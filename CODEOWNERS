@@ -1,0 +1,8 @@
+# Default code owners
+* @calinrus-dev
+
+# Owners for Flutter app
+/flutter_app/ @calinrus-dev
+
+# Owners for Rust core
+/malphas_core/ @calinrus-dev

@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # MALPHAS v1.0 - The Agnostic Virtual Console
 
 Contenedor modular multiplataforma disenado para la ejecucion de motores logicos dinamicos y paquetes de recursos estaticos mediante comunicacion bidireccional por FFI nativo (Zero-Copy).
@@ -152,3 +153,6 @@ Interactive elements (buttons, gesture zones, collision boxes) are evaluated ins
 Collision = (X_touch >= X_box) AND (X_touch <= X_box + W) AND (Y_touch >= Y_box) AND (Y_touch <= Y_box + H)
 
 If a collision occurs, the engine alters the data state inside the RAM immediately, modifying the graphics instructions for the very next frame.
+=======
+# malphas
+>>>>>>> origin/main

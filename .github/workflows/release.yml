@@ -1,0 +1,32 @@
+name: Release build artifacts
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 'stable'
+      - name: Build Flutter APK
+        run: |
+          cd flutter_app
+          flutter pub get
+          flutter build apk --release
+      - name: Build Rust lib
+        run: |
+          cd malphas_core
+          cargo build --release
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: malphas-release
+          path: |
+            flutter_app/build/app/outputs/flutter-apk/*.apk
+            malphas_core/target/release/*.dll
+            malphas_core/target/release/*.so

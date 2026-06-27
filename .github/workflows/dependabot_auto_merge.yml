@@ -1,0 +1,16 @@
+name: Dependabot Auto-Merge
+
+on:
+  pull_request_target:
+    types: [opened]
+
+jobs:
+  auto-merge:
+    runs-on: ubuntu-latest
+    if: github.actor == 'dependabot[bot]'
+    steps:
+      - name: Auto-merge when CI passes
+        uses: pascalgn/automerge-action@v0.14.3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          merge_method: squash

@@ -1,0 +1,7 @@
+* text=auto
+*.rs text
+*.dart text
+*.yaml text
+*.yml text
+*.sh eol=lf
+*.ps1 eol=crlf

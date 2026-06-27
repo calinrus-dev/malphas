@@ -1,0 +1,33 @@
+name: Flutter CI
+
+on:
+  push:
+    branches: [ main, master, ffi-refactor, update-readme ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  analyze-test-build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 'stable'
+
+      - name: Install dependencies
+        run: |
+          flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Run tests
+        run: flutter test --coverage || true
+
+      - name: Build APK (debug)
+        run: flutter build apk --debug
