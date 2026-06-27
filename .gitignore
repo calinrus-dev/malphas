@@ -18,3 +18,10 @@ Cargo.lock
 *.swp
 Thumbs.db
 .DS_Store
+
+# Generated platform folders (keep sources only)
+/flutter_app/android/
+/flutter_app/ios/
+/flutter_app/macos/
+/flutter_app/linux/
+/flutter_app/windows/
