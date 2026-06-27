@@ -1,0 +1,20 @@
+# Root gitignore
+/.idea
+/.vscode
+
+# Rust
+/malphas_core/target/
+
+# Flutter
+/flutter_app/build/
+/flutter_app/.dart_tool/
+/flutter_app/.packages
+
+# Generated binaries
+*.dll
+*.so
+*.dylib
+
+# OS
+Thumbs.db
+.DS_Store
