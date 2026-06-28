@@ -258,8 +258,8 @@ class MalphasPackageCompiler {
     // Check min_x:
     // 7. READ_ARENA_F32(reg4, offset=32) -> min_x (e.g. 50.0)
     writeInst(0x05, 4, 32);
-    // 8. JMP_LT(reg4, reg0, instr_idx=13) -> if min_x < X, skip reverse
-    writeInst(0x08, 4, (0 << 8) | 13);
+    // 8. JMP_LT(reg4, reg0, instr_idx=12) -> if min_x < X, skip reverse
+    writeInst(0x08, 4, (0 << 8) | 12);
     
     // Reverse speed_x:
     // 9. LOAD_REG_CONST(reg5, 0)
@@ -271,64 +271,64 @@ class MalphasPackageCompiler {
     // 12. MUL_REG(reg2, reg5) -> speed_x = -speed_x
     writeInst(0x0B, 2, 5);
 
-    // Check max_x (instruction 13):
-    // 13. READ_ARENA_F32(reg4, offset=36) -> max_x (e.g. 900.0)
+    // Check max_x (instruction 12):
+    // 12. READ_ARENA_F32(reg4, offset=36) -> max_x (e.g. 900.0)
     writeInst(0x05, 4, 36);
-    // 14. JMP_LT(reg0, reg4, instr_idx=19) -> if X < max_x, skip reverse
-    writeInst(0x08, 0, (4 << 8) | 19);
+    // 13. JMP_LT(reg0, reg4, instr_idx=18) -> if X < max_x, skip reverse
+    writeInst(0x08, 0, (4 << 8) | 18);
     
     // Reverse speed_x:
-    // 15. LOAD_REG_CONST(reg5, 0)
+    // 14. LOAD_REG_CONST(reg5, 0)
     writeInst(0x01, 5, 0);
-    // 16. LOAD_REG_CONST(reg6, 1)
+    // 15. LOAD_REG_CONST(reg6, 1)
     writeInst(0x01, 6, 1);
-    // 17. SUB_REG(reg5, reg6) -> reg5 = -1
+    // 16. SUB_REG(reg5, reg6) -> reg5 = -1
     writeInst(0x03, 5, 6);
-    // 18. MUL_REG(reg2, reg5) -> speed_x = -speed_x
+    // 17. MUL_REG(reg2, reg5) -> speed_x = -speed_x
     writeInst(0x0B, 2, 5);
 
-    // Check min_y (instruction 19):
-    // 19. READ_ARENA_F32(reg4, offset=40) -> min_y (e.g. 50.0)
+    // Check min_y (instruction 18):
+    // 18. READ_ARENA_F32(reg4, offset=40) -> min_y (e.g. 50.0)
     writeInst(0x05, 4, 40);
-    // 20. JMP_LT(reg4, reg1, instr_idx=25) -> if min_y < Y, skip reverse
-    writeInst(0x08, 4, (1 << 8) | 25);
+    // 19. JMP_LT(reg4, reg1, instr_idx=24) -> if min_y < Y, skip reverse
+    writeInst(0x08, 4, (1 << 8) | 24);
     
     // Reverse speed_y:
-    // 21. LOAD_REG_CONST(reg5, 0)
+    // 20. LOAD_REG_CONST(reg5, 0)
     writeInst(0x01, 5, 0);
-    // 22. LOAD_REG_CONST(reg6, 1)
+    // 21. LOAD_REG_CONST(reg6, 1)
     writeInst(0x01, 6, 1);
-    // 23. SUB_REG(reg5, reg6) -> reg5 = -1
+    // 22. SUB_REG(reg5, reg6) -> reg5 = -1
     writeInst(0x03, 5, 6);
-    // 24. MUL_REG(reg3, reg5) -> speed_y = -speed_y
+    // 23. MUL_REG(reg3, reg5) -> speed_y = -speed_y
     writeInst(0x0B, 3, 5);
 
-    // Check max_y (instruction 25):
-    // 25. READ_ARENA_F32(reg4, offset=44) -> max_y (e.g. 900.0)
+    // Check max_y (instruction 24):
+    // 24. READ_ARENA_F32(reg4, offset=44) -> max_y (e.g. 900.0)
     writeInst(0x05, 4, 44);
-    // 26. JMP_LT(reg1, reg4, instr_idx=31) -> if Y < max_y, skip reverse
-    writeInst(0x08, 1, (4 << 8) | 31);
+    // 25. JMP_LT(reg1, reg4, instr_idx=30) -> if Y < max_y, skip reverse
+    writeInst(0x08, 1, (4 << 8) | 30);
     
     // Reverse speed_y:
-    // 27. LOAD_REG_CONST(reg5, 0)
+    // 26. LOAD_REG_CONST(reg5, 0)
     writeInst(0x01, 5, 0);
-    // 28. LOAD_REG_CONST(reg6, 1)
+    // 27. LOAD_REG_CONST(reg6, 1)
     writeInst(0x01, 6, 1);
-    // 29. SUB_REG(reg5, reg6) -> reg5 = -1
+    // 28. SUB_REG(reg5, reg6) -> reg5 = -1
     writeInst(0x03, 5, 6);
-    // 30. MUL_REG(reg3, reg5) -> speed_y = -speed_y
+    // 29. MUL_REG(reg3, reg5) -> speed_y = -speed_y
     writeInst(0x0B, 3, 5);
 
     // Write back updated entity properties
-    // 31. WRITE_ARENA_F32(offset=4, reg0) -> X
+    // 30. WRITE_ARENA_F32(offset=4, reg0) -> X
     writeInst(0x04, 0, 4);
-    // 32. WRITE_ARENA_F32(offset=8, reg1) -> Y
+    // 31. WRITE_ARENA_F32(offset=8, reg1) -> Y
     writeInst(0x04, 1, 8);
-    // 33. WRITE_ARENA_F32(offset=24, reg2) -> speed_x
+    // 32. WRITE_ARENA_F32(offset=24, reg2) -> speed_x
     writeInst(0x04, 2, 24);
-    // 34. WRITE_ARENA_F32(offset=28, reg3) -> speed_y
+    // 33. WRITE_ARENA_F32(offset=28, reg3) -> speed_y
     writeInst(0x04, 3, 28);
-    // 35. HALT
+    // 34. HALT
     writeInst(0x00, 0, 0);
 
     return bytes.toBytes();

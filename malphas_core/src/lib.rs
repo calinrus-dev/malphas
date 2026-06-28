@@ -12,6 +12,7 @@ static ARENA_ADDRESS: AtomicUsize = AtomicUsize::new(0);
 static ARENA_SIZE: AtomicUsize = AtomicUsize::new(0);
 static BRIDGE_ADDRESS: AtomicUsize = AtomicUsize::new(0);
 static MAX_COMMANDS_CAPACITY: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(2048);
+static ENGINE_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -117,6 +118,11 @@ pub extern "C" fn init_engine(
     if bridge_ptr.is_null() || arena_ptr.is_null() {
         return -1;
     }
+    
+    // Stop any existing dynamic simulation thread
+    ENGINE_RUNNING.store(false, Ordering::SeqCst);
+    std::thread::sleep(std::time::Duration::from_millis(15));
+
     BRIDGE_ADDRESS.store(bridge_ptr as usize, Ordering::SeqCst);
     ARENA_ADDRESS.store(arena_ptr as usize, Ordering::SeqCst);
     ARENA_SIZE.store(arena_size as usize, Ordering::SeqCst);
@@ -140,6 +146,21 @@ pub extern "C" fn init_engine(
         // Bytes 16-19: entities_count = 0
         *(arena_start.add(16) as *mut u32) = 0;
     }
+
+    ENGINE_RUNNING.store(true, Ordering::SeqCst);
+    std::thread::spawn(|| {
+        let sleep_dur = std::time::Duration::from_micros(8333); // ~120Hz
+        while ENGINE_RUNNING.load(Ordering::SeqCst) {
+            let start = std::time::Instant::now();
+            
+            process_engine_tick_internal();
+            
+            let elapsed = start.elapsed();
+            if elapsed < sleep_dur {
+                std::thread::sleep(sleep_dur - elapsed);
+            }
+        }
+    });
 
     0
 }
@@ -470,8 +491,13 @@ pub extern "C" fn load_resource_pack(filepath: *const c_char) -> i32 {
 #[no_mangle]
 pub extern "C" fn process_engine_tick(dt_micros: u64) -> i32 {
     let _ = dt_micros;
+    // Synchronous execution is now fully decoupled; this is a cheap no-op
+    0
+}
+
+fn process_engine_tick_internal() {
     let bridge_addr = BRIDGE_ADDRESS.load(Ordering::SeqCst);
-    if bridge_addr == 0 { return -1; }
+    if bridge_addr == 0 { return; }
 
     let bridge = unsafe { &mut *(bridge_addr as *mut MalphasDoubleBufferBridge) };
     let back_index = bridge.atomic_back_index.load(Ordering::SeqCst);
@@ -565,8 +591,6 @@ pub extern "C" fn process_engine_tick(dt_micros: u64) -> i32 {
     // 3. Swap atomic back index
     let next_back = 1 - back_index;
     bridge.atomic_back_index.store(next_back, Ordering::SeqCst);
-
-    0
 }
 
 #[no_mangle]
