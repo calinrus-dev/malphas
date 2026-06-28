@@ -638,7 +638,8 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
         final originalIndex = _environments.indexOf(env);
 
         return DragTarget<int>(
-          onAccept: (fromIndex) {
+          onAcceptWithDetails: (details) {
+            final fromIndex = details.data;
             setState(() {
               final item = _environments.removeAt(fromIndex);
               _environments.insert(originalIndex, item);
@@ -731,7 +732,8 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
         final originalIndex = _environments.indexOf(env);
 
         return DragTarget<int>(
-          onAccept: (fromIndex) {
+          onAcceptWithDetails: (details) {
+            final fromIndex = details.data;
             setState(() {
               final item = _environments.removeAt(fromIndex);
               _environments.insert(originalIndex, item);
@@ -886,7 +888,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                 style: TextStyle(
                     fontFamily: 'Arial',
                     fontSize: 11,
-                    color: Colors.white.withOpacity(0.3))),
+                    color: Colors.white.withValues(alpha: 0.3))),
           ),
           const SizedBox(height: 12)
         ],

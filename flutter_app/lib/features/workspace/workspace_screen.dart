@@ -116,7 +116,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
               child: Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.02),
+                    color: Colors.white.withValues(alpha: 0.02),
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(color: Colors.white10)),
                 child: const Text('CHASIS FFI: PASIVE SIMULATION CORE MODE',

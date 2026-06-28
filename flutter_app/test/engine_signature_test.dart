@@ -17,7 +17,8 @@ void main() {
     final controller = EngineController();
     // The test may run from flutter_app/ or from the repo root.
     var workspace = Directory.current.path;
-    final binaryName = Platform.isWindows ? 'malphas_core.dll' : 'libmalphas_core.so';
+    final binaryName =
+        Platform.isWindows ? 'malphas_core.dll' : 'libmalphas_core.so';
     if (!File('$workspace/$binaryName').existsSync()) {
       workspace = Directory.current.parent.path;
     }

@@ -337,7 +337,8 @@ class _PackageManagerPanelState extends State<PackageManagerPanel> {
                 border: Border.all(color: const Color(0xff1b1b1b))),
             child: Center(
                 child: Icon(Icons.bento_outlined,
-                    color: theme.primaryColor.withOpacity(0.2), size: 22)),
+                    color: theme.primaryColor.withValues(alpha: 0.2),
+                    size: 22)),
           ),
         ),
       );

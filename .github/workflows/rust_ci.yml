@@ -44,7 +44,7 @@ jobs:
         run: |
           for lib in target/release/libmalphas_core.so target/release/libmalphas_core.dylib target/release/malphas_core.dll; do
             if [ -f "$lib" ]; then
-              cargo run --release --bin sign_engine -- sign "$lib" "$TEST_PRIVATE_KEY"
+              ./target/release/malphas-cli sign "$lib" "$TEST_PRIVATE_KEY"
             fi
           done
 
