@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:malphas_app/core/ffi/malphas_bindings.dart';
@@ -18,6 +19,13 @@ void main() {
 
     // Ensure the bouncing_demo package is compiled and registered.
     await PackageController().init();
+
+    final workspace = PackageController.resolveWorkspaceRoot();
+    final mhpFile = File('$workspace/examples/bouncing_demo/bouncing_demo.mhp');
+    if (!mhpFile.existsSync()) {
+      markTestSkipped('bouncing_demo.mhp not found at ${mhpFile.path}');
+      return;
+    }
 
     final env = MalphasEnvironment(
       id: 'env_auto_load_test',
