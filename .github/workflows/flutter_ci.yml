@@ -64,5 +64,19 @@ jobs:
 
       - name: Run Flutter Tests with Native Context
         run: |
-          export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${{ github.workspace }}/flutter_app/motors
-          flutter test
+          sudo apt-get update && sudo apt-get install -y xvfb libegl1-mesa
+          export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${{ github.workspace }}/flutter_app/motors:${{ github.workspace }}
+          cd flutter_app
+          mkdir -p test_logs
+          xvfb-run flutter test --machine > test_logs/flutter_test_log.json 2> test_logs/flutter_test_stderr.log || TEST_EXIT=$?
+          echo '--- FLUTTER TEST STDERR ---'
+          cat test_logs/flutter_test_stderr.log
+          echo '--- END STDERR ---'
+          exit ${TEST_EXIT:-0}
+
+      - name: Upload Flutter test logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flutter-test-logs-${{ github.run_id }}
+          path: flutter_app/test_logs/
