@@ -1,4 +1,6 @@
+import 'dart:collection';
 import 'dart:ffi' as dffi;
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import '../ffi/malphas_bindings.dart';
 import '../ffi/types.dart';
@@ -29,17 +31,44 @@ class EnginePainter extends CustomPainter {
 
   EnginePainter(this.bindings, {required Listenable repaint}) : super(repaint: repaint);
 
+  /// Set to `true` to render a small frame-time overlay in the top-left corner.
+  /// Disabled by default to avoid any overhead in production builds.
+  static bool debugShowFrameTime = false;
+
+  static final Paint _backgroundPaint = Paint()
+    ..color = const Color(0xff000000);
+
+  /// Bounded LRU cache of [Paint] objects keyed by the 32-bit native color.
+  /// Two independent caches are kept so that text-specific properties
+  /// (e.g. [FilterQuality.low]) never leak into rectangle paints.
+  final _PaintCache _rectPaints = _PaintCache();
+  final _PaintCache _textPaints = _PaintCache(filterQualityLow: true);
+
+  final Stopwatch _frameTimer = Stopwatch();
+  int _lastFrameMicros = 0;
+
   @override
   void paint(Canvas canvas, Size size) {
-    final bg = Paint()..color = const Color(0xff000000);
-    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), bg);
+    _frameTimer.reset();
+    _frameTimer.start();
+
+    canvas.drawRect(
+      Rect.fromLTWH(0, 0, size.width, size.height),
+      _backgroundPaint,
+    );
 
     final bufferPtr = bindings.commandBuffer;
-    if (bufferPtr == null || bufferPtr == dffi.nullptr) return;
+    if (bufferPtr == null || bufferPtr == dffi.nullptr) {
+      _stopAndMaybeDrawOverlay(canvas);
+      return;
+    }
 
     final count = bindings.getCommandCount(bufferPtr);
     final commands = bindings.getCommandsPointer(bufferPtr);
-    if (commands == dffi.nullptr || count <= 0) return;
+    if (commands == dffi.nullptr || count <= 0) {
+      _stopAndMaybeDrawOverlay(canvas);
+      return;
+    }
 
     // Bidirectional normalization over immutable virtual matrix 1000x1000
     final scaleX = size.width / 1000.0;
@@ -48,25 +77,23 @@ class EnginePainter extends CustomPainter {
     int i = 0;
     while (i < count) {
       final command = (commands + i).ref;
-      final paint = Paint()..color = Color(command.colorRgba);
+      final colorRgba = command.colorRgba;
 
       switch (command.commandType) {
         case 1: // Solid Rectangle
-          canvas.drawRect(
-            Rect.fromLTWH(
-              command.x * scaleX,
-              command.y * scaleY,
-              command.width * scaleX,
-              command.height * scaleY,
-            ),
-            paint,
-          );
+          final paint = _rectPaints.getPaint(colorRgba);
+          final x = command.x * scaleX;
+          final y = command.y * scaleY;
+          final w = command.width * scaleX;
+          final h = command.height * scaleY;
+          canvas.drawRect(Rect.fromLTWH(x, y, w, h), paint);
           i += 1;
           break;
         case 2: // Union text command: metadata in x/y, pointer in width/height.
+          final paint = _textPaints.getPaint(colorRgba);
           final textPtr = _decodeTextPointer(commands + i);
           if (textPtr != dffi.nullptr) {
-            _renderTextFromFonts(canvas, command, textPtr, scaleX, scaleY);
+            _renderTextFromFonts(canvas, command, textPtr, scaleX, scaleY, paint);
           }
           i += 1;
           break;
@@ -75,6 +102,33 @@ class EnginePainter extends CustomPainter {
           break;
       }
     }
+
+    _stopAndMaybeDrawOverlay(canvas);
+  }
+
+  void _stopAndMaybeDrawOverlay(Canvas canvas) {
+    _frameTimer.stop();
+    _lastFrameMicros = _frameTimer.elapsedMicroseconds;
+    if (debugShowFrameTime) {
+      _drawFrameTimeOverlay(canvas);
+    }
+  }
+
+  void _drawFrameTimeOverlay(Canvas canvas) {
+    final ms = _lastFrameMicros / 1000.0;
+    final builder = ui.ParagraphBuilder(
+      ui.ParagraphStyle(
+        textAlign: TextAlign.left,
+        fontSize: 14,
+      ),
+    )
+      ..pushStyle(ui.TextStyle(color: Colors.white))
+      ..addText('${ms.toStringAsFixed(2)} ms');
+
+    final paragraph = builder.build()
+      ..layout(const ui.ParagraphConstraints(width: 120));
+
+    canvas.drawParagraph(paragraph, const Offset(8, 8));
   }
 
   /// Decodes the 64-bit pointer stored across the `width` (low 32 bits) and
@@ -97,6 +151,7 @@ class EnginePainter extends CustomPainter {
     dffi.Pointer<dffi.Uint8> textPtr,
     double scaleX,
     double scaleY,
+    Paint paint,
   ) {
     final atlasImage = bindings.fontAtlasImage;
     if (atlasImage == null || textPtr == dffi.nullptr) return;
@@ -110,10 +165,6 @@ class EnginePainter extends CustomPainter {
 
     double currentX = payload.x * scaleX;
     final double startY = payload.y * scaleY;
-
-    final paint = Paint()
-      ..color = Color(command.colorRgba)
-      ..filterQuality = FilterQuality.low;
 
     final arenaUint32 = arenaStart.cast<dffi.Uint32>();
     final metricsOffset = arenaUint32[5];
@@ -163,4 +214,32 @@ class EnginePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant EnginePainter oldDelegate) => false;
+}
+
+/// Bounded LRU cache of [Paint] objects keyed by a 32-bit color.
+///
+/// The cache is intentionally simple: it uses a [LinkedHashMap] iteration
+/// order to evict the least-recently used entry once [maxSize] is exceeded.
+class _PaintCache {
+  static const int maxSize = 128;
+
+  final Map<int, Paint> _cache = <int, Paint>{};
+  final bool _filterQualityLow;
+
+  _PaintCache({bool filterQualityLow = false}) : _filterQualityLow = filterQualityLow;
+
+  Paint getPaint(int colorRgba) {
+    Paint? paint = _cache.remove(colorRgba);
+    if (paint == null) {
+      paint = Paint()..color = Color(colorRgba);
+      if (_filterQualityLow) {
+        paint.filterQuality = FilterQuality.low;
+      }
+      if (_cache.length >= maxSize) {
+        _cache.remove(_cache.keys.first);
+      }
+    }
+    _cache[colorRgba] = paint;
+    return paint;
+  }
 }
