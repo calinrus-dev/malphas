@@ -5,33 +5,34 @@ import '../ffi/malphas_bindings.dart';
 import '../ffi/types.dart';
 
 class PrimitiveCanvas extends StatelessWidget {
-  final dffi.Pointer<CoreCommandBuffer>? bufferPtr;
+  final MalphasBindings bindings;
   final Listenable repaintNotifier;
 
-  const PrimitiveCanvas({super.key, this.bufferPtr, required this.repaintNotifier});
+  const PrimitiveCanvas({super.key, required this.bindings, required this.repaintNotifier});
 
   @override
   Widget build(BuildContext context) {
     return CustomPaint(
-      painter: EnginePainter(bufferPtr, repaint: repaintNotifier),
+      painter: EnginePainter(bindings, repaint: repaintNotifier),
       child: const SizedBox.expand(),
     );
   }
 }
 
 class EnginePainter extends CustomPainter {
-  final dffi.Pointer<CoreCommandBuffer>? bufferPtr;
+  final MalphasBindings bindings;
 
-  EnginePainter(this.bufferPtr, {required Listenable repaint}) : super(repaint: repaint);
+  EnginePainter(this.bindings, {required Listenable repaint}) : super(repaint: repaint);
 
   @override
   void paint(Canvas canvas, Size size) {
     final bg = Paint()..color = const Color(0xff000000);
     canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), bg);
 
+    final bufferPtr = bindings.commandBuffer;
     if (bufferPtr == null || bufferPtr == dffi.nullptr) return;
 
-    final buffer = bufferPtr!.ref;
+    final buffer = bufferPtr.ref;
     final count = buffer.commandCount;
     final commands = buffer.commands;
     if (commands == dffi.nullptr || count <= 0) return;

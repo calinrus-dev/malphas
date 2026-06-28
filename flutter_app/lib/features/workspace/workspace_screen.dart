@@ -56,7 +56,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> with SingleTickerProv
                         final double logicalY = (localPos.dy / constraints.maxHeight) * 1000.0;
                         bindings.processInputEvent(0, logicalX, logicalY);
                       },
-                      child: PrimitiveCanvas(bufferPtr: bindings.commandBuffer, repaintNotifier: bindings),
+                      child: PrimitiveCanvas(bindings: bindings, repaintNotifier: bindings),
                     );
                   },
                 ),
