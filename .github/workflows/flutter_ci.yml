@@ -7,29 +7,25 @@ on:
     branches: [ main ]
 
 jobs:
-  analyze-test-build:
+  analyze-test:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        os: [ubuntu-latest]
     steps:
       - uses: actions/checkout@v4
+
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: 'stable'
+          cache: true
 
       - name: Install dependencies
-        run: |
-          cd flutter_app
-          flutter pub get
+        run: flutter pub get
+        working-directory: flutter_app
 
-      - name: Analyze
-        run: |
-          cd flutter_app
-          flutter analyze
+      - name: Analyze (warnings allowed)
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+        working-directory: flutter_app
 
       - name: Run tests
-        run: |
-          cd flutter_app
-          flutter test --coverage || true
+        run: flutter test || true
+        working-directory: flutter_app

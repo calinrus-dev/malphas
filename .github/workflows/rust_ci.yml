@@ -11,15 +11,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build (release)
-        run: |
-          cd malphas_core
-          cargo build --release
+        run: cargo build --release
+        working-directory: malphas_core
 
       - name: Run tests
-        run: |
-          cd malphas_core
-          cargo test --all --verbose
+        run: cargo test --all --verbose
+        working-directory: malphas_core

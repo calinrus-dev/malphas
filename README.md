@@ -1,32 +1,49 @@
-# MALPHAS - Ecosistema de Consola Virtual y Servidor de Despliegue Pasivo
+# MALPHAS — Virtual Console Ecosystem
 
-Malphas es una infraestructura de consola virtual agnóstica de alto rendimiento. Separa de forma radical el motor lógico del proyector gráfico a través de una autopista de memoria compartida de copia cero (Zero-Copy), donde el chasis en Flutter actúa como un rasterizador síncrono coordinado a 120Hz que lee primitivas geométricas directo del *heap* de la memoria RAM mediante punteros y alineación de bytes compatible con C-ABI (`#[repr(C)]`).
+A high-performance, language-agnostic virtual console and passive deployment server. Malphas radically separates the logic engine from the graphical renderer through a **Zero-Copy shared memory highway**, where the Flutter chassis acts as a pure synchronous rasterizer running at up to 120 Hz, reading geometric primitives directly from physical RAM via pointers and strict byte alignment (`#[repr(C)]`).
+
+The intelligent layer — programmable in any language with a **C-ABI** (Rust, Zig, C++) — is completely free from GC penalties and serialization latency.
 
 ---
 
-## 1. Arquitectura de Doble Búfer de Copia Cero
+## Architecture
 
-Para evitar el desgarro de pantalla (*screen tearing*) y desvincular el hilo de la interfaz visual (Flutter UI) de la ejecución lógica pesada del motor nativo, la comunicación FFI opera mediante un Doble Búfer de comandos en la memoria RAM compartida física.
+```
+┌─────────────────────────────┐      Zero-Copy Shared Memory
+│      Flutter Chassis        │ ◄────────────────────────────┐
+│  (Pure Rasterizer @ 120Hz)  │                              │
+└─────────────────────────────┘                              │
+         │  FFI Bridge                                       │
+         ▼                                                   │
+┌─────────────────────────────┐                              │
+│   malphas_core (Rust/C-ABI) │ ────── Arena ───────────────►│
+│   Logic VM + Bytecode       │                              │
+└─────────────────────────────┘                              │
+         │                                                   │
+         └──── DartRenderCommand[] ──────────────────────────┘
+```
 
-### Estructuras FFI en C-ABI (`#[repr(C)]`)
+The virtual canvas is a fixed, normalized **1000×1000 logical unit** coordinate space. Letterboxing preserves aspect ratios on any physical display resolution.
+
+---
+
+## Zero-Copy Double Buffer Bridge
+
+To eliminate screen tearing and decouple the Flutter UI thread from the native engine's logic thread, FFI communication uses a **double command buffer** in shared physical RAM.
+
+### C-ABI FFI Structures (`#[repr(C)]`)
 
 ```rust
 #[repr(C)]
 pub struct DartRenderCommand {
     pub command_type: u8,
     pub layer: u8,
-    pub pad: u16, // Padding de 2 bytes para alinear f32 a fronteras de 4 bytes
+    pub pad: u16,       // 2-byte padding to align f32 to 4-byte boundaries
     pub x: f32,
     pub y: f32,
     pub width: f32,
     pub height: f32,
     pub color_rgba: u32,
-}
-
-#[repr(C)]
-pub struct CoreCommandBuffer {
-    pub command_count: u32,
-    pub commands: *mut DartRenderCommand,
 }
 
 #[repr(C)]
@@ -37,124 +54,122 @@ pub struct MalphasDoubleBufferBridge {
 }
 ```
 
-### Mecánica de Sincronización y Swapping
-1. **Asignación:** El chasis de Flutter reserva la memoria física para la estructura `MalphasDoubleBufferBridge` y dos arrays masivos de comandos (`buffer_a` y `buffer_b` de capacidad 2048 comandos cada uno), inicializando `atomic_back_index` en `0`.
-2. **Escritura Nativa:** El motor nativo escribe en el buffer apuntado por `atomic_back_index` (el *Back Buffer*).
-3. **Commit Atómico:** Una vez que el frame lógico se ha completado, el motor escribe un intercambio atómico (`Compare-And-Swap` o `store` con `Ordering::SeqCst`) incrementando/modificando el índice (`1 - back_index`).
-4. **Lectura en Flutter (120Hz):** El ticker de hardware de Flutter lee la variable atómica. El buffer que **no** está siendo escrito por el motor nativo (el *Front Buffer*) se considera inmutable y cerrado. Flutter lee sus comandos directamente mediante punteros y los dibuja en el lienzo.
+### Synchronisation Mechanic
+1. **Allocation** — Flutter allocates the `MalphasDoubleBufferBridge` and two command arrays (2048 commands each), initialising `atomic_back_index` to `0`.
+2. **Native write** — The engine writes into the buffer pointed to by `atomic_back_index` (the *Back Buffer*).
+3. **Atomic commit** — On frame completion, the engine performs an atomic swap (`store` with `SeqCst` ordering).
+4. **Flutter read @ 120 Hz** — Flutter's hardware ticker reads the atomic index. The *Front Buffer* (not currently being written) is treated as immutable and drawn via raw pointers.
 
 ---
 
-## 2. Especificación del Paquete de Recursos Binario (`.malphas`)
+## Binary Resource Package (`.malphas`)
 
-Para dar control total de layout al programador, el chasis y el motor nativo leen los metadatos e índices del paquete binario compilado.
+| Offset | Type | Field | Description |
+|--------|------|-------|-------------|
+| `0` | `[u8; 4]` | `magic` | ASCII header: `'M', 'L', 'P', 'H'` |
+| `4` | `u32` | `manifest_size` | Size in bytes of the JSON manifest segment |
+| `8` | `u32` | `font_metrics_offset` | Start address of the glyph metrics table |
+| `12` | `u32` | `font_atlas_offset` | Start address of the A8 font atlas pixels |
+| `16` | `u32` | `table_of_jumps_offset` | Start address of the object jump directory |
+| `20` | `u32` | `table_of_jumps_size` | Total size of the jump table |
+| `24` | `u32` | `bytecode_offset` | Start address of the behaviour bytecode vector |
+| `28` | `u32` | `bytecode_size` | Size of the behaviour bytecode binary |
+| `32` | `[u8]` | `manifest_data` | Contiguous UTF-8 JSON configuration string |
 
-### Estructura de Archivo Fija
-
-| Compensación (Offset) | Tipo | Campo | Descripción |
-|---|---|---|---|
-| `0` | `[u8; 4]` | `magic` | Cabecera ASCII de identificación obligatoria: `'M', 'L', 'P', 'H'` |
-| `4` | `u32` | `manifest_size` | Tamaño en bytes del segmento JSON del Manifiesto |
-| `8` | `u32` | `font_metrics_offset` | Dirección de inicio de la Tabla de Métricas de Fuentes |
-| `12` | `u32` | `font_atlas_offset` | Dirección de inicio de los píxeles del atlas A8 de Fuentes |
-| `16` | `u32` | `table_of_jumps_offset` | Dirección de inicio del Directorio de Saltos de Objetos |
-| `20` | `u32` | `table_of_jumps_size` | Tamaño total de la Tabla de Saltos de Objetos |
-| `24` | `u32` | `bytecode_offset` | Dirección de inicio del vector de bytecode de comportamiento |
-| `28` | `u32` | `bytecode_size` | Tamaño del binario de bytecode de comportamiento |
-| `32` | `[u8]` | `manifest_data` | Cadena JSON contigua de configuración serializada en UTF-8 |
-
-### Tabla de Métricas de Glifos
-La tabla contiene exactamente 256 bloques fijos contiguos de 16 bytes (uno por cada valor de byte ASCII/extendido). Estructura de cada bloque de métricas:
-- `2 bytes` (uint16): Código de carácter.
-- `2 bytes` (uint16): Coordenada X en el Atlas de fuentes.
-- `2 bytes` (uint16): Coordenada Y en el Atlas de fuentes.
-- `2 bytes` (uint16): Ancho del glifo en píxeles.
-- `2 bytes` (uint16): Alto del glifo en píxeles.
-- `2 bytes` (int16): Desplazamiento horizontal de dibujado (X-offset).
-- `2 bytes` (uint16): Avance horizontal acumulado.
+### Glyph Metrics Table
+Exactly 256 fixed 16-byte blocks (one per ASCII/extended byte value):
+- `2 bytes` (uint16): Character code
+- `2 bytes` (uint16): X coordinate in the font atlas
+- `2 bytes` (uint16): Y coordinate in the font atlas
+- `2 bytes` (uint16): Glyph width in pixels
+- `2 bytes` (uint16): Glyph height in pixels
+- `2 bytes` (int16): Horizontal draw offset (X-offset)
+- `2 bytes` (uint16): Cumulative horizontal advance
 
 ---
 
-## 3. Ingesta del Font Atlas y Renderizado por Glifos
+## Bytecode Sandbox VM
 
-### Compilador de Fuentes (Dart)
-El compilador rasteriza caracteres tipográficos (fuentes `.ttf` o `.otf`) utilizando un `TextPainter` de Flutter para renderizar dinámicamente glifos ASCII (0-255) en un lienzo de 512x512 píxeles. Posteriormente, se extrae el canal de intensidad de píxeles para generar un Font Atlas en formato plano A8 (8 bits por píxel) de 256 KB.
+Behaviour logic is compiled into binary bytecode and interpreted by a micro-interpreter in the Rust native layer. Each instruction occupies exactly **4 bytes**:
+- **Byte 0:** Opcode
+- **Byte 1:** Destination register (r0–r7)
+- **Bytes 2–3:** 16-bit unsigned constant (`val_u16`)
 
-### Salto de Puntero Asimétrico (*Lookahead Loop*)
-Para procesar texto dinámico sin segfaults, el bucle del rasterizador realiza saltos variables según la instrucción:
-- **Case 1 (Rectángulo):** Ocupa 1 slot en el búfer de comandos. Se procesa de forma indexada.
-- **Case 2 (Texto):** Ocupa 2 slots.
-  - El primer slot (`i`) almacena las coordenadas virtuales (`x`, `y`), tamaño/escala (`width`) y color (`color_rgba`).
-  - El segundo slot (`i + 1`) almacena un puntero físico directo de 64 bits (`*const u8`) a la dirección de memoria física en la Arena donde reside la cadena UTF-8 terminada en nulo (`\0`).
-  - El consumidor de Flutter realiza un salto crítico de paso incrementando el índice por dos (`i += 2`).
-
----
-
-## 4. Entorno de Ejecución Bytecode Aislado (*Sandbox VM*)
-
-Para esquivar las políticas restrictivas de memoria que prohíben la ejecución de código dinámico compilado localmente en dispositivos móviles (bloqueo W^X), la lógica de comportamiento del paquete se compila en un Bytecode Binario ejecutado por un micro-intérprete lineal en la capa nativa de Rust.
-
-### Estructura de la Arena de Memoria Compartida
-
-| Offset de Arena | Tamaño | Campo | Descripción |
-|---|---|---|---|
-| `0` | `4 bytes` | `magic` | `'M', 'A', 'M', 'P'` |
-| `4` | `4 bytes` | `static_resources_offset` | Offset de carga del binario `.malphas` (típicamente `1024`) |
-| `8` | `4 bytes` | `static_resources_size` | Tamaño en bytes cargado del recurso binario |
-| `12` | `4 bytes` | `entities_offset` | Dirección de inicio del pool de entidades (típicamente `32`) |
-| `16` | `4 bytes` | `entities_count` | Cantidad total de entidades lógicas registradas en la ejecución actual |
-| `20` | `4 bytes` | `font_metrics_offset` | Offset absoluto de métricas de fuentes |
-| `24` | `4 bytes` | `font_atlas_offset` | Offset absoluto de píxeles del atlas de fuentes |
-| `28` | `4 bytes` | `table_of_jumps_offset` | Offset absoluto de tabla de saltos |
-
-### Tabla de Opcodes Soportados por la VM
-
-Cada instrucción en el bytecode ocupa exactamente 4 bytes continuos:
-- **Byte 0:** Opcode binario.
-- **Byte 1:** Registro destino (r0-r7).
-- **Bytes 2 y 3:** Constante entera sin signo de 16 bits (`val_u16`).
-
-| Opcode | Mnemónico | Operación |
-|---|---|---|
-| `0x00` | HALT | Detiene la ejecución del hilo lógico actual de la VM |
-| `0x01` | LOAD_REG_CONST | Carga un valor constante de 16 bits en el registro destino |
-| `0x02` | ADD_REG | Suma el valor de un registro origen al registro destino |
-| `0x03` | SUB_REG | Resta el valor de un registro origen al registro destino |
-| `0x04` | WRITE_ARENA_F32 | Escribe el valor float de un registro a una posición relativa de la entidad en la Arena |
-| `0x05` | READ_ARENA_F32 | Lee un float de la Arena (relativo a la entidad) al registro destino |
-| `0x06` | WRITE_ARENA_U8 | Escribe el byte de un registro a la Arena |
-| `0x07` | READ_ARENA_U8 | Lee un byte de la Arena al registro destino |
-| `0x08` | JMP_LT | Salta a la instrucción destino si `reg1 < reg2` |
-| `0x09` | JMP | Salta incondicionalmente a la instrucción destino |
-| `0x0A` | WRITE_ARENA_U32 | Escribe un valor de 32 bits a la Arena |
-| `0x0B` | MUL_REG | Multiplica el valor del registro destino por el registro origen |
-| `0x0C` | DIV_REG | Divide el valor del registro destino por el registro origen |
+| Opcode | Mnemonic | Operation |
+|--------|----------|-----------|
+| `0x00` | HALT | Stop the current VM logic thread |
+| `0x01` | LOAD_REG_CONST | Load a 16-bit constant into the destination register |
+| `0x02` | ADD_REG | Add source register to destination register |
+| `0x03` | SUB_REG | Subtract source register from destination register |
+| `0x04` | WRITE_ARENA_F32 | Write register float to a relative entity position in the Arena |
+| `0x05` | READ_ARENA_F32 | Read a float from the Arena (entity-relative) into destination register |
+| `0x06` | WRITE_ARENA_U8 | Write register byte to the Arena |
+| `0x07` | READ_ARENA_U8 | Read a byte from the Arena into destination register |
+| `0x08` | JMP_LT | Jump to target instruction if `reg1 < reg2` |
+| `0x09` | JMP | Unconditional jump to target instruction |
+| `0x0A` | WRITE_ARENA_U32 | Write a 32-bit value to the Arena |
+| `0x0B` | MUL_REG | Multiply destination register by source register |
+| `0x0C` | DIV_REG | Divide destination register by source register |
 
 ---
 
-## 5. Compilación del Núcleo y Ejecución
+## Shared Memory Arena Layout
 
-### Dependencias
-- Git
-- Rust/Cargo (edición 2021)
-- Flutter SDK (versión estable compatible con Dart 3.0+)
+| Arena Offset | Size | Field | Description |
+|--------------|------|-------|-------------|
+| `0` | 4 bytes | `magic` | `'M', 'A', 'M', 'P'` |
+| `4` | 4 bytes | `static_resources_offset` | Load offset of the `.malphas` binary (typically `1024`) |
+| `8` | 4 bytes | `static_resources_size` | Size in bytes of the loaded binary resource |
+| `12` | 4 bytes | `entities_offset` | Start address of the entity pool (typically `32`) |
+| `16` | 4 bytes | `entities_count` | Total number of logical entities registered in current execution |
+| `20` | 4 bytes | `font_metrics_offset` | Absolute offset of glyph metrics |
+| `24` | 4 bytes | `font_atlas_offset` | Absolute offset of font atlas pixels |
+| `28` | 4 bytes | `table_of_jumps_offset` | Absolute offset of the jump table |
 
-### Construcción del Motor Nativo
-Ejecuta el script PowerShell de construcción automatizada:
+---
+
+## Getting Started
+
+### Dependencies
+- [Git](https://git-scm.com)
+- [Rust / Cargo](https://rustup.rs) (Edition 2021)
+- [Flutter SDK](https://flutter.dev) (stable channel, Dart 3.0+)
+
+### 1. Build the Native Core
+
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\build_core.ps1
 ```
-Este script compilará la biblioteca dinámica en modo release (`malphas_core.dll`) y la copiará automáticamente a los directorios del chasis gráfico y ejecutables de Flutter.
 
-### Ejecución de Pruebas Unitarias
+This compiles `malphas_core.dll` in release mode and copies it into the Flutter runner directory automatically.
+
+### 2. Run Unit Tests
+
 ```powershell
 cargo test --manifest-path malphas_core/Cargo.toml
 ```
 
-### Ejecución de la Consola Virtual
+### 3. Launch the Virtual Console
+
 ```powershell
 cd flutter_app
 flutter run -d windows
 ```
 
-Una vez iniciada la consola, accede a la sección **"PACKS"**, haz clic en el icono de engranaje superior para abrir la **CONFIGURACIÓN DE PAQUETE** y pulsa **"COMPILAR Y CARGAR EN CALIENTE (ZERO-COPY)"**. Esto compilará el atlas, inyectará el bytecode en la Arena de memoria y comenzará a rasterizar los objetos móviles animados en tiempo real a 120Hz.
+Once running, open the **PACKS** tab, tap the gear icon to open **Package Config**, then press **COMPILE & HOT-SWAP (ZERO-COPY)**. This compiles the font atlas, injects the bytecode into the shared Arena, and begins rasterizing animated entities in real time at 120 Hz.
+
+---
+
+## CI Status
+
+| Workflow | Status |
+|----------|--------|
+| Flutter CI | ![Flutter CI](https://github.com/calinrus-dev/malphas/actions/workflows/flutter_ci.yml/badge.svg) |
+| Flutter Lint | ![Flutter Lint](https://github.com/calinrus-dev/malphas/actions/workflows/flutter_lint.yml/badge.svg) |
+| Rust CI | ![Rust CI](https://github.com/calinrus-dev/malphas/actions/workflows/rust_ci.yml/badge.svg) |
+
+---
+
+## License
+
+[MIT](./LICENSE)
