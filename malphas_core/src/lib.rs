@@ -40,6 +40,50 @@ pub struct MalphasDoubleBufferBridge {
     pub atomic_back_index: AtomicU8,
 }
 
+#[repr(C, align(16))]
+#[derive(Clone, Copy)]
+pub struct MhpHeader {
+    pub magic: [u8; 4],
+    pub version: u32,
+    pub total_size: u64,
+    pub checksum: [u8; 32],
+    pub pack_id: [u8; 16],
+    pub canvas_width: u16,
+    pub canvas_height: u16,
+    pub font_metrics_offset: u32,
+    pub font_atlas_offset: u32,
+    pub objects_table_offset: u32,
+    pub objects_table_count: u32,
+    pub skins_offset: u32,
+    pub skins_size: u32,
+    pub has_embedded_msp: u32,
+    pub embedded_msp_offset: u32,
+    pub embedded_msp_size: u32,
+    pub padding: [u8; 4],
+}
+
+#[repr(C, align(16))]
+#[derive(Clone, Copy)]
+pub struct MhpObjectDescriptor {
+    pub object_id: u32,
+    pub properties_offset: u32,
+    pub properties_size: u32,
+    pub skins_offset: u32,
+    pub skins_size: u32,
+    pub padding: [u8; 12],
+}
+
+#[repr(C, align(16))]
+#[derive(Clone, Copy)]
+pub struct MspHeader {
+    pub magic: [u8; 4],
+    pub version: u32,
+    pub checksum: [u8; 32],
+    pub bytecode_size: u32,
+    pub entry_point: u32,
+    pub padding: [u8; 16],
+}
+
 pub struct ResourcePackRuntime {
     pub arena_start_ptr: *mut u8,
     pub arena_size: usize,
@@ -262,57 +306,129 @@ pub extern "C" fn load_resource_pack(filepath: *const c_char) -> i32 {
         return -3;
     }
 
-    if buffer.len() < 32 {
+    if buffer.len() < 4 {
         return -4;
     }
 
-    if &buffer[0..4] != b"MLPH" {
-        return -5;
-    }
+    let magic = &buffer[0..4];
 
-    // Extract offsets from header
-    let _manifest_size = u32::from_le_bytes(buffer[4..8].try_into().unwrap()) as usize;
-    let font_metrics_offset = u32::from_le_bytes(buffer[8..12].try_into().unwrap()) as usize;
-    let font_atlas_offset = u32::from_le_bytes(buffer[12..16].try_into().unwrap()) as usize;
-    let table_of_jumps_offset = u32::from_le_bytes(buffer[16..20].try_into().unwrap()) as usize;
-    let bytecode_offset = u32::from_le_bytes(buffer[24..28].try_into().unwrap()) as usize;
-    let bytecode_size = u32::from_le_bytes(buffer[28..32].try_into().unwrap()) as usize;
+    if magic == b"MLPH" {
+        // --- MHP (Malphas Hot Package) Loader ---
+        let header_size = std::mem::size_of::<MhpHeader>();
+        if buffer.len() < header_size {
+            return -5;
+        }
 
-    let arena_addr = ARENA_ADDRESS.load(Ordering::SeqCst);
-    let arena_size = ARENA_SIZE.load(Ordering::SeqCst);
+        let header = unsafe { &*(buffer.as_ptr() as *const MhpHeader) };
 
-    if arena_addr != 0 {
-        let arena_start = arena_addr as *mut u8;
-        unsafe {
-            // Write package size to memory map
-            *(arena_start.add(8) as *mut u32) = buffer.len() as u32;
+        // Validate total size
+        if header.total_size as usize != buffer.len() {
+            return -6;
+        }
 
-            // Write font atlas offsets (relative to Arena start)
-            *(arena_start.add(20) as *mut u32) = 1024 + font_metrics_offset as u32;
-            *(arena_start.add(24) as *mut u32) = 1024 + font_atlas_offset as u32;
-            *(arena_start.add(28) as *mut u32) = 1024 + table_of_jumps_offset as u32;
+        // Validate SHA-256 Checksum over payload
+        let mut hasher = Sha256::new();
+        hasher.update(&buffer[header_size..]);
+        let calculated = hasher.finalize();
+        if calculated.as_slice() != header.checksum {
+            return -7;
+        }
 
-            // Copy pack binary data starting at offset 1024 in the Arena
-            if arena_size >= buffer.len() + 1024 {
-                std::ptr::copy_nonoverlapping(buffer.as_ptr(), arena_start.add(1024), buffer.len());
+        // Bounds checking for sub-tables
+        if header.font_metrics_offset as usize + 4096 > buffer.len() {
+            return -8;
+        }
+        if header.font_atlas_offset as usize + (512 * 512) > buffer.len() {
+            return -9;
+        }
+        let objects_table_end = header.objects_table_offset as usize + (header.objects_table_count as usize * 32);
+        if objects_table_end > buffer.len() {
+            return -10;
+        }
+        if header.skins_offset as usize + header.skins_size as usize > buffer.len() {
+            return -11;
+        }
+
+        let arena_addr = ARENA_ADDRESS.load(Ordering::SeqCst);
+        let arena_size = ARENA_SIZE.load(Ordering::SeqCst);
+
+        if arena_addr != 0 {
+            let arena_start = arena_addr as *mut u8;
+            unsafe {
+                // Write package size to memory map
+                *(arena_start.add(8) as *mut u32) = buffer.len() as u32;
+
+                // Write absolute offsets in the Arena
+                *(arena_start.add(20) as *mut u32) = 1024 + header.font_metrics_offset;
+                *(arena_start.add(24) as *mut u32) = 1024 + header.font_atlas_offset;
+                *(arena_start.add(28) as *mut u32) = 1024 + header.objects_table_offset;
+
+                // Copy aligned MHP binary starting at offset 1024 in the Arena
+                if arena_size >= buffer.len() + 1024 {
+                    std::ptr::copy_nonoverlapping(buffer.as_ptr(), arena_start.add(1024), buffer.len());
+                }
             }
         }
-    }
 
-    let bytecode = if bytecode_size > 0 && bytecode_offset + bytecode_size <= buffer.len() {
-        buffer[bytecode_offset..(bytecode_offset + bytecode_size)].to_vec()
+        // Extract embedded bytecode if present
+        let mut bytecode = Vec::new();
+        if header.has_embedded_msp == 1 {
+            let start = header.embedded_msp_offset as usize;
+            let end = start + header.embedded_msp_size as usize;
+            if end <= buffer.len() {
+                bytecode = buffer[start..end].to_vec();
+            } else {
+                return -12;
+            }
+        }
+
+        let mut runtime = RUNTIME.lock().unwrap();
+        *runtime = Some(ResourcePackRuntime {
+            arena_start_ptr: arena_addr as *mut u8,
+            arena_size,
+            bytecode_buffer: bytecode,
+        });
+
+        0
+    } else if magic == b"MLPS" {
+        // --- MSP (Malphas Script Package) Hot-Swap Loader ---
+        let header_size = std::mem::size_of::<MspHeader>();
+        if buffer.len() < header_size {
+            return -20;
+        }
+
+        let header = unsafe { &*(buffer.as_ptr() as *const MspHeader) };
+
+        // Validate payload boundaries
+        let payload_start = header_size;
+        let payload_end = payload_start + header.bytecode_size as usize;
+        if payload_end > buffer.len() {
+            return -21;
+        }
+
+        // Validate SHA-256 Checksum over bytecode
+        let mut hasher = Sha256::new();
+        hasher.update(&buffer[payload_start..payload_end]);
+        let calculated = hasher.finalize();
+        if calculated.as_slice() != header.checksum {
+            return -22;
+        }
+
+        let bytecode = buffer[payload_start..payload_end].to_vec();
+
+        let mut runtime_opt = RUNTIME.lock().unwrap();
+        if let Some(ref mut runtime) = *runtime_opt {
+            // Hot-swap bytecode buffer in the active logic VM sandbox
+            runtime.bytecode_buffer = bytecode;
+            0
+        } else {
+            // MHP must be loaded before hot-swapping behavior scripts
+            -23
+        }
     } else {
-        Vec::new()
-    };
-
-    let mut runtime = RUNTIME.lock().unwrap();
-    *runtime = Some(ResourcePackRuntime {
-        arena_start_ptr: arena_addr as *mut u8,
-        arena_size,
-        bytecode_buffer: bytecode,
-    });
-
-    0
+        // Invalid Magic Header
+        -30
+    }
 }
 
 #[no_mangle]
@@ -587,6 +703,19 @@ mod tests {
         std::fs::remove_file(temp_path).unwrap();
 
         assert_eq!(res, 0);
+    }
+
+    #[test]
+    fn test_struct_alignments() {
+        // Assert sizes
+        assert_eq!(std::mem::size_of::<MhpHeader>(), 112);
+        assert_eq!(std::mem::size_of::<MhpObjectDescriptor>(), 32);
+        assert_eq!(std::mem::size_of::<MspHeader>(), 64);
+
+        // Assert alignments
+        assert_eq!(std::mem::align_of::<MhpHeader>(), 16);
+        assert_eq!(std::mem::align_of::<MhpObjectDescriptor>(), 16);
+        assert_eq!(std::mem::align_of::<MspHeader>(), 16);
     }
 }
 

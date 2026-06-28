@@ -2,60 +2,92 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:crypto/crypto.dart';
+
+class CompileOutput {
+  final Uint8List mhpBytes;
+  final Uint8List mspBytes;
+  CompileOutput(this.mhpBytes, this.mspBytes);
+}
 
 class MalphasPackageCompiler {
-  Future<Uint8List> compilePackage(Map<String, dynamic> manifest) async {
-    // 1. Serialize manifest JSON
-    final manifestJsonStr = jsonEncode(manifest);
-    final manifestBytes = utf8.encode(manifestJsonStr);
+  Uint8List align16(Uint8List data) {
+    final rem = data.length % 16;
+    if (rem == 0) return data;
+    final padSize = 16 - rem;
+    final builder = BytesBuilder();
+    builder.add(data);
+    builder.add(Uint8List(padSize));
+    return builder.toBytes();
+  }
 
-    // 2. Generate Font Atlas (measure and render characters ASCII 0-255)
+  Future<CompileOutput> compilePackage(Map<String, dynamic> manifest) async {
+    // 1. Generate Font Atlas (measure and render characters ASCII 0-255)
     final fontData = await compileFontAtlas();
-    final metricsBytes = fontData['metrics']!;
-    final pixelsBytes = fontData['pixels']!;
+    final metricsBytes = align16(fontData['metrics']!); // 4096 bytes
+    final pixelsBytes = align16(fontData['pixels']!);   // 262144 bytes
 
-    // 3. Assemble VM Bytecode for movement physics
-    final bytecodeBytes = assembleBouncingScript();
+    // 2. Compile VM Bytecode for movement physics & generate standalone .msp
+    final bytecodeBytes = align16(assembleBouncingScript());
+    final mspBytes = compileMsp(bytecodeBytes);
 
-    // 4. Generate Table of Jumps & Free Arena
+    // 3. Assemble Objects Table (32 bytes per entry)
     final jumpBuilder = BytesBuilder();
-    final arenaBuilder = BytesBuilder();
-    
     final List<dynamic> objects = manifest['objects'] as List<dynamic>? ?? [];
+    
+    // Skin and properties binary data pool
+    final dataPoolBuilder = BytesBuilder();
     
     for (final obj in objects) {
       final int objId = obj['object_id'] as int? ?? 0;
       
-      // Write custom metadata to arenaBuilder
-      final metaOffset = arenaBuilder.length;
-      final metaJson = jsonEncode(obj['properties'] ?? {});
-      final metaBytes = utf8.encode(metaJson);
-      arenaBuilder.add(metaBytes);
+      // Write properties JSON to data pool
+      final propJson = jsonEncode(obj['properties'] ?? {});
+      final propBytes = align16(utf8.encode(propJson));
+      final propOffset = dataPoolBuilder.length;
+      dataPoolBuilder.add(propBytes);
       
-      // Write skins (A simple dummy raw pixel skin block for now)
-      final skinsOffset = arenaBuilder.length;
-      final skinsBytes = Uint8List(256 * 256 * 4); // 256KB placeholder raw image
-      arenaBuilder.add(skinsBytes);
-      final skinsSize = skinsBytes.length;
+      // Write placeholder skin block (256 bytes) to data pool
+      final skinBytes = align16(Uint8List(256));
+      final skinOffset = dataPoolBuilder.length;
+      dataPoolBuilder.add(skinBytes);
       
-      // Table entry
-      final entry = ByteData(14);
-      entry.setUint16(0, objId, Endian.little);
-      entry.setUint32(2, metaOffset, Endian.little);
-      entry.setUint32(6, skinsOffset, Endian.little);
-      entry.setUint32(10, skinsSize, Endian.little);
+      // Object Table entry structure (exactly 32 bytes, 16-byte aligned)
+      final entry = ByteData(32);
+      entry.setUint32(0, objId, Endian.little);
+      entry.setUint32(4, propOffset, Endian.little);
+      entry.setUint32(8, propBytes.length, Endian.little);
+      entry.setUint32(12, skinOffset, Endian.little);
+      entry.setUint32(16, skinBytes.length, Endian.little);
+      // bytes 20-31: padding (12 bytes)
       jumpBuilder.add(entry.buffer.asUint8List());
     }
 
-    // Header size is 32 bytes
-    final headerSize = 32;
-    final manifestOffset = headerSize;
-    final fontMetricsOffset = manifestOffset + manifestBytes.length;
-    final fontAtlasOffset = fontMetricsOffset + metricsBytes.length;
-    final tableOfJumpsOffset = fontAtlasOffset + pixelsBytes.length;
-    final bytecodeOffset = tableOfJumpsOffset + jumpBuilder.length;
-    // final freeArenaOffset = bytecodeOffset + bytecodeBytes.length;
+    final jumpTableBytes = align16(jumpBuilder.toBytes());
+    final dataPoolBytes = align16(dataPoolBuilder.toBytes());
 
+    // 4. Calculate layout offsets
+    final headerSize = 112;
+    final fontMetricsOffset = headerSize;
+    final fontAtlasOffset = fontMetricsOffset + metricsBytes.length;
+    final objectsTableOffset = fontAtlasOffset + pixelsBytes.length;
+    final skinsOffset = objectsTableOffset + jumpTableBytes.length;
+    final embeddedMspOffset = skinsOffset + dataPoolBytes.length;
+    final embeddedMspSize = mspBytes.length;
+
+    // 5. Assemble Payload (everything after the header)
+    final payloadBuilder = BytesBuilder();
+    payloadBuilder.add(metricsBytes);
+    payloadBuilder.add(pixelsBytes);
+    payloadBuilder.add(jumpTableBytes);
+    payloadBuilder.add(dataPoolBytes);
+    payloadBuilder.add(mspBytes);
+    final payloadBytes = payloadBuilder.toBytes();
+
+    // 6. Calculate Checksum over payload
+    final checksum = sha256.convert(payloadBytes).bytes;
+
+    // 7. Write MhpHeader (112 bytes)
     final header = ByteData(headerSize);
     // 'MLPH' magic
     header.setUint8(0, 0x4D); // 'M'
@@ -63,24 +95,74 @@ class MalphasPackageCompiler {
     header.setUint8(2, 0x50); // 'P'
     header.setUint8(3, 0x48); // 'H'
     
-    header.setUint32(4, manifestBytes.length, Endian.little);
-    header.setUint32(8, fontMetricsOffset, Endian.little);
-    header.setUint32(12, fontAtlasOffset, Endian.little);
-    header.setUint32(16, tableOfJumpsOffset, Endian.little);
-    header.setUint32(20, jumpBuilder.length, Endian.little);
-    header.setUint32(24, bytecodeOffset, Endian.little);
-    header.setUint32(28, bytecodeBytes.length, Endian.little);
+    header.setUint32(4, 1, Endian.little); // version
+    header.setUint64(8, (headerSize + payloadBytes.length).toUnsigned(64), Endian.little); // total_size
+    
+    // Inject 32-byte checksum (offsets 16-47)
+    for (int i = 0; i < 32; i++) {
+      header.setUint8(16 + i, checksum[i]);
+    }
 
-    final packBytes = BytesBuilder();
-    packBytes.add(header.buffer.asUint8List());
-    packBytes.add(manifestBytes);
-    packBytes.add(metricsBytes);
-    packBytes.add(pixelsBytes);
-    packBytes.add(jumpBuilder.toBytes());
-    packBytes.add(bytecodeBytes);
-    packBytes.add(arenaBuilder.toBytes());
+    // pack_id (offsets 48-63)
+    final packIdStr = manifest['pack_id'] as String? ?? 'pack_custom_01';
+    final packIdBytes = utf8.encode(packIdStr);
+    for (int i = 0; i < 16; i++) {
+      header.setUint8(48 + i, i < packIdBytes.length ? packIdBytes[i] : 0);
+    }
 
-    return packBytes.toBytes();
+    header.setUint16(64, 1000, Endian.little); // canvas_width
+    header.setUint16(66, 1000, Endian.little); // canvas_height
+    
+    header.setUint32(68, fontMetricsOffset, Endian.little);
+    header.setUint32(72, fontAtlasOffset, Endian.little);
+    
+    header.setUint32(76, objectsTableOffset, Endian.little);
+    header.setUint32(80, objects.length, Endian.little); // objects_table_count
+    
+    header.setUint32(84, skinsOffset, Endian.little);
+    header.setUint32(88, dataPoolBytes.length, Endian.little); // skins_size
+    
+    header.setUint32(92, 1, Endian.little); // has_embedded_msp = 1
+    header.setUint32(96, embeddedMspOffset, Endian.little);
+    header.setUint32(100, embeddedMspSize, Endian.little);
+    // bytes 104-111: padding
+
+    final mhpBuilder = BytesBuilder();
+    mhpBuilder.add(header.buffer.asUint8List());
+    mhpBuilder.add(payloadBytes);
+    final mhpBytes = mhpBuilder.toBytes();
+
+    return CompileOutput(mhpBytes, mspBytes);
+  }
+
+  Uint8List compileMsp(Uint8List bytecodeBytes) {
+    final headerSize = 64;
+    
+    // Calculate Checksum over bytecode payload
+    final checksum = sha256.convert(bytecodeBytes).bytes;
+
+    final header = ByteData(headerSize);
+    // 'MLPS' magic
+    header.setUint8(0, 0x4D); // 'M'
+    header.setUint8(1, 0x4C); // 'L'
+    header.setUint8(2, 0x50); // 'P'
+    header.setUint8(3, 0x53); // 'S'
+    
+    header.setUint32(4, 1, Endian.little); // version
+    
+    // Inject 32-byte checksum (offsets 8-39)
+    for (int i = 0; i < 32; i++) {
+      header.setUint8(8 + i, checksum[i]);
+    }
+    
+    header.setUint32(40, bytecodeBytes.length, Endian.little);
+    header.setUint32(44, 0, Endian.little); // entry_point
+    // bytes 48-63: padding (16 bytes)
+
+    final mspBuilder = BytesBuilder();
+    mspBuilder.add(header.buffer.asUint8List());
+    mspBuilder.add(bytecodeBytes);
+    return mspBuilder.toBytes();
   }
 
   Future<Map<String, Uint8List>> compileFontAtlas() async {

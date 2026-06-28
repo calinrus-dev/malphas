@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
 import 'models.dart';
 
 class PackageController {
@@ -48,7 +51,70 @@ class PackageController {
   ];
 
   Future<void> init() async {
-    // Simula la llamada a los directorios raíz externos del proyecto (../packages/ y ../motors/)
+    final workspace = Directory.current.path;
+    final packagesDir = Directory('$workspace/packages');
+    if (!packagesDir.existsSync()) {
+      packagesDir.createSync(recursive: true);
+    }
+
+    final List<FileSystemEntity> files = packagesDir.listSync();
+    for (final file in files) {
+      if (file is File && file.path.endsWith('.mhp')) {
+        try {
+          final bytes = await file.readAsBytes();
+          if (bytes.length < 112) continue;
+          
+          // Verify magic header: 'MLPH'
+          if (bytes[0] != 0x4D || bytes[1] != 0x4C || bytes[2] != 0x50 || bytes[3] != 0x48) {
+            continue;
+          }
+
+          final data = ByteData.view(bytes.buffer, bytes.offsetInBytes);
+          final version = data.getUint32(4, Endian.little);
+          
+          // Read pack_id (16 bytes ASCII at offset 48)
+          final packIdBytes = bytes.sublist(48, 64);
+          final packId = utf8.decode(packIdBytes.takeWhile((b) => b != 0).toList());
+          
+          final objectsCount = data.getUint32(80, Endian.little);
+          final objectsTableOffset = data.getUint32(76, Endian.little);
+
+          final List<MalphasObject> parsedObjects = [];
+          for (int i = 0; i < objectsCount; i++) {
+            final entryOffset = objectsTableOffset + (i * 32);
+            if (entryOffset + 32 > bytes.length) break;
+
+            final objId = data.getUint32(entryOffset, Endian.little);
+            
+            parsedObjects.add(
+              MalphasObject(
+                id: 'vox_obj_$objId',
+                name: 'Voxel_Object_$objId',
+                category: 'Compiled Archetype',
+                properties: {'ID': '$objId'},
+                tags: [const MalphasTag(name: 'Zero-Copy', isPublic: true)],
+                skins: [],
+              ),
+            );
+          }
+
+          final newPack = MalphasPackage(
+            id: packId,
+            name: 'MHP Pack ($packId)',
+            version: 'v$version.0.0',
+            author: 'Compiled Artifact',
+            description: 'Estructura binaria mapeada en zero-copy con cabeceras alineadas.',
+            objects: parsedObjects,
+          )..isLoaded = true;
+
+          // Replace or add to registry
+          _registry.removeWhere((p) => p.id == packId);
+          _registry.add(newPack);
+        } catch (e) {
+          // Silent skip
+        }
+      }
+    }
   }
 
   List<MalphasPackage> getAllPackages() => _registry;

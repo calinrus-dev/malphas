@@ -51,7 +51,7 @@ class _PackageConfigScreenState extends State<PackageConfigScreen> {
         ]
       };
 
-      final packBytes = await compiler.compilePackage(manifest);
+      final output = await compiler.compilePackage(manifest);
 
       final workspace = Directory.current.path;
       final packagesDir = Directory('$workspace/packages');
@@ -59,14 +59,24 @@ class _PackageConfigScreenState extends State<PackageConfigScreen> {
         packagesDir.createSync(recursive: true);
       }
 
-      final outputPath = '${packagesDir.path}/mecatron.malphas';
-      final file = File(outputPath);
-      await file.writeAsBytes(packBytes);
+      final outputPathMhp = '${packagesDir.path}/mecatron.mhp';
+      final outputPathMsp = '${packagesDir.path}/mecatron.msp';
+      
+      await File(outputPathMhp).writeAsBytes(output.mhpBytes);
+      await File(outputPathMsp).writeAsBytes(output.mspBytes);
 
       final bindings = MalphasBindings();
-      final loadRes = bindings.loadPack(outputPath);
-      if (loadRes != 0) {
-        throw Exception('load_resource_pack failed with error $loadRes');
+      
+      // Load MHP first (this sets up static metadata, fonts, layouts, and embedded logic)
+      final loadResMhp = bindings.loadPack(outputPathMhp);
+      if (loadResMhp != 0) {
+        throw Exception('load_resource_pack (MHP) failed with error $loadResMhp');
+      }
+
+      // Hot-swap with standalone logic (.msp) to demonstrate dynamic loading
+      final loadResMsp = bindings.loadPack(outputPathMsp);
+      if (loadResMsp != 0) {
+        throw Exception('load_resource_pack (MSP) failed with error $loadResMsp');
       }
 
       final arena = bindings.arena;
