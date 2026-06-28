@@ -1,0 +1,42 @@
+name: Native Core Release Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  native-core:
+    name: Build native core (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: malphas_core
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: malphas_core
+
+      - name: Build release
+        run: cargo build --release --locked
+
+      - name: Upload native artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: malphas_core-${{ matrix.os }}
+          path: |
+            malphas_core/target/release/malphas_core.dll
+            malphas_core/target/release/libmalphas_core.so
+            malphas_core/target/release/libmalphas_core.dylib
+          if-no-files-found: ignore

@@ -1,0 +1,46 @@
+name: Flutter Windows Release Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: malphas_core
+
+      - name: Build native core (Windows)
+        run: cargo build --release --locked
+        working-directory: malphas_core
+
+      - name: Install Flutter dependencies
+        run: flutter pub get
+        working-directory: flutter_app
+
+      - name: Build Windows release
+        run: flutter build windows --release
+        working-directory: flutter_app
+
+      - name: Upload Windows executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: malphas-app-windows
+          path: flutter_app/build/windows/x64/runner/Release/
+          if-no-files-found: error

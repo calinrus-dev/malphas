@@ -1,12 +1,17 @@
+// This crate is a C-ABI boundary; pointer arguments are validated inside each
+// function before they are dereferenced, so the not_unsafe_ptr_arg_deref lint
+// is not useful here.
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
+
+use arc_swap::ArcSwap;
 use std::ffi::{c_void, CStr};
-use std::os::raw::c_char;
 use std::fs::File;
 use std::io::Read;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicUsize, AtomicPtr, Ordering};
+use std::os::raw::c_char;
+use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
-use arc_swap::ArcSwap;
 
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 use zip::ZipArchive;
 
 // ---------------------------------------------------------------------------
@@ -233,10 +238,10 @@ pub extern "C" fn init_engine(
         *arena_start.add(2) = b'M';
         *arena_start.add(3) = b'P';
 
-        *(arena_start.add(4) as *mut u32) = 1024;   // static_resources_offset
-        *(arena_start.add(8) as *mut u32) = 0;      // static_resources_size
-        *(arena_start.add(12) as *mut u32) = 32;    // entities_offset
-        *(arena_start.add(16) as *mut u32) = 0;     // entities_count
+        *(arena_start.add(4) as *mut u32) = 1024; // static_resources_offset
+        *(arena_start.add(8) as *mut u32) = 0; // static_resources_size
+        *(arena_start.add(12) as *mut u32) = 32; // entities_offset
+        *(arena_start.add(16) as *mut u32) = 0; // entities_count
     }
 
     // 5. Create a fresh single-clock pulse channel for this session.
@@ -301,7 +306,9 @@ pub extern "C" fn shutdown_engine() -> i32 {
     // reader can observe the old runtime. Swap it out and drop it.
     let old_ptr = RUNTIME.swap(std::ptr::null_mut(), Ordering::Acquire);
     if !old_ptr.is_null() {
-        unsafe { drop(Box::from_raw(old_ptr)); }
+        unsafe {
+            drop(Box::from_raw(old_ptr));
+        }
     }
     0
 }
@@ -324,7 +331,11 @@ pub extern "C" fn trigger_engine_pulse() -> i32 {
     match PULSE_SENDER.lock() {
         Ok(guard) => {
             if let Some(sender) = guard.as_ref() {
-                if sender.send(()).is_ok() { 0 } else { -4 }
+                if sender.send(()).is_ok() {
+                    0
+                } else {
+                    -4
+                }
             } else {
                 -3 // channel not yet initialised
             }
@@ -355,7 +366,9 @@ pub extern "C" fn process_input_event(_event_type: i32, x: f32, y: f32) -> i32 {
 // on the bridge layout or copy nested structs by value.
 // ---------------------------------------------------------------------------
 #[no_mangle]
-pub extern "C" fn get_buffer_a_ptr(bridge: *mut MalphasDoubleBufferBridge) -> *mut CoreCommandBuffer {
+pub extern "C" fn get_buffer_a_ptr(
+    bridge: *mut MalphasDoubleBufferBridge,
+) -> *mut CoreCommandBuffer {
     if bridge.is_null() {
         return std::ptr::null_mut();
     }
@@ -365,7 +378,9 @@ pub extern "C" fn get_buffer_a_ptr(bridge: *mut MalphasDoubleBufferBridge) -> *m
 }
 
 #[no_mangle]
-pub extern "C" fn get_buffer_b_ptr(bridge: *mut MalphasDoubleBufferBridge) -> *mut CoreCommandBuffer {
+pub extern "C" fn get_buffer_b_ptr(
+    bridge: *mut MalphasDoubleBufferBridge,
+) -> *mut CoreCommandBuffer {
     if bridge.is_null() {
         return std::ptr::null_mut();
     }
@@ -436,7 +451,10 @@ pub extern "C" fn malphas_free(ptr: *mut u8, size: usize) {
 // Binary integrity and package extraction.
 // ---------------------------------------------------------------------------
 #[no_mangle]
-pub extern "C" fn verify_binary_integrity(filepath: *const c_char, expected_sha: *const c_char) -> i32 {
+pub extern "C" fn verify_binary_integrity(
+    filepath: *const c_char,
+    expected_sha: *const c_char,
+) -> i32 {
     let filepath_str = match c_str_to_str(filepath) {
         Some(s) => s,
         None => return -1,
@@ -464,7 +482,11 @@ pub extern "C" fn verify_binary_integrity(filepath: *const c_char, expected_sha:
     }
     let calculated_sha = format!("{:x}", hasher.finalize());
 
-    if calculated_sha == clean_expected { 0 } else { 1 }
+    if calculated_sha == clean_expected {
+        0
+    } else {
+        1
+    }
 }
 
 #[no_mangle]
@@ -489,10 +511,8 @@ pub extern "C" fn extract_zip_package(zip_path: *const c_char, output_dir: *cons
     };
 
     let dest_path = std::path::Path::new(output_dir_str);
-    if !dest_path.exists() {
-        if std::fs::create_dir_all(dest_path).is_err() {
-            return -5;
-        }
+    if !dest_path.exists() && std::fs::create_dir_all(dest_path).is_err() {
+        return -5;
     }
 
     for i in 0..archive.len() {
@@ -512,10 +532,8 @@ pub extern "C" fn extract_zip_package(zip_path: *const c_char, output_dir: *cons
             }
         } else {
             if let Some(p) = outpath.parent() {
-                if !p.exists() {
-                    if std::fs::create_dir_all(p).is_err() {
-                        return -8;
-                    }
+                if !p.exists() && std::fs::create_dir_all(p).is_err() {
+                    return -8;
                 }
             }
             let mut outfile = match File::create(&outpath) {
@@ -669,7 +687,8 @@ fn load_mhp_package(buffer: &[u8]) -> i32 {
     if header.font_atlas_offset as usize + (512 * 512) > buffer.len() {
         return -9;
     }
-    let objects_table_end = header.objects_table_offset as usize + (header.objects_table_count as usize * 32);
+    let objects_table_end =
+        header.objects_table_offset as usize + (header.objects_table_count as usize * 32);
     if objects_table_end > buffer.len() {
         return -10;
     }
@@ -726,7 +745,9 @@ fn load_mhp_package(buffer: &[u8]) -> i32 {
         let _guard = ARENA_WRITE_LOCK.lock();
         let old_ptr = RUNTIME.swap(new_ptr, Ordering::AcqRel);
         if !old_ptr.is_null() {
-            unsafe { drop(Box::from_raw(old_ptr)); }
+            unsafe {
+                drop(Box::from_raw(old_ptr));
+            }
         }
     }
     pause_engine(0);
@@ -890,7 +911,7 @@ fn process_engine_tick_internal() {
 
     // 2. Load bytecode atomically and lock-free.
     let bytecode_guard = get_bytecode_vm().load();
-    let bytecode: &[u8] = &**bytecode_guard;
+    let bytecode: &[u8] = &bytecode_guard;
 
     // 3. Run bytecode script inside the sandbox runtime.
     {
@@ -939,7 +960,8 @@ fn process_engine_tick_internal() {
                 let payload_size = std::mem::size_of::<TextPayload>();
 
                 if str_offset + payload_size <= arena_size {
-                    let text_payload_ptr = unsafe { arena_start.add(str_offset) as *mut TextPayload };
+                    let text_payload_ptr =
+                        unsafe { arena_start.add(str_offset) as *mut TextPayload };
 
                     // Synchronise the payload geometry with the entity so the
                     // text moves with the simulation while the command buffer
@@ -974,13 +996,19 @@ fn process_engine_tick_internal() {
     }
 
     unsafe {
-        (*back_buffer_ptr).command_count.store(write_idx as u32, Ordering::Release);
-        (*bridge).commands_written.store(write_idx as u32, Ordering::Release);
+        (*back_buffer_ptr)
+            .command_count
+            .store(write_idx as u32, Ordering::Release);
+        (*bridge)
+            .commands_written
+            .store(write_idx as u32, Ordering::Release);
     }
 
     let next_back = 1 - back_index;
     unsafe {
-        (*bridge).atomic_back_index.store(next_back, Ordering::Release);
+        (*bridge)
+            .atomic_back_index
+            .store(next_back, Ordering::Release);
     }
 }
 
@@ -1023,7 +1051,8 @@ impl ResourcePackRuntime {
         while pc + 4 <= bytecode_buffer.len() {
             let opcode = bytecode_buffer[pc];
             let arg1 = bytecode_buffer[pc + 1];
-            let val_u16 = ((bytecode_buffer[pc + 2] as u16) << 8) | (bytecode_buffer[pc + 3] as u16);
+            let val_u16 =
+                ((bytecode_buffer[pc + 2] as u16) << 8) | (bytecode_buffer[pc + 3] as u16);
 
             match opcode {
                 0x00 => {
@@ -1105,11 +1134,9 @@ impl ResourcePackRuntime {
                     // JMP_LT (reg1, reg2, target_instr_index_u8)
                     let reg2 = (val_u16 >> 8) as usize;
                     let target_pc = (val_u16 & 0xFF) as usize * 4;
-                    if arg1 < 8 && reg2 < 8 {
-                        if regs[arg1 as usize] < regs[reg2] {
-                            pc = target_pc;
-                            continue;
-                        }
+                    if arg1 < 8 && reg2 < 8 && regs[arg1 as usize] < regs[reg2] {
+                        pc = target_pc;
+                        continue;
                     }
                     pc += 4;
                 }
@@ -1165,7 +1192,8 @@ mod tests {
     fn test_verify_binary_integrity() {
         let temp_path = std::path::Path::new("temp_test_file.txt");
         let mut file = File::create(temp_path).unwrap();
-        file.write_all(b"Malphas Engine Core Verification Data").unwrap();
+        file.write_all(b"Malphas Engine Core Verification Data")
+            .unwrap();
         drop(file);
 
         let mut hasher = Sha256::new();
@@ -1211,7 +1239,11 @@ mod tests {
         let duration = start.elapsed();
         let ns_per_iter = (duration.as_nanos() as f64) / (iterations as f64);
         println!("ArcSwap<[u8]> read latency: {:.4} ns/iter", ns_per_iter);
-        assert!(ns_per_iter < 1000.0, "Latency too high: {} ns/iter", ns_per_iter);
+        assert!(
+            ns_per_iter < 1000.0,
+            "Latency too high: {} ns/iter",
+            ns_per_iter
+        );
     }
 
     #[test]
@@ -1219,7 +1251,11 @@ mod tests {
         let size = 1024usize;
         let ptr = malphas_alloc(size);
         assert!(!ptr.is_null());
-        assert_eq!(ptr as usize % 16, 0, "Allocator must return 16-byte aligned memory");
+        assert_eq!(
+            ptr as usize % 16,
+            0,
+            "Allocator must return 16-byte aligned memory"
+        );
         unsafe { std::ptr::write_bytes(ptr, 0xAB, size) };
         malphas_free(ptr, size);
     }
@@ -1228,23 +1264,28 @@ mod tests {
     fn test_active_thread_lifecycle() {
         use std::sync::Arc;
 
-        let bridge = Arc::new(std::sync::Mutex::new(
-            unsafe { std::mem::zeroed::<MalphasDoubleBufferBridge>() }
-        ));
+        let bridge = Arc::new(std::sync::Mutex::new(unsafe {
+            std::mem::zeroed::<MalphasDoubleBufferBridge>()
+        }));
         let mut arena = vec![0u8; 1024 * 1024];
         let bridge_ptr = &mut *bridge.lock().unwrap() as *mut MalphasDoubleBufferBridge;
         let arena_ptr = arena.as_mut_ptr() as *mut c_void;
 
-        assert_eq!(init_engine(bridge_ptr, arena_ptr, arena.len() as u32, 2048), 0);
+        assert_eq!(
+            init_engine(bridge_ptr, arena_ptr, arena.len() as u32, 2048),
+            0
+        );
         std::thread::sleep(std::time::Duration::from_millis(20));
         assert!(ACTIVE_THREADS.load(Ordering::SeqCst) > 0);
 
         assert_eq!(shutdown_engine(), 0);
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
         while ACTIVE_THREADS.load(Ordering::SeqCst) > 0 {
-            assert!(std::time::Instant::now() < deadline, "Thread did not shut down");
+            assert!(
+                std::time::Instant::now() < deadline,
+                "Thread did not shut down"
+            );
             std::thread::yield_now();
         }
     }
-
 }

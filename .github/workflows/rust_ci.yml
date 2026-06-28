@@ -2,23 +2,35 @@ name: Rust CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
 
 jobs:
   build-test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: malphas_core
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Build (release)
-        run: cargo build --release
-        working-directory: malphas_core
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: malphas_core
+
+      - name: Check formatting
+        run: cargo fmt -- --check
+
+      - name: Run Clippy
+        run: cargo clippy --release -- -D warnings
+
+      - name: Build release
+        run: cargo build --release --locked
 
       - name: Run tests
-        run: cargo test --all --verbose
-        working-directory: malphas_core
+        run: cargo test --locked --verbose
