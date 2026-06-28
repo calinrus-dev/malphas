@@ -10,7 +10,7 @@ use std::fs::File;
 use std::io::Read;
 use std::os::raw::c_char;
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicU8, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use sha2::{Digest, Sha256};
 use zip::ZipArchive;
@@ -37,10 +37,12 @@ static PULSE_SENDER: Mutex<Option<std::sync::mpsc::Sender<()>>> = Mutex::new(Non
 /// to spawn overlapping simulation threads.
 static INIT_LOCK: Mutex<()> = Mutex::new(());
 
-/// Serialises Dart-side Arena writes with the Rust simulation tick.  The
-/// engine tick holds this lock while it reads entity state and generates
-/// render commands; Dart-side helpers acquire it for entity setup.
-static ARENA_WRITE_LOCK: Mutex<()> = Mutex::new(());
+/// Protects dynamic entity data in the Arena.  Static resources (font atlas,
+/// metrics, jump tables, loaded package bytes) are written once during package
+/// loading and are read lock-free afterwards.  The engine tick holds this
+/// lock only while accessing dynamic entity state; Dart-side helpers acquire
+/// it for entity setup.
+static ARENA_LOCK: RwLock<()> = RwLock::new(());
 
 // ---------------------------------------------------------------------------
 // Input event queue: Dart pushes, engine thread drains at frame start.
@@ -166,7 +168,7 @@ unsafe impl Sync for ResourcePackRuntime {}
 /// Live runtime pointer.  Stored as an atomic raw pointer so it can be
 /// hot-swapped during package loading without taking a lock on the simulation
 /// hot path. The tick `load`s it with `Acquire`; package loading `swap`s it
-/// with `AcqRel` while the engine is paused and the Arena write lock is held.
+/// with `AcqRel` while the engine is paused and the Arena lock is held.
 static RUNTIME: AtomicPtr<ResourcePackRuntime> = AtomicPtr::new(std::ptr::null_mut());
 
 /// Lock-free, atomic single-writer / multi-reader bytecode container.
@@ -564,7 +566,7 @@ pub extern "C" fn extract_zip_package(zip_path: *const c_char, output_dir: *cons
 }
 
 // ---------------------------------------------------------------------------
-// Safe Arena helpers for Dart-side entity setup.  These acquire ARENA_WRITE_LOCK
+// Safe Arena helpers for Dart-side entity setup.  These acquire ARENA_LOCK
 // so they never race the simulation tick.
 // ---------------------------------------------------------------------------
 #[no_mangle]
@@ -573,7 +575,7 @@ pub extern "C" fn set_entities_count(count: u32) -> i32 {
     if arena_addr == 0 {
         return -1;
     }
-    let _guard = ARENA_WRITE_LOCK.lock();
+    let _guard = ARENA_LOCK.write();
     unsafe {
         *((arena_addr as *mut u8).add(16) as *mut u32) = count;
     }
@@ -595,7 +597,7 @@ pub extern "C" fn write_arena_bytes(offset: u32, ptr: *const u8, len: u32) -> i3
     if end > arena_size {
         return -3;
     }
-    let _guard = ARENA_WRITE_LOCK.lock();
+    let _guard = ARENA_LOCK.write();
     unsafe {
         std::ptr::copy_nonoverlapping(ptr, (arena_addr as *mut u8).add(start), len as usize);
     }
@@ -627,7 +629,7 @@ pub extern "C" fn set_entity(
         return -1;
     }
 
-    let _guard = ARENA_WRITE_LOCK.lock();
+    let _guard = ARENA_LOCK.write();
     let arena_start = arena_addr as *mut u8;
     let entities_offset = unsafe { *(arena_start.add(12) as *const u32) } as usize;
     let entity_offset = entities_offset + (entity_id as usize * 64);
@@ -715,7 +717,9 @@ fn load_mhp_package(buffer: &[u8]) -> i32 {
 
     if arena_addr != 0 {
         let arena_start = arena_addr as *mut u8;
-        let _guard = ARENA_WRITE_LOCK.lock();
+        // Static resources are written once under a write lock; after this
+        // completes they are read lock-free by both the engine tick and Dart.
+        let _guard = ARENA_LOCK.write();
         unsafe {
             *(arena_start.add(8) as *mut u32) = buffer.len() as u32;
             *(arena_start.add(20) as *mut u32) = 1024 + header.font_metrics_offset;
@@ -754,9 +758,9 @@ fn load_mhp_package(buffer: &[u8]) -> i32 {
 
     pause_engine(1);
     {
-        // Wait (block) until any in-flight tick has released the Arena write
-        // lock, which guarantees the old runtime is no longer in use.
-        let _guard = ARENA_WRITE_LOCK.lock();
+        // Wait (block) until any in-flight tick has released the Arena lock,
+        // which guarantees the old runtime is no longer in use.
+        let _guard = ARENA_LOCK.write();
         let old_ptr = RUNTIME.swap(new_ptr, Ordering::AcqRel);
         if !old_ptr.is_null() {
             unsafe {
@@ -872,157 +876,170 @@ fn process_engine_tick_internal() {
 
     let arena_start = arena_addr as *mut u8;
 
-    // Hold the Arena write lock for the duration of the tick so Dart cannot
-    // observe torn entity state while we read it.
-    let _arena_guard = ARENA_WRITE_LOCK.lock();
-
-    let entities_offset = unsafe { *(arena_start.add(12) as *const u32) } as usize;
-    let entities_count = unsafe { *(arena_start.add(16) as *const u32) } as usize;
-
-    // 1. Drain input events at the start of the frame.
+    // 1. Drain input events at the start of the frame.  This only touches the
+    //    input queue, not the Arena, so no Arena lock is required.
     let mut events = VecDeque::new();
     if let Ok(mut queue) = INPUT_QUEUE.lock() {
         std::mem::swap(&mut *queue, &mut events);
     }
 
-    for event in events {
-        let x = event.x;
-        let y = event.y;
+    // 2. Process input events under a write lock because they mutate entity
+    //    state (speed and colour).  The lock is held only for this short phase.
+    if !events.is_empty() {
+        let _write_guard = ARENA_LOCK.write();
+        let entities_offset = unsafe { *(arena_start.add(12) as *const u32) } as usize;
+        let entities_count = unsafe { *(arena_start.add(16) as *const u32) } as usize;
+
+        for event in events {
+            let x = event.x;
+            let y = event.y;
+            for entity_id in 0..entities_count {
+                let entity_ptr = unsafe { arena_start.add(entities_offset + entity_id * 64) };
+                let cmd = unsafe { &mut *(entity_ptr as *mut DartRenderCommand) };
+
+                if cmd.command_type == 0 {
+                    continue;
+                }
+
+                // Text commands (type 2) carry a pointer in their width/height
+                // fields, not geometry, so skip them for hit testing.
+                if cmd.command_type == 2 {
+                    continue;
+                }
+
+                if x >= cmd.x && x <= cmd.x + cmd.width && y >= cmd.y && y <= cmd.y + cmd.height {
+                    unsafe {
+                        let speed_x_ptr = entity_ptr.add(24) as *mut f32;
+                        let speed_y_ptr = entity_ptr.add(28) as *mut f32;
+                        *speed_x_ptr = -(*speed_x_ptr);
+                        *speed_y_ptr = -(*speed_y_ptr);
+
+                        if cmd.color_rgba == 0xFF00FFCC {
+                            cmd.color_rgba = 0xFFFF00CC;
+                        } else if cmd.color_rgba == 0xFFFF00CC {
+                            cmd.color_rgba = 0xFF00FFCC;
+                        } else if cmd.color_rgba == 0xFFE0DCD3 {
+                            cmd.color_rgba = 0xFFFFFF00;
+                        } else if cmd.color_rgba == 0xFFFFFF00 {
+                            cmd.color_rgba = 0xFFE0DCD3;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Load bytecode atomically and lock-free.  Bytecode is a static resource
+    //    and is read lock-free after package load.
+    let bytecode_guard = get_bytecode_vm().load();
+    let bytecode: &[u8] = &bytecode_guard;
+
+    // 4. Execute bytecode and generate render commands.  Entity data is dynamic,
+    //    so it is accessed under a read lock.  This allows concurrent Dart
+    //    readers while still excluding Dart writers.  The engine thread is the
+    //    only writer during this phase.
+    {
+        let _read_guard = ARENA_LOCK.read();
+        let entities_offset = unsafe { *(arena_start.add(12) as *const u32) } as usize;
+        let entities_count = unsafe { *(arena_start.add(16) as *const u32) } as usize;
+
+        // Run bytecode script inside the sandbox runtime.
+        {
+            // Acquire load matches the AcqRel swap in load_mhp_package, ensuring we
+            // see a fully initialised runtime and that the package loader sees our
+            // subsequent Arena reads complete before the pointer is reused.
+            let runtime_ptr = RUNTIME.load(Ordering::Acquire);
+            if !runtime_ptr.is_null() {
+                unsafe {
+                    let runtime = &mut *runtime_ptr;
+                    runtime.arena_start_ptr = arena_start;
+                    runtime.arena_size = arena_size;
+
+                    for entity_id in 0..entities_count {
+                        runtime.execute_logic_tick(entity_id as u16, bytecode);
+                    }
+                }
+            }
+        }
+
+        // Generate render commands into the back buffer.
+        let commands_ptr = unsafe { (*back_buffer_ptr).commands };
+        if commands_ptr.is_null() {
+            return;
+        }
+
+        let commands_slice = unsafe { std::slice::from_raw_parts_mut(commands_ptr, max_capacity) };
+
+        let mut write_idx = 0usize;
         for entity_id in 0..entities_count {
             let entity_ptr = unsafe { arena_start.add(entities_offset + entity_id * 64) };
-            let cmd = unsafe { &mut *(entity_ptr as *mut DartRenderCommand) };
+            let cmd = unsafe { &*(entity_ptr as *const DartRenderCommand) };
 
             if cmd.command_type == 0 {
                 continue;
             }
 
-            // Text commands (type 2) carry a pointer in their width/height
-            // fields, not geometry, so skip them for hit testing.
-            if cmd.command_type == 2 {
-                continue;
-            }
+            if write_idx < max_capacity {
+                commands_slice[write_idx] = *cmd;
 
-            if x >= cmd.x && x <= cmd.x + cmd.width && y >= cmd.y && y <= cmd.y + cmd.height {
-                unsafe {
-                    let speed_x_ptr = entity_ptr.add(24) as *mut f32;
-                    let speed_y_ptr = entity_ptr.add(28) as *mut f32;
-                    *speed_x_ptr = -(*speed_x_ptr);
-                    *speed_y_ptr = -(*speed_y_ptr);
+                // Union text command: command_type == 2 stores text metadata in
+                // x/y and a pointer to the Arena-resident TextPayload in width/height.
+                // This keeps the command array a homogeneous 24-byte stride.
+                if cmd.command_type == 2 {
+                    let str_offset = unsafe { *(entity_ptr.add(48) as *const u32) } as usize;
+                    let payload_size = std::mem::size_of::<TextPayload>();
 
-                    if cmd.color_rgba == 0xFF00FFCC {
-                        cmd.color_rgba = 0xFFFF00CC;
-                    } else if cmd.color_rgba == 0xFFFF00CC {
-                        cmd.color_rgba = 0xFF00FFCC;
-                    } else if cmd.color_rgba == 0xFFE0DCD3 {
-                        cmd.color_rgba = 0xFFFFFF00;
-                    } else if cmd.color_rgba == 0xFFFFFF00 {
-                        cmd.color_rgba = 0xFFE0DCD3;
-                    }
-                }
-            }
-        }
-    }
+                    if str_offset + payload_size <= arena_size {
+                        let text_payload_ptr =
+                            unsafe { arena_start.add(str_offset) as *mut TextPayload };
 
-    // 2. Load bytecode atomically and lock-free.
-    let bytecode_guard = get_bytecode_vm().load();
-    let bytecode: &[u8] = &bytecode_guard;
-
-    // 3. Run bytecode script inside the sandbox runtime.
-    {
-        // Acquire load matches the AcqRel swap in load_mhp_package, ensuring we
-        // see a fully initialised runtime and that the package loader sees our
-        // subsequent Arena reads complete before the pointer is reused.
-        let runtime_ptr = RUNTIME.load(Ordering::Acquire);
-        if !runtime_ptr.is_null() {
-            unsafe {
-                let runtime = &mut *runtime_ptr;
-                runtime.arena_start_ptr = arena_start;
-                runtime.arena_size = arena_size;
-
-                for entity_id in 0..entities_count {
-                    runtime.execute_logic_tick(entity_id as u16, bytecode);
-                }
-            }
-        }
-    }
-
-    // 4. Generate render commands into the back buffer.
-    let commands_ptr = unsafe { (*back_buffer_ptr).commands };
-    if commands_ptr.is_null() {
-        return;
-    }
-
-    let commands_slice = unsafe { std::slice::from_raw_parts_mut(commands_ptr, max_capacity) };
-
-    let mut write_idx = 0usize;
-    for entity_id in 0..entities_count {
-        let entity_ptr = unsafe { arena_start.add(entities_offset + entity_id * 64) };
-        let cmd = unsafe { &*(entity_ptr as *const DartRenderCommand) };
-
-        if cmd.command_type == 0 {
-            continue;
-        }
-
-        if write_idx < max_capacity {
-            commands_slice[write_idx] = *cmd;
-
-            // Union text command: command_type == 2 stores text metadata in
-            // x/y and a pointer to the Arena-resident TextPayload in width/height.
-            // This keeps the command array a homogeneous 24-byte stride.
-            if cmd.command_type == 2 {
-                let str_offset = unsafe { *(entity_ptr.add(48) as *const u32) } as usize;
-                let payload_size = std::mem::size_of::<TextPayload>();
-
-                if str_offset + payload_size <= arena_size {
-                    let text_payload_ptr =
-                        unsafe { arena_start.add(str_offset) as *mut TextPayload };
-
-                    // Synchronise the payload geometry with the entity so the
-                    // text moves with the simulation while the command buffer
-                    // remains a simple fixed-size array.
-                    unsafe {
-                        (*text_payload_ptr).x = cmd.x;
-                        (*text_payload_ptr).y = cmd.y;
-                        (*text_payload_ptr).font_size = cmd.width;
-                    }
-
-                    let text_bytes_ptr = unsafe { (text_payload_ptr as *mut u8).add(payload_size) };
-                    let mut text_len = 0usize;
-                    unsafe {
-                        let max_len = arena_size - str_offset - payload_size;
-                        while text_len < max_len && *text_bytes_ptr.add(text_len) != 0 {
-                            text_len += 1;
+                        // Synchronise the payload geometry with the entity so the
+                        // text moves with the simulation while the command buffer
+                        // remains a simple fixed-size array.
+                        unsafe {
+                            (*text_payload_ptr).x = cmd.x;
+                            (*text_payload_ptr).y = cmd.y;
+                            (*text_payload_ptr).font_size = cmd.width;
                         }
+
+                        let text_bytes_ptr = unsafe { (text_payload_ptr as *mut u8).add(payload_size) };
+                        let mut text_len = 0usize;
+                        unsafe {
+                            let max_len = arena_size - str_offset - payload_size;
+                            while text_len < max_len && *text_bytes_ptr.add(text_len) != 0 {
+                                text_len += 1;
+                            }
+                        }
+
+                        let payload_addr = text_payload_ptr as usize;
+                        commands_slice[write_idx].x = text_len as f32;
+                        commands_slice[write_idx].y = cmd.width; // style = font size
+                        commands_slice[write_idx].width = f32::from_bits(payload_addr as u32);
+                        commands_slice[write_idx].height = f32::from_bits((payload_addr >> 32) as u32);
                     }
 
-                    let payload_addr = text_payload_ptr as usize;
-                    commands_slice[write_idx].x = text_len as f32;
-                    commands_slice[write_idx].y = cmd.width; // style = font size
-                    commands_slice[write_idx].width = f32::from_bits(payload_addr as u32);
-                    commands_slice[write_idx].height = f32::from_bits((payload_addr >> 32) as u32);
+                    write_idx += 1;
+                } else {
+                    write_idx += 1;
                 }
-
-                write_idx += 1;
-            } else {
-                write_idx += 1;
             }
         }
-    }
 
-    unsafe {
-        (*back_buffer_ptr)
-            .command_count
-            .store(write_idx as u32, Ordering::Release);
-        (*bridge)
-            .commands_written
-            .store(write_idx as u32, Ordering::Release);
-    }
+        unsafe {
+            (*back_buffer_ptr)
+                .command_count
+                .store(write_idx as u32, Ordering::Release);
+            (*bridge)
+                .commands_written
+                .store(write_idx as u32, Ordering::Release);
+        }
 
-    let next_back = 1 - back_index;
-    unsafe {
-        (*bridge)
-            .atomic_back_index
-            .store(next_back, Ordering::Release);
+        let next_back = 1 - back_index;
+        unsafe {
+            (*bridge)
+                .atomic_back_index
+                .store(next_back, Ordering::Release);
+        }
     }
 }
 
@@ -1334,6 +1351,47 @@ mod tests {
             );
             std::thread::yield_now();
         }
+    }
+
+    #[test]
+    fn test_rwlock_concurrent_readers_block_writer() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+        use std::thread;
+        use std::time::Duration;
+
+        let lock = Arc::new(RwLock::new(()));
+        let writer_acquired = Arc::new(AtomicBool::new(false));
+
+        let lock_w = Arc::clone(&lock);
+        let writer_acquired_w = Arc::clone(&writer_acquired);
+
+        // Hold two read guards simultaneously.
+        let _read_guard_a = lock.read().unwrap();
+        let _read_guard_b = lock.read().unwrap();
+
+        // Spawn a writer while readers are still held.
+        let handle = thread::spawn(move || {
+            let _write_guard = lock_w.write().unwrap();
+            writer_acquired_w.store(true, Ordering::SeqCst);
+        });
+
+        // Give the writer time to wake up and contend.
+        thread::sleep(Duration::from_millis(50));
+        assert!(
+            !writer_acquired.load(Ordering::SeqCst),
+            "writer acquired the lock while readers were still held"
+        );
+
+        // Release the readers.
+        drop(_read_guard_a);
+        drop(_read_guard_b);
+
+        handle.join().unwrap();
+        assert!(
+            writer_acquired.load(Ordering::SeqCst),
+            "writer should have acquired the lock after readers were released"
+        );
     }
 }
 
