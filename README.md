@@ -1,6 +1,8 @@
-# Malphas v2.3
+# Malphas v2.3 — Onboarding v2.4
 
 A high-performance, terminal-inspired graphical engine with a modular Rust core and a passive Flutter frontend. The two sides communicate through a small, explicit C-ABI boundary and share memory directly instead of marshalling messages across an isolating bridge.
+
+> **Onboarding v2.4** closes the local development loop: a real `examples/bouncing_demo/` package is compiled by `malphas-cli`, the Flutter front-end discovers engines and packages from disk instead of using hard-coded mocks, and CI is blinded to native artifacts so tests run with the real `malphas_core` motor and CLI on every push.
 
 ## Architecture at a glance
 
@@ -279,20 +281,31 @@ cargo build --release
 # Run Rust tests
 cargo test --release
 
+# Check Rust formatting
+cargo fmt -- --check
+
 # Run Rust lints
 cargo clippy --release -- -D warnings
 
 # Cross-platform native core + CLI build (Linux, macOS, Windows Git Bash)
 ./build.sh
 
-# Flutter unit tests
+# Windows PowerShell equivalent
+.\build_core.ps1
+
+# Flutter analyze
+cd flutter_app && flutter analyze --no-fatal-infos --no-fatal-warnings
+
+# Flutter unit tests (expects malphas_core in flutter_app/motors/)
 cd flutter_app && flutter test
 
 # Flutter release build (example: Windows)
 cd flutter_app && flutter build windows --release
 ```
 
-The `./build.sh` script detects the host platform, builds `malphas_core` and `malphas_cli` from the workspace root, copies the resulting native library to `flutter_app/motors/` with a timestamped name, keeps the three most recent motors, and deploys the latest library plus its signature into existing Flutter build directories.
+The `./build.sh` script and `build_core.ps1` are kept in parity. They detect the host platform, build `malphas_core` and `malphas_cli` from the workspace root, copy the resulting native library to `flutter_app/motors/` with a timestamped name, keep the three most recent motors, copy the CLI executable into the same folder, and deploy a non-timestamped motor plus signature into existing Flutter build directories.
+
+When running Flutter tests locally or in CI, the dynamic linker must be able to find the native motor. On Linux this is done by exporting `LD_LIBRARY_PATH` to include `flutter_app/motors/`; on Windows the motor is picked up from the same directory automatically once copied.
 
 ## Repository layout
 
@@ -303,9 +316,23 @@ flutter_app/           Flutter UI, FFI bindings, package compiler wrapper
   lib/core/ffi/        Dart mirrors of Rust structs and the bindings class
   lib/core/compiler/   Dart wrapper that invokes malphas-cli
   lib/features/        Engine manager, package manager, workspace UI
+  motors/              Populated by build.sh / build_core.ps1; ignored by git
+examples/              Real Malphas packages (e.g., bouncing_demo)
+build.sh               Cross-platform Bash build script
+build_core.ps1         Windows PowerShell build script (parity with build.sh)
 .agents/AGENTS.md      Agent conventions, build commands and FFI safety rules
 .github/workflows/     CI/CD pipeline (Rust builds first, Flutter consumes artifacts)
 ```
+
+## CI/CD pipeline
+
+GitHub Actions is split into small, focused workflows that keep Rust and Flutter verification fast and deterministic:
+
+- `rust_ci.yml` — builds `malphas_core` and `malphas_cli` on Linux, macOS, and Windows, runs `cargo fmt --check`, `cargo clippy --release`, and `cargo test --release`, then uploads the CLI and native motor artifacts.
+- `flutter_ci.yml` — downloads the CLI artifact for the runner OS, downloads the matching native motor artifact, places both in `flutter_app/motors/`, exports `LD_LIBRARY_PATH` so the dynamic linker can find the motor, and runs `flutter test`.
+- `flutter_lint.yml` — downloads the native motor artifact, runs `flutter analyze --no-fatal-infos --no-fatal-warnings`, and verifies `dart format --set-exit-if-changed .`.
+
+Native binaries are intentionally not committed; they are produced by the build scripts or downloaded from CI artifacts. This keeps the repository small and guarantees that Flutter tests always exercise the current Rust build.
 
 ## Releases
 
