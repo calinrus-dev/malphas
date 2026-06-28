@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
-import 'dart:ffi' as dffi;
 import 'package:flutter/material.dart';
 import '../../core/compiler/package_compiler.dart';
 import '../../core/ffi/malphas_bindings.dart';
@@ -61,68 +60,71 @@ class _PackageConfigScreenState extends State<PackageConfigScreen> {
 
       final outputPathMhp = '${packagesDir.path}/mecatron.mhp';
       final outputPathMsp = '${packagesDir.path}/mecatron.msp';
-      
+
       await File(outputPathMhp).writeAsBytes(output.mhpBytes);
       await File(outputPathMsp).writeAsBytes(output.mspBytes);
 
       final bindings = MalphasBindings();
-      
-      // Load MHP first (this sets up static metadata, fonts, layouts, and embedded logic)
-      final loadResMhp = bindings.loadPack(outputPathMhp);
-      if (loadResMhp != 0) {
-        throw Exception('load_resource_pack (MHP) failed with error $loadResMhp');
-      }
 
-      // Hot-swap with standalone logic (.msp) to demonstrate dynamic loading
-      final loadResMsp = bindings.loadPack(outputPathMsp);
-      if (loadResMsp != 0) {
-        throw Exception('load_resource_pack (MSP) failed with error $loadResMsp');
-      }
+      // Pause the engine so entity setup cannot race the simulation tick.
+      bindings.pauseEngine(true);
+      try {
+        // Load MHP first (this sets up static metadata, fonts, layouts, and embedded logic)
+        final loadResMhp = bindings.loadPack(outputPathMhp);
+        if (loadResMhp != 0) {
+          throw Exception('load_resource_pack (MHP) failed with error $loadResMhp');
+        }
 
-      final arena = bindings.arena;
-      if (arena != dffi.nullptr) {
-        final arenaBytes = arena.cast<dffi.Uint8>().asTypedList(8 * 1024 * 1024);
-        final byteData = ByteData.view(arenaBytes.buffer, arenaBytes.offsetInBytes);
+        // Hot-swap with standalone logic (.msp) to demonstrate dynamic loading
+        final loadResMsp = bindings.loadPack(outputPathMsp);
+        if (loadResMsp != 0) {
+          throw Exception('load_resource_pack (MSP) failed with error $loadResMsp');
+        }
 
-        arena.cast<dffi.Uint32>()[4] = 2;
+        // Configure entities through the Rust-gated API instead of writing the
+        // Arena directly from Dart.
+        bindings.setEntitiesCount(2);
 
         const text = "MALPHAS LIVE CORE";
         final textBytes = utf8.encode(text);
-        for (int i = 0; i < textBytes.length; i++) {
-          arenaBytes[2048 + i] = textBytes[i];
-        }
-        arenaBytes[2048 + textBytes.length] = 0;
+        bindings.writeArenaString(2048, Uint8List.fromList([...textBytes, 0]));
 
-        final e0 = 32;
-        arenaBytes[e0 + 0] = 1; 
-        arenaBytes[e0 + 1] = 0; 
-        byteData.setFloat32(e0 + 4, 100.0, Endian.little); 
-        byteData.setFloat32(e0 + 8, 150.0, Endian.little); 
-        byteData.setFloat32(e0 + 12, 180.0, Endian.little); 
-        byteData.setFloat32(e0 + 16, 120.0, Endian.little); 
-        byteData.setUint32(e0 + 20, 0xFF00FFCC, Endian.little); 
-        byteData.setFloat32(e0 + 24, 4.0, Endian.little); 
-        byteData.setFloat32(e0 + 28, 3.0, Endian.little); 
-        byteData.setFloat32(e0 + 32, 20.0, Endian.little); 
-        byteData.setFloat32(e0 + 36, 800.0, Endian.little); 
-        byteData.setFloat32(e0 + 40, 20.0, Endian.little); 
-        byteData.setFloat32(e0 + 44, 860.0, Endian.little); 
+        bindings.configureEntity(
+          entityId: 0,
+          commandType: 1,
+          layer: 0,
+          x: 100.0,
+          y: 150.0,
+          width: 180.0,
+          height: 120.0,
+          colorRgba: 0xFF00FFCC,
+          speedX: 4.0,
+          speedY: 3.0,
+          minX: 20.0,
+          maxX: 800.0,
+          minY: 20.0,
+          maxY: 860.0,
+        );
 
-        final e1 = 96;
-        arenaBytes[e1 + 0] = 2; 
-        arenaBytes[e1 + 1] = 1; 
-        byteData.setFloat32(e1 + 4, 300.0, Endian.little); 
-        byteData.setFloat32(e1 + 8, 400.0, Endian.little); 
-        byteData.setFloat32(e1 + 12, 48.0, Endian.little); 
-        byteData.setFloat32(e1 + 16, 0.0, Endian.little);
-        byteData.setUint32(e1 + 20, 0xFFE0DCD3, Endian.little); 
-        byteData.setFloat32(e1 + 24, -3.5, Endian.little); 
-        byteData.setFloat32(e1 + 28, 2.5, Endian.little); 
-        byteData.setFloat32(e1 + 32, 20.0, Endian.little); 
-        byteData.setFloat32(e1 + 36, 450.0, Endian.little); 
-        byteData.setFloat32(e1 + 40, 20.0, Endian.little); 
-        byteData.setFloat32(e1 + 44, 880.0, Endian.little); 
-        byteData.setUint32(e1 + 48, 2048, Endian.little); 
+        bindings.configureEntity(
+          entityId: 1,
+          commandType: 2,
+          layer: 1,
+          x: 300.0,
+          y: 400.0,
+          width: 48.0,
+          height: 0.0,
+          colorRgba: 0xFFE0DCD3,
+          speedX: -3.5,
+          speedY: 2.5,
+          minX: 20.0,
+          maxX: 450.0,
+          minY: 20.0,
+          maxY: 880.0,
+          strOffset: 2048,
+        );
+      } finally {
+        bindings.pauseEngine(false);
       }
 
       setState(() {
@@ -172,7 +174,7 @@ class _PackageConfigScreenState extends State<PackageConfigScreen> {
               const SizedBox(height: 12),
               _buildField('PACKAGE NAME', 'Mecatron Geometry Core'),
               _buildField('GENERAL DESCRIPTION', 'Static structures mapped to raw native memory.'),
-              
+
               Wrap(
                 spacing: 12, runSpacing: 12,
                 children: [
@@ -181,10 +183,10 @@ class _PackageConfigScreenState extends State<PackageConfigScreen> {
                 ],
               ),
               const Divider(color: Colors.white10, height: 32),
-              
+
               const Text('REGISTERED OBJECTS (INTEGRAL ECOSYSTEM):', style: TextStyle(fontFamily: 'Arial', fontSize: 10, color: Colors.white24, fontWeight: FontWeight.bold)),
               const SizedBox(height: 12),
-              
+
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
@@ -204,7 +206,7 @@ class _PackageConfigScreenState extends State<PackageConfigScreen> {
                 )).toList(),
               ),
               const SizedBox(height: 32),
-              
+
               if (_statusMessage.isNotEmpty) ...[
                 Container(
                   width: double.infinity,

@@ -1,9 +1,12 @@
 import 'dart:ffi' as dffi;
 import 'package:flutter/material.dart';
-import 'package:ffi/ffi.dart' as ffi;
 import '../ffi/malphas_bindings.dart';
 import '../ffi/types.dart';
 
+/// A pure synchronous rasterizer backed by the native command buffer.
+///
+/// Wrapped in a [RepaintBoundary] so the 120 Hz paint phase is isolated from
+/// the rest of the widget tree and cannot trigger accidental re-layouts.
 class PrimitiveCanvas extends StatelessWidget {
   final MalphasBindings bindings;
   final Listenable repaintNotifier;
@@ -12,9 +15,11 @@ class PrimitiveCanvas extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return CustomPaint(
-      painter: EnginePainter(bindings, repaint: repaintNotifier),
-      child: const SizedBox.expand(),
+    return RepaintBoundary(
+      child: CustomPaint(
+        painter: EnginePainter(bindings, repaint: repaintNotifier),
+        child: const SizedBox.expand(),
+      ),
     );
   }
 }
@@ -32,9 +37,8 @@ class EnginePainter extends CustomPainter {
     final bufferPtr = bindings.commandBuffer;
     if (bufferPtr == null || bufferPtr == dffi.nullptr) return;
 
-    final buffer = bufferPtr.ref;
-    final count = buffer.commandCount;
-    final commands = buffer.commands;
+    final count = bindings.getCommandCount(bufferPtr);
+    final commands = bindings.getCommandsPointer(bufferPtr);
     if (commands == dffi.nullptr || count <= 0) return;
 
     // Bidirectional normalization over immutable virtual matrix 1000x1000
@@ -60,9 +64,13 @@ class EnginePainter extends CustomPainter {
           i += 1;
           break;
         case 2: // Text command (occupies 2 slots)
-          final pointerSlot = (commands + i + 1).cast<dffi.Pointer<ffi.Utf8>>().value;
-          _renderTextFromFonts(canvas, command, pointerSlot, scaleX, scaleY);
-          i += 2; // Critical skip
+          if (i + 1 < count) {
+            final pointerSlot = (commands + i + 1).cast<dffi.Pointer<dffi.Uint8>>().value;
+            _renderTextFromFonts(canvas, command, pointerSlot, scaleX, scaleY);
+            i += 2;
+          } else {
+            i += 1;
+          }
           break;
         default:
           i += 1;
@@ -74,11 +82,10 @@ class EnginePainter extends CustomPainter {
   void _renderTextFromFonts(
     Canvas canvas,
     DartRenderCommand command,
-    dffi.Pointer<ffi.Utf8> textPtr,
+    dffi.Pointer<dffi.Uint8> textPtr,
     double scaleX,
     double scaleY,
   ) {
-    final bindings = MalphasBindings();
     final atlasImage = bindings.fontAtlasImage;
     if (atlasImage == null || textPtr == dffi.nullptr) return;
 
@@ -99,10 +106,9 @@ class EnginePainter extends CustomPainter {
       ..color = Color(command.colorRgba)
       ..filterQuality = FilterQuality.low;
 
-    final dffi.Pointer<dffi.Uint8> bytes = textPtr.cast<dffi.Uint8>();
     int charIdx = 0;
     while (true) {
-      final charCode = bytes[charIdx];
+      final charCode = textPtr[charIdx];
       if (charCode == 0) break; // null-terminator
 
       final glyphOffset = metricsOffset + (charCode * 16);
@@ -139,5 +145,5 @@ class EnginePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant EnginePainter oldDelegate) => true;
+  bool shouldRepaint(covariant EnginePainter oldDelegate) => false;
 }

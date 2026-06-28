@@ -34,6 +34,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> with SingleTickerProv
   @override
   void dispose() {
     _ticker.dispose();
+    bindings.dispose();
     super.dispose();
   }
 

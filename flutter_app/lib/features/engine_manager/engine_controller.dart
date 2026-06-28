@@ -64,4 +64,12 @@ class EngineController {
     }
     return false;
   }
+
+  /// Reloads the native core from disk.  This tears down the current engine
+  /// thread, frees shared memory, discards any unlocked temp binaries, loads
+  /// the requested binary under a unique filename (bypassing the Dart/Windows
+  /// DLL cache), and reinitialises the FFI bridge.
+  void reloadNativeCore(String sourcePath) {
+    _bindings.reloadNativeLibrary(sourcePath);
+  }
 }

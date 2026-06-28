@@ -1,8 +1,8 @@
 # MALPHAS — Virtual Console Ecosystem
 
-A high-performance, language-agnostic virtual console and passive deployment server. Malphas radically separates the logic engine from the graphical renderer through a **Zero-Copy shared memory highway**, where the Flutter chassis acts as a pure synchronous rasterizer running at up to 120 Hz, reading geometric primitives directly from physical RAM via pointers and strict byte alignment (`#[repr(C)]`).
+A high-performance, language-agnostic virtual console and passive deployment server. Malphas separates the logic engine from the graphical renderer through a **zero-copy shared-memory highway**. The Flutter chassis is a pure synchronous rasterizer that reads geometric primitives directly from physical RAM via FFI pointers and strict byte alignment (`#[repr(C)]`).
 
-The intelligent layer — programmable in any language with a **C-ABI** (Rust, Zig, C++) — is completely free from GC penalties and serialization latency.
+The intelligent layer — programmable in any language with a **C-ABI** (Rust, Zig, C++) — is free from GC penalties and serialization latency.
 
 ---
 
@@ -27,18 +27,64 @@ The virtual canvas is a fixed, normalized **1000×1000 logical unit** coordinate
 
 ---
 
-## Zero-Copy Double Buffer Bridge
+## Single-Clock Pulse Engine
 
-To eliminate screen tearing and decouple the Flutter UI thread from the native engine's logic thread, FFI communication uses a **double command buffer** in shared physical RAM.
+The native runtime is driven by a single background simulation thread that pulses at **~120 Hz** (8.33 ms frame budget). Flutter does **not** drive the simulation; it only observes the committed render buffer.
 
-### C-ABI FFI Structures (`#[repr(C)]`)
+```
+Dart:  ticker ──► read atomic_back_index ──► draw front buffer
+                       │
+Rust:  sleep(8.33ms) ◄─┘
+       process_engine_tick_internal()
+         ├─ drain input queue
+         ├─ execute bytecode per entity
+         ├─ write render commands to back buffer
+         └─ atomic swap back/front index
+```
+
+### Lifecycle Guarantees
+
+* `init_engine` acquires `INIT_LOCK`, stops any previous simulation thread, and **spin-waits** on `ACTIVE_THREADS` until the old thread has truly exited. No arbitrary sleeps are used.
+* `shutdown_engine` signals the thread to stop and spin-waits until `ACTIVE_THREADS` reaches zero.
+* `ActiveThreadGuard` decrements `ACTIVE_THREADS` even if the thread panics, preventing leaked lifecycle state.
+
+---
+
+## Lock-Free Runtime
+
+### Double-Buffer Command Exchange
+
+The FFI bridge uses two command buffers in shared physical RAM. The engine writes to the **back buffer** while Flutter reads from the **front buffer**.
+
+```rust
+#[repr(C, align(16))]
+pub struct MalphasDoubleBufferBridge {
+    pub buffer_a: CoreCommandBuffer,
+    pub buffer_b: CoreCommandBuffer,
+    pub atomic_back_index: AtomicU8,
+    pub commands_written: AtomicU32,
+}
+```
+
+* `atomic_back_index` selects the back buffer with `Acquire`/`Release` ordering.
+* `commands_written` is a diagnostic counter also published with `Release` ordering.
+* Flutter reads the atomic index, then treats the opposite buffer as immutable and draws it through raw pointers.
+
+### Bytecode Hot-Swap
+
+Behaviour bytecode is stored in a lock-free `ArcSwap<Box<[u8]>>`. The simulation tick loads an `Arc` snapshot at frame start and executes from that immutable slice for the entire frame. Replacing the bytecode (via `load_resource_pack`) atomically swaps the `Arc` without blocking the engine or invalidating an in-flight tick.
+
+---
+
+## C-ABI FFI Structures (`#[repr(C)]`)
 
 ```rust
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct DartRenderCommand {
     pub command_type: u8,
     pub layer: u8,
-    pub pad: u16,       // 2-byte padding to align f32 to 4-byte boundaries
+    pub pad: u16,       // 2-byte padding to align f32 fields to 4-byte boundaries
     pub x: f32,
     pub y: f32,
     pub width: f32,
@@ -46,35 +92,112 @@ pub struct DartRenderCommand {
     pub color_rgba: u32,
 }
 
-#[repr(C)]
-pub struct MalphasDoubleBufferBridge {
-    pub buffer_a: CoreCommandBuffer,
-    pub buffer_b: CoreCommandBuffer,
-    pub atomic_back_index: std::sync::atomic::AtomicU8,
+#[repr(C, align(16))]
+pub struct CoreCommandBuffer {
+    pub command_count: AtomicU32,
+    pub commands: *mut DartRenderCommand,
 }
 ```
 
-### Synchronisation Mechanic
-1. **Allocation** — Flutter allocates the `MalphasDoubleBufferBridge` and two command arrays (2048 commands each), initialising `atomic_back_index` to `0`.
-2. **Native write** — The engine writes into the buffer pointed to by `atomic_back_index` (the *Back Buffer*).
-3. **Atomic commit** — On frame completion, the engine performs an atomic swap (`store` with `SeqCst` ordering).
-4. **Flutter read @ 120 Hz** — Flutter's hardware ticker reads the atomic index. The *Front Buffer* (not currently being written) is treated as immutable and drawn via raw pointers.
+* `DartRenderCommand` is 24 bytes with 4-byte alignment.
+* `CoreCommandBuffer` is 16 bytes with 16-byte alignment.
+* `MalphasDoubleBufferBridge` is 48 bytes with 16-byte alignment.
+
+These sizes and alignments are enforced by unit tests so layouts stay identical on x64, ARM64 and other strict architectures.
 
 ---
 
-## Binary Resource Package (`.malphas`)
+## Union Text Command
+
+`command_type == 2` is a **text command**. The text command occupies **two consecutive slots** in the command buffer:
+
+1. The first slot is a normal `DartRenderCommand` where:
+   * `x`, `y` define the baseline position in logical units.
+   * `width` is reused as the font size (32 px baseline).
+   * `color_rgba` is the text tint.
+2. The second slot stores a raw `*const u8` pointer to the null-terminated UTF-8 string in the Arena.
+
+```
+slot i:   DartRenderCommand { command_type=2, ..., width=font_size, color_rgba=tint }
+slot i+1: *const u8 ──► "MALPHAS LIVE CORE\0"
+```
+
+This union keeps the command stream compact while avoiding extra struct fields or serialization overhead. The rasterizer skips the pointer slot when advancing through the buffer.
+
+---
+
+## Safe Arena Helpers
+
+Direct Dart pointer writes into the shared Arena would race the simulation tick. Instead, all entity setup goes through Rust-gated helpers that acquire `ARENA_WRITE_LOCK`:
+
+| FFI Function | Purpose |
+|--------------|---------|
+| `set_entities_count(count)` | Write the live entity count. |
+| `write_arena_bytes(offset, ptr, len)` | Copy a byte blob into the Arena inside bounds. |
+| `set_entity(...)` | Write a full 64-byte entity record. |
+
+The engine tick also holds `ARENA_WRITE_LOCK` while reading entity state, so Dart setup and Rust simulation are mutually exclusive. Pause the engine around multi-step setup to avoid observing torn state between calls.
+
+### Entity Record Layout (64 bytes)
+
+| Offset | Size | Field | Description |
+|--------|------|-------|-------------|
+| `0` | 1 byte | `command_type` | 0 = inactive, 1 = rectangle, 2 = text |
+| `1` | 1 byte | `layer` | Draw order layer |
+| `4` | 4 bytes | `x` | Logical X position (f32) |
+| `8` | 4 bytes | `y` | Logical Y position (f32) |
+| `12` | 4 bytes | `width` | Width or font size (f32) |
+| `16` | 4 bytes | `height` | Height (f32) |
+| `20` | 4 bytes | `color_rgba` | Tint/Colour (u32) |
+| `24` | 4 bytes | `speed_x` | Horizontal velocity (f32) |
+| `28` | 4 bytes | `speed_y` | Vertical velocity (f32) |
+| `32` | 4 bytes | `min_x` | Left bounce bound (f32) |
+| `36` | 4 bytes | `max_x` | Right bounce bound (f32) |
+| `40` | 4 bytes | `min_y` | Top bounce bound (f32) |
+| `44` | 4 bytes | `max_y` | Bottom bounce bound (f32) |
+| `48` | 4 bytes | `str_offset` | Arena offset of the entity's text string |
+
+---
+
+## Aligned Native Allocator
+
+All shared buffers (bridge, command arrays, Arena) are allocated through the exported Rust allocator to guarantee **16-byte alignment** on ARM64:
+
+```rust
+#[no_mangle]
+pub extern "C" fn malphas_alloc(size: usize) -> *mut u8;
+
+#[no_mangle]
+pub extern "C" fn malphas_free(ptr: *mut u8, size: usize);
+```
+
+Dart must never use `ffi.calloc` for shared-memory buffers because the system allocator may only provide 8-byte alignment.
+
+---
+
+## Binary Resource Package (`.malphas` / `.mhp`)
+
+### MHP Header (`MhpHeader`, 112 bytes)
 
 | Offset | Type | Field | Description |
 |--------|------|-------|-------------|
 | `0` | `[u8; 4]` | `magic` | ASCII header: `'M', 'L', 'P', 'H'` |
-| `4` | `u32` | `manifest_size` | Size in bytes of the JSON manifest segment |
-| `8` | `u32` | `font_metrics_offset` | Start address of the glyph metrics table |
-| `12` | `u32` | `font_atlas_offset` | Start address of the A8 font atlas pixels |
-| `16` | `u32` | `table_of_jumps_offset` | Start address of the object jump directory |
-| `20` | `u32` | `table_of_jumps_size` | Total size of the jump table |
-| `24` | `u32` | `bytecode_offset` | Start address of the behaviour bytecode vector |
-| `28` | `u32` | `bytecode_size` | Size of the behaviour bytecode binary |
-| `32` | `[u8]` | `manifest_data` | Contiguous UTF-8 JSON configuration string |
+| `4` | `u32` | `version` | Package format version |
+| `8` | `u64` | `total_size` | Total package size in bytes |
+| `16` | `[u8; 32]` | `checksum` | SHA-256 over payload |
+| `48` | `[u8; 16]` | `pack_id` | UTF-8 package identifier |
+| `64` | `u16` | `canvas_width` | Virtual canvas width |
+| `66` | `u16` | `canvas_height` | Virtual canvas height |
+| `68` | `u32` | `font_metrics_offset` | Offset of glyph metrics table |
+| `72` | `u32` | `font_atlas_offset` | Offset of A8 font atlas pixels |
+| `76` | `u32` | `objects_table_offset` | Offset of object jump directory |
+| `80` | `u32` | `objects_table_count` | Number of object descriptors |
+| `84` | `u32` | `skins_offset` | Offset of skin/property data pool |
+| `88` | `u32` | `skins_size` | Size of skin/property data pool |
+| `92` | `u32` | `has_embedded_msp` | `1` if an MSP bytecode blob is embedded |
+| `96` | `u32` | `embedded_msp_offset` | Offset of embedded MSP bytecode |
+| `100` | `u32` | `embedded_msp_size` | Size of embedded MSP bytecode |
+| `104` | `[u8; 8]` | `padding` | Reserved / padding |
 
 ### Glyph Metrics Table
 Exactly 256 fixed 16-byte blocks (one per ASCII/extended byte value):
@@ -124,7 +247,7 @@ Behaviour logic is compiled into binary bytecode and interpreted by a micro-inte
 | `16` | 4 bytes | `entities_count` | Total number of logical entities registered in current execution |
 | `20` | 4 bytes | `font_metrics_offset` | Absolute offset of glyph metrics |
 | `24` | 4 bytes | `font_atlas_offset` | Absolute offset of font atlas pixels |
-| `28` | 4 bytes | `table_of_jumps_offset` | Absolute offset of the jump table |
+| `28` | 4 bytes | `objects_table_offset` | Absolute offset of the object jump table |
 
 ---
 
@@ -145,8 +268,15 @@ This compiles `malphas_core.dll` in release mode and copies it into the Flutter 
 
 ### 2. Run Unit Tests
 
+Rust:
 ```powershell
 cargo test --manifest-path malphas_core/Cargo.toml
+```
+
+Flutter:
+```powershell
+cd flutter_app
+flutter test
 ```
 
 ### 3. Launch the Virtual Console
@@ -157,6 +287,13 @@ flutter run -d windows
 ```
 
 Once running, open the **PACKS** tab, tap the gear icon to open **Package Config**, then press **COMPILE & HOT-SWAP (ZERO-COPY)**. This compiles the font atlas, injects the bytecode into the shared Arena, and begins rasterizing animated entities in real time at 120 Hz.
+
+### 4. Release Build
+
+```powershell
+cd flutter_app
+flutter build windows --release
+```
 
 ---
 
