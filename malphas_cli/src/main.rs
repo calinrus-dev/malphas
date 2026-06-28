@@ -553,6 +553,14 @@ fn decode_hex_32(s: &str) -> Result<[u8; 32], Box<dyn Error>> {
 }
 
 fn sign_file(file_path: &Path, private_key_hex: &str) -> Result<(), Box<dyn Error>> {
+    if private_key_hex.trim().is_empty() {
+        eprintln!(
+            "WARN: empty signing key for '{}'; skipping signature generation.",
+            file_path.display()
+        );
+        return Ok(());
+    }
+
     let seed = decode_hex_32(private_key_hex)?;
     let signing_key = SigningKey::from_bytes(&seed);
 
