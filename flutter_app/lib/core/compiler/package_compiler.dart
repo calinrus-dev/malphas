@@ -136,7 +136,8 @@ class MalphasPackageCompiler {
     // Fallback: search upward from the current directory.
     var current = Directory.current;
     for (var i = 0; i < 8; i++) {
-      final candidate = File(_join(current.path, 'assets', 'fonts', _fontFileName));
+      final candidate =
+          File(_join(current.path, 'assets', 'fonts', _fontFileName));
       if (candidate.existsSync()) return candidate;
       final parent = current.parent;
       if (parent.path == current.path) break;

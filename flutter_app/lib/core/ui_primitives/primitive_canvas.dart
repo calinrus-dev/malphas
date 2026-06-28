@@ -13,7 +13,8 @@ class PrimitiveCanvas extends StatelessWidget {
   final MalphasBindings bindings;
   final Listenable repaintNotifier;
 
-  const PrimitiveCanvas({super.key, required this.bindings, required this.repaintNotifier});
+  const PrimitiveCanvas(
+      {super.key, required this.bindings, required this.repaintNotifier});
 
   @override
   Widget build(BuildContext context) {
@@ -29,7 +30,8 @@ class PrimitiveCanvas extends StatelessWidget {
 class EnginePainter extends CustomPainter {
   final MalphasBindings bindings;
 
-  EnginePainter(this.bindings, {required Listenable repaint}) : super(repaint: repaint);
+  EnginePainter(this.bindings, {required Listenable repaint})
+      : super(repaint: repaint);
 
   /// Set to `true` to render a small frame-time overlay in the top-left corner.
   /// Disabled by default to avoid any overhead in production builds.
@@ -93,7 +95,8 @@ class EnginePainter extends CustomPainter {
           final paint = _textPaints.getPaint(colorRgba);
           final textPtr = _decodeTextPointer(commands + i);
           if (textPtr != dffi.nullptr) {
-            _renderTextFromFonts(canvas, command, textPtr, scaleX, scaleY, paint);
+            _renderTextFromFonts(
+                canvas, command, textPtr, scaleX, scaleY, paint);
           }
           i += 1;
           break;
@@ -141,11 +144,14 @@ class EnginePainter extends CustomPainter {
   /// `height` (high 32 bits) fields of a text command.  The fields are read as
   /// raw integers to avoid any NaN canonicalisation that could happen when
   /// round-tripping through Dart `double` values.
-  dffi.Pointer<dffi.Uint8> _decodeTextPointer(dffi.Pointer<DartRenderCommand> cmdPtr) {
+  dffi.Pointer<dffi.Uint8> _decodeTextPointer(
+      dffi.Pointer<DartRenderCommand> cmdPtr) {
     const widthOffset = 12; // offset of `width` inside DartRenderCommand
     const heightOffset = 16; // offset of `height` inside DartRenderCommand
-    final lowPtr = dffi.Pointer<dffi.Uint32>.fromAddress(cmdPtr.address + widthOffset);
-    final highPtr = dffi.Pointer<dffi.Uint32>.fromAddress(cmdPtr.address + heightOffset);
+    final lowPtr =
+        dffi.Pointer<dffi.Uint32>.fromAddress(cmdPtr.address + widthOffset);
+    final highPtr =
+        dffi.Pointer<dffi.Uint32>.fromAddress(cmdPtr.address + heightOffset);
     final address = lowPtr.value | (highPtr.value << 32);
     if (address == 0) return dffi.nullptr;
     return dffi.Pointer<dffi.Uint8>.fromAddress(address);
@@ -186,7 +192,8 @@ class EnginePainter extends CustomPainter {
       if (charCode == 0) break; // null-terminator
 
       final glyphOffset = metricsOffset + (charCode * 16);
-      final metricsData = (arenaStart.cast<dffi.Uint8>() + glyphOffset).cast<dffi.Uint16>();
+      final metricsData =
+          (arenaStart.cast<dffi.Uint8>() + glyphOffset).cast<dffi.Uint16>();
 
       final int gx = metricsData[1];
       final int gy = metricsData[2];
@@ -232,7 +239,8 @@ class _PaintCache {
   final Map<int, Paint> _cache = <int, Paint>{};
   final bool _filterQualityLow;
 
-  _PaintCache({bool filterQualityLow = false}) : _filterQualityLow = filterQualityLow;
+  _PaintCache({bool filterQualityLow = false})
+      : _filterQualityLow = filterQualityLow;
 
   Paint getPaint(int colorRgba) {
     Paint? paint = _cache.remove(colorRgba);

@@ -62,5 +62,7 @@ jobs:
       - name: Analyze
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
-      - name: Run tests (headless)
-        run: flutter test
+      - name: Run Flutter Tests with Native Context
+        run: |
+          export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${{ github.workspace }}/flutter_app/motors
+          flutter test

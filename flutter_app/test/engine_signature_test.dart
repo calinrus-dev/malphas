@@ -5,7 +5,9 @@ import 'package:malphas_app/features/engine_manager/engine_controller.dart';
 import 'package:malphas_app/features/engine_manager/models.dart';
 
 void main() {
-  test('Engine verification marks local DLL standby with .sig and corrupt without', () {
+  test(
+      'Engine verification marks local DLL standby with .sig and corrupt without',
+      () {
     final bindings = MalphasBindings();
     if (!bindings.isNativeAvailable) {
       // Skip when the native library cannot be loaded (headless CI).

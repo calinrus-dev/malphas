@@ -14,7 +14,8 @@ class WorkspaceScreen extends StatefulWidget {
   State<WorkspaceScreen> createState() => _WorkspaceScreenState();
 }
 
-class _WorkspaceScreenState extends State<WorkspaceScreen> with SingleTickerProviderStateMixin {
+class _WorkspaceScreenState extends State<WorkspaceScreen>
+    with SingleTickerProviderStateMixin {
   late final MalphasBindings bindings;
   late final Ticker _ticker;
   int _currentViewIndex = 0;
@@ -54,11 +55,14 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> with SingleTickerProv
                     return GestureDetector(
                       onTapDown: (details) {
                         final localPos = details.localPosition;
-                        final double logicalX = (localPos.dx / constraints.maxWidth) * 1000.0;
-                        final double logicalY = (localPos.dy / constraints.maxHeight) * 1000.0;
+                        final double logicalX =
+                            (localPos.dx / constraints.maxWidth) * 1000.0;
+                        final double logicalY =
+                            (localPos.dy / constraints.maxHeight) * 1000.0;
                         bindings.processInputEvent(0, logicalX, logicalY);
                       },
-                      child: PrimitiveCanvas(bindings: bindings, repaintNotifier: bindings),
+                      child: PrimitiveCanvas(
+                          bindings: bindings, repaintNotifier: bindings),
                     );
                   },
                 ),
@@ -67,7 +71,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> with SingleTickerProv
               ],
             ),
           ),
-          
+
           // BARRA SUPERIOR ANTIOVERFLOW (Scroll horizontal integrado si no caben las pestañas)
           Positioned(
             top: 40,
@@ -79,7 +83,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> with SingleTickerProv
                 IconButton(
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(),
-                  icon: const Icon(Icons.arrow_back_ios, size: 16, color: Colors.white),
+                  icon: const Icon(Icons.arrow_back_ios,
+                      size: 16, color: Colors.white),
                   onPressed: () => Navigator.of(context).pop(),
                 ),
                 const SizedBox(width: 8),
@@ -102,7 +107,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> with SingleTickerProv
               ],
             ),
           ),
-          
+
           if (!bindings.isNativeAvailable && _currentViewIndex == 0)
             Positioned(
               top: 90,
@@ -110,8 +115,16 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> with SingleTickerProv
               right: 16,
               child: Container(
                 padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(color: Colors.white.withOpacity(0.02), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.white10)),
-                child: const Text('CHASIS FFI: PASIVE SIMULATION CORE MODE', style: TextStyle(fontFamily: 'Courier', fontSize: 9, color: Color(0xffe0dcd3), fontWeight: FontWeight.bold)),
+                decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.02),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.white10)),
+                child: const Text('CHASIS FFI: PASIVE SIMULATION CORE MODE',
+                    style: TextStyle(
+                        fontFamily: 'Courier',
+                        fontSize: 9,
+                        color: Color(0xffe0dcd3),
+                        fontWeight: FontWeight.bold)),
               ),
             )
         ],
@@ -125,8 +138,17 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> with SingleTickerProv
       onTap: () => setState(() => _currentViewIndex = index),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: BoxDecoration(color: isSel ? const Color(0xffe0dcd3) : const Color(0xff0d0d0d), borderRadius: BorderRadius.circular(14), border: Border.all(color: isSel ? Colors.transparent : const Color(0xff1b1b1b))),
-        child: Text(label, style: TextStyle(fontFamily: 'Arial', fontSize: 10, fontWeight: FontWeight.bold, color: isSel ? Colors.black : const Color(0xffe0dcd3))),
+        decoration: BoxDecoration(
+            color: isSel ? const Color(0xffe0dcd3) : const Color(0xff0d0d0d),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+                color: isSel ? Colors.transparent : const Color(0xff1b1b1b))),
+        child: Text(label,
+            style: TextStyle(
+                fontFamily: 'Arial',
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+                color: isSel ? Colors.black : const Color(0xffe0dcd3))),
       ),
     );
   }

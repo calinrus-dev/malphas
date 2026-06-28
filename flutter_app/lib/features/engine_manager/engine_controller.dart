@@ -21,7 +21,8 @@ class EngineController {
       name: 'LIQUID Core v1.0',
       version: 'v1.0.0',
       runtime: NativeRuntime.rust,
-      binaryName: Platform.isWindows ? 'malphas_core.dll' : 'libmalphas_core.so',
+      binaryName:
+          Platform.isWindows ? 'malphas_core.dll' : 'libmalphas_core.so',
       sha256: '',
       allocatedMemoryBytes: 8388608,
       status: EngineStatus.unverified,
@@ -31,16 +32,15 @@ class EngineController {
   String activeEngineId = 'eng_liquid_01';
   final MalphasBindings _bindings = MalphasBindings();
 
-  MalphasEngine get activeEngine => engines.firstWhere((e) => e.id == activeEngineId);
+  MalphasEngine get activeEngine =>
+      engines.firstWhere((e) => e.id == activeEngineId);
   List<MalphasEngine> getAllEngines() => engines;
 
   /// Computes the SHA-256 hex digest of [file].
   String computeSha256(File file) {
     final bytes = file.readAsBytesSync();
     final digest = sha256.convert(bytes);
-    return digest.bytes
-        .map((b) => b.toRadixString(16).padLeft(2, '0'))
-        .join();
+    return digest.bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
   }
 
   void verifyEngineIntegrity(String id, [String? fullWorkspacePath]) {
@@ -89,7 +89,8 @@ class EngineController {
     }
 
     final signatureHex = sigFile.readAsStringSync().trim();
-    final result = _bindings.verifyEngine(targetPath, signatureHex, _enginePublicKeyHex);
+    final result =
+        _bindings.verifyEngine(targetPath, signatureHex, _enginePublicKeyHex);
 
     if (result == 0) {
       engines[index].status = EngineStatus.standby;
@@ -108,13 +109,16 @@ class EngineController {
     void addIfBinary(File file) {
       final path = file.path;
       final lower = path.toLowerCase();
-      if (lower.endsWith('.dll') || lower.endsWith('.so') || lower.endsWith('.dylib')) {
+      if (lower.endsWith('.dll') ||
+          lower.endsWith('.so') ||
+          lower.endsWith('.dylib')) {
         discovered.add(path);
       }
     }
 
     // 1. flutter_app/motors/malphas_core_*.{dll,so,dylib}
-    final motorsDir = Directory('$root${Platform.pathSeparator}flutter_app${Platform.pathSeparator}motors');
+    final motorsDir = Directory(
+        '$root${Platform.pathSeparator}flutter_app${Platform.pathSeparator}motors');
     if (motorsDir.existsSync()) {
       for (final entity in motorsDir.listSync()) {
         if (entity is File) {
@@ -127,7 +131,8 @@ class EngineController {
     }
 
     // 2. target/release/{malphas_core.dll,libmalphas_core.so,libmalphas_core.dylib}
-    final releaseDir = Directory('$root${Platform.pathSeparator}target${Platform.pathSeparator}release');
+    final releaseDir = Directory(
+        '$root${Platform.pathSeparator}target${Platform.pathSeparator}release');
     if (releaseDir.existsSync()) {
       final releaseNames = Platform.isWindows
           ? ['malphas_core.dll']
@@ -135,7 +140,8 @@ class EngineController {
               ? ['libmalphas_core.dylib']
               : ['libmalphas_core.so'];
       for (final name in releaseNames) {
-        final candidate = File('${releaseDir.path}${Platform.pathSeparator}$name');
+        final candidate =
+            File('${releaseDir.path}${Platform.pathSeparator}$name');
         if (candidate.existsSync()) {
           addIfBinary(candidate);
         }
@@ -179,7 +185,8 @@ class EngineController {
           name: 'LIQUID Core v1.0',
           version: 'v1.0.0',
           runtime: NativeRuntime.rust,
-          binaryName: Platform.isWindows ? 'malphas_core.dll' : 'libmalphas_core.so',
+          binaryName:
+              Platform.isWindows ? 'malphas_core.dll' : 'libmalphas_core.so',
           sha256: '',
           allocatedMemoryBytes: 8388608,
           status: EngineStatus.unverified,
@@ -192,7 +199,8 @@ class EngineController {
 
   bool hotSwapEngine(String id) {
     final target = engines.firstWhere((e) => e.id == id);
-    if (target.status == EngineStatus.standby || target.status == EngineStatus.active) {
+    if (target.status == EngineStatus.standby ||
+        target.status == EngineStatus.active) {
       activeEngineId = id;
       target.status = EngineStatus.active;
       return true;

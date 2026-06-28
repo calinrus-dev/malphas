@@ -16,7 +16,8 @@ final class DartRenderCommand extends Struct {
   external int layer;
 
   @Uint16()
-  external int pad; // 2-byte alignment padding to align f32 fields to 4-byte boundaries
+  external int
+      pad; // 2-byte alignment padding to align f32 fields to 4-byte boundaries
 
   @Float()
   external double x;
@@ -75,4 +76,3 @@ final class MalphasDoubleBufferBridge extends Struct {
   @Uint32()
   external int commandsWritten;
 }
-

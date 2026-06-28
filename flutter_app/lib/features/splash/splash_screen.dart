@@ -9,7 +9,8 @@ class MalphasSplashScreen extends StatefulWidget {
   State<MalphasSplashScreen> createState() => _MalphasSplashScreenState();
 }
 
-class _MalphasSplashScreenState extends State<MalphasSplashScreen> with SingleTickerProviderStateMixin {
+class _MalphasSplashScreenState extends State<MalphasSplashScreen>
+    with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
   final List<String> _letters = ['M', 'A', 'L', 'P', 'H', 'A', 'S'];
 
@@ -25,8 +26,10 @@ class _MalphasSplashScreenState extends State<MalphasSplashScreen> with SingleTi
       if (mounted) {
         Navigator.of(context).pushReplacement(
           PageRouteBuilder(
-            pageBuilder: (context, anim, secondaryAnim) => const MalphasHubScreen(),
-            transitionsBuilder: (context, anim, secondaryAnim, child) => FadeTransition(opacity: anim, child: child),
+            pageBuilder: (context, anim, secondaryAnim) =>
+                const MalphasHubScreen(),
+            transitionsBuilder: (context, anim, secondaryAnim, child) =>
+                FadeTransition(opacity: anim, child: child),
             transitionDuration: const Duration(milliseconds: 600),
           ),
         );
@@ -52,13 +55,16 @@ class _MalphasSplashScreenState extends State<MalphasSplashScreen> with SingleTi
             children: [
               Center(
                 child: Opacity(
-                  opacity: value < 0.8 ? (value / 0.8).clamp(0.0, 1.0) : (1.0 - (value - 0.8) / 0.2).clamp(0.0, 1.0),
+                  opacity: value < 0.8
+                      ? (value / 0.8).clamp(0.0, 1.0)
+                      : (1.0 - (value - 0.8) / 0.2).clamp(0.0, 1.0),
                   child: Stack(
                     alignment: Alignment.center,
                     children: List.generate(_letters.length, (index) {
-                      final angle = (index * (2 * math.pi / _letters.length)) + (value * 2 * math.pi);
+                      final angle = (index * (2 * math.pi / _letters.length)) +
+                          (value * 2 * math.pi);
                       // Las letras orbitan radialmente y colapsan hacia el centro (radio tiende a 0)
-                      final radius = (1.0 - value) * 120.0; 
+                      final radius = (1.0 - value) * 120.0;
                       final x = math.cos(angle) * radius;
                       final y = math.sin(angle) * radius;
 

@@ -56,7 +56,10 @@ class PackageController {
       if (bytes.length < 112) return null;
 
       // Verify magic header: 'MLPH'
-      if (bytes[0] != 0x4D || bytes[1] != 0x4C || bytes[2] != 0x50 || bytes[3] != 0x48) {
+      if (bytes[0] != 0x4D ||
+          bytes[1] != 0x4C ||
+          bytes[2] != 0x50 ||
+          bytes[3] != 0x48) {
         return null;
       }
 
@@ -94,7 +97,8 @@ class PackageController {
         name: 'MHP Pack ($packId)',
         version: 'v$version.0.0',
         author: 'Compiled Artifact',
-        description: 'Estructura binaria mapeada en zero-copy con cabeceras alineadas.',
+        description:
+            'Estructura binaria mapeada en zero-copy con cabeceras alineadas.',
         objects: parsedObjects,
       )..isLoaded = true;
     } catch (e) {
@@ -107,7 +111,8 @@ class PackageController {
   /// but its `.mhp` artifact is missing. Guards against a missing CLI and never
   /// fails silently.
   Future<void> _ensureBouncingDemoCompiled(String workspace) async {
-    final manifestFile = File('$workspace/examples/bouncing_demo/manifest.json');
+    final manifestFile =
+        File('$workspace/examples/bouncing_demo/manifest.json');
     final mhpFile = File('$workspace/examples/bouncing_demo/bouncing_demo.mhp');
 
     if (!manifestFile.existsSync() || mhpFile.existsSync()) {
@@ -134,7 +139,8 @@ class PackageController {
   }
 
   List<MalphasPackage> getAllPackages() => _registry;
-  List<MalphasPackage> getActivePackages() => _registry.where((p) => p.isLoaded).toList();
+  List<MalphasPackage> getActivePackages() =>
+      _registry.where((p) => p.isLoaded).toList();
   void injectPackage(MalphasPackage pack) => _registry.add(pack);
   void deletePackage(String id) => _registry.removeWhere((p) => p.id == id);
 }

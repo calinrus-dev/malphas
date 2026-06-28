@@ -5,10 +5,10 @@ import 'features/package_manager/package_controller.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   // Inicializar asíncronamente el gestor de paquetes persistentes en disco
   await PackageController().init();
-  
+
   runApp(const MalphasConsole());
 }
 
@@ -21,7 +21,8 @@ class MalphasConsole extends StatelessWidget {
       title: 'Malphas',
       theme: MalphasTheme.darkTheme,
       debugShowCheckedModeBanner: false,
-      home: const MalphasSplashScreen(), // Arranca directamente en el Splash interactivo
+      home:
+          const MalphasSplashScreen(), // Arranca directamente en el Splash interactivo
     );
   }
 }

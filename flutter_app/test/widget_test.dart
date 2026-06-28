@@ -33,10 +33,11 @@ void main() {
         // Offset is odd (e.g., 17, 33, 49, etc.)
         final oddOffset = (i * 16) + 1;
         if (oddOffset + 32 > totalSize) break;
-        
+
         // Access DartRenderCommand from unaligned memory offset
-        final cmdPtr = dffi.Pointer<DartRenderCommand>.fromAddress(ptr.address + oddOffset);
-        
+        final cmdPtr = dffi.Pointer<DartRenderCommand>.fromAddress(
+            ptr.address + oddOffset);
+
         // Write fields
         cmdPtr.ref.commandType = 2;
         cmdPtr.ref.layer = 1;
@@ -45,7 +46,7 @@ void main() {
         cmdPtr.ref.width = 50.0;
         cmdPtr.ref.height = 50.0;
         cmdPtr.ref.colorRgba = 0xFF112233;
-        
+
         // Read and assert values
         expect(cmdPtr.ref.commandType, equals(2));
         expect(cmdPtr.ref.layer, equals(1));
@@ -94,7 +95,8 @@ void main() {
 
     // 2. Write .mhp and .msp bytes to temporary files.
     final tmpDir = Directory.systemTemp.createTempSync('malphas_integration');
-    final mhpFile = File('${tmpDir.path}/test.mhp')..writeAsBytesSync(output.mhpBytes);
+    final mhpFile = File('${tmpDir.path}/test.mhp')
+      ..writeAsBytesSync(output.mhpBytes);
 
     // 3. Load the pack through the FFI bridge.
     final loadResult = bindings.loadPack(mhpFile.path);
