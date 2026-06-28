@@ -305,7 +305,7 @@ cd flutter_app && flutter build windows --release
 
 The `./build.sh` script and `build_core.ps1` are kept in parity. They detect the host platform, build `malphas_core` and `malphas_cli` from the workspace root, copy the resulting native library to `flutter_app/motors/` with a timestamped name, keep the three most recent motors, copy the CLI executable into the same folder, and deploy a non-timestamped motor plus signature into existing Flutter build directories.
 
-On Linux and macOS, `./build.sh` also deploys `libmalphas_core.so` into `flutter_app/android/app/src/main/jniLibs/arm64-v8a/` so the Android Gradle Plugin bundles the native motor into the APK/AAB automatically.
+On Linux and macOS, `./build.sh` also cross-compiles `libmalphas_core.so` for Android (`arm64-v8a`, `armeabi-v7a`, `x86_64`) when the `ANDROID_NDK_HOME` environment variable points to a valid Android NDK. The resulting libraries are placed in `flutter_app/android/app/src/main/jniLibs/<abi>/` so the Android Gradle Plugin bundles them into the APK/AAB automatically. The dedicated `android_build.yml` workflow performs the same cross-compilation on every push.
 
 When running Flutter tests locally or in CI, the dynamic linker must be able to find the native motor. On Linux this is done by exporting `LD_LIBRARY_PATH` to include `flutter_app/motors/`; on Windows the motor is picked up from the same directory automatically once copied. On Android, the motor is loaded from the bundled `jniLibs` via the standard platform search path.
 

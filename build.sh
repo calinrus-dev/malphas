@@ -182,4 +182,40 @@ for target in "${android_targets[@]}"; do
     ok "Copied Android library to: $target/$LIB_NAME"
 done
 
+# -----------------------------------------------------------------------------
+# Optional Android cross-compilation when the NDK is available.
+# -----------------------------------------------------------------------------
+build_android() {
+    local ndk="${ANDROID_NDK_HOME:-$ANDROID_NDK_ROOT}"
+    [ -n "$ndk" ] || return 0
+
+    local toolchain="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin"
+    if [ ! -d "$toolchain" ]; then
+        warn "Android NDK toolchain not found at $toolchain; skipping Android build."
+        return 0
+    fi
+
+    info "Android NDK detected; building multi-arch libraries..."
+    local abis=(
+        "arm64-v8a:aarch64-linux-android"
+        "armeabi-v7a:armv7-linux-androideabi"
+        "x86_64:x86_64-linux-android"
+    )
+    for entry in "${abis[@]}"; do
+        local abi="${entry%%:*}"
+        local target="${entry#*:}"
+        info "Building $abi ($target)..."
+        if ! cargo build --release --target "$target" --package malphas_core; then
+            warn "Failed to build $target; skipping."
+            continue
+        fi
+        local out="$ROOT/flutter_app/android/app/src/main/jniLibs/$abi"
+        mkdir -p "$out"
+        cp -f "$ROOT/target/$target/release/libmalphas_core.so" "$out/libmalphas_core.so"
+        ok "Copied Android library to: $out/libmalphas_core.so"
+    done
+}
+
+build_android
+
 ok "Build complete."

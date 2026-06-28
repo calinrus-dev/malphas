@@ -1,0 +1,13 @@
+# Android cross-compilation toolchains.
+# Expects ANDROID_NDK_HOME (or ANDROID_NDK_ROOT) to point to a valid NDK.
+# The LLVM toolchain binaries live under:
+#   $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/<host>/bin/
+
+[target.aarch64-linux-android]
+linker = "aarch64-linux-android21-clang"
+
+[target.armv7-linux-androideabi]
+linker = "armv7a-linux-androideabi21-clang"
+
+[target.x86_64-linux-android]
+linker = "x86_64-linux-android21-clang"

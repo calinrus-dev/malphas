@@ -151,7 +151,7 @@ Malphas shares memory between Dart and Rust. Breaking these rules causes crashes
 - They build the workspace in release mode, then copy the native motor into `flutter_app/motors/` using a timestamped filename (`malphas_core_YYYYMMDD_HHMMSS.<ext>`).
 - They keep only the three most recent timestamped motors plus their `.sig` files to avoid unbounded growth.
 - They also copy the CLI executable into `flutter_app/motors/` so Dart can invoke it, and deploy a non-timestamped copy of the motor plus signature to the workspace root and into existing Flutter build directories.
-- On Linux and macOS, `./build.sh` additionally deploys `libmalphas_core.so` into `flutter_app/android/app/src/main/jniLibs/arm64-v8a/` so Android builds bundle the motor automatically.
+- On Linux and macOS, `./build.sh` additionally cross-compiles `libmalphas_core.so` for Android (`arm64-v8a`, `armeabi-v7a`, `x86_64`) when `ANDROID_NDK_HOME` is set, deploying the results into `flutter_app/android/app/src/main/jniLibs/<abi>/`. The `.github/workflows/android_build.yml` workflow validates this on every push.
 - Neither script should leave the repository in a state that requires manual copying before `flutter test` or `flutter build` can succeed.
 
 ## 10. Workspace Auto-Load
