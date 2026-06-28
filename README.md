@@ -1,21 +1,43 @@
-# Malphas v2.2
+# Malphas v2.3
 
-A high-performance, terminal-inspired graphical engine with a Rust core and a Flutter frontend. The two sides communicate through a small, explicit C-ABI boundary and share memory directly instead of marshalling messages across an isolating bridge.
+A high-performance, terminal-inspired graphical engine with a modular Rust core and a passive Flutter frontend. The two sides communicate through a small, explicit C-ABI boundary and share memory directly instead of marshalling messages across an isolating bridge.
 
 ## Architecture at a glance
 
 ```
-Flutter (Dart)                Rust (malphas_core)
-------------------            -------------------
-Ticker / VSync --------------> trigger_engine_pulse()
-   |                                    |
-   |                            simulation thread
-   |                                    |
-   |                            double-buffer bridge
-   +<--------------------------- render commands
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  Flutter (Dart)                                                             │
+│  ─────────────                                                              │
+│  Ticker / VSync  ───────────────────────┐                                   │
+│  Reads front command buffer <───────────┤                                   │
+└─────────────────────────────────────────┼───────────────────────────────────┘
+                                          │
+                                          ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  malphas_core (Rust cdylib)                                                 │
+│  ──────────────────────────                                                 │
+│  ┌─────────┐ ┌─────┐ ┌────────┐ ┌─────────┐ ┌──────────┐                    │
+│  │ pipeline│ │ vm  │ │ bridge │ │ input   │ │ crypto   │                    │
+│  │         │ │     │ │        │ │         │ │          │                    │
+│  │ MHP/MSP │ │byte-│ │ double │ │ 256-evt │ │ Ed25519  │                    │
+│  │ loader  │ │code │ │ buffer │ │ queue   │ │ verify   │                    │
+│  └─────────┘ └─────┘ └────────┘ └─────────┘ └──────────┘                    │
+│                         │                                                   │
+│  C-ABI exports ◄────────┘                                                   │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                          ▲
+                                          │
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  malphas-cli (Rust executable)                                              │
+│  ─────────────────────────────                                              │
+│  compile manifest.json ──► <pack_id>.mhp + <pack_id>.msp                    │
+│  sign <file> <private_key_hex> ──► <file>.sig                               │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-Flutter owns the only clock. Every vertical sync it sends one pulse through `trigger_engine_pulse()`. The Rust simulation thread wakes up, drains pending input, executes one frame of bytecode logic, writes render commands into the back buffer, and flips the bridge. Flutter reads the front buffer on the next frame.
+Flutter owns the only clock and acts as a passive display server. Every vertical sync it sends one pulse through `trigger_engine_pulse()`. The Rust simulation thread wakes up, drains pending input, executes one frame of bytecode logic, writes render commands into the back buffer, and flips the bridge. Flutter reads the front buffer on the next frame.
+
+The `malphas-cli` compiler is a standalone Rust executable. It parses `manifest.json`, builds the font atlas, assembles the MHP/MSP binaries, and signs outputs with Ed25519. Dart's `MalphasPackageCompiler` is now a thin wrapper that locates the CLI and invokes it.
 
 This single-clock design eliminates drift between the Dart scheduler and the native simulation, keeps battery use low, and makes the engine trivially pausable by stopping the pulse.
 
@@ -39,11 +61,22 @@ pub struct DartRenderCommand {
 }
 ```
 
-- For a rectangle (`command_type == 1`) the float fields are geometry.
+| Bytes | Field |
+|-------|-------|
+| 0 | `command_type` |
+| 1 | `layer` |
+| 2–3 | `pad` |
+| 4–7 | `x` |
+| 8–11 | `y` |
+| 12–15 | `width` |
+| 16–19 | `height` |
+| 20–23 | `color_rgba` |
+
+- For a rectangle (`command_type == 1`) the `x`, `y`, `width`, and `height` fields are geometry.
 - For a text command (`command_type == 2`) the same bytes are reinterpreted:
   - `x` = text length in bytes
   - `y` = style / font size
-  - `width` / `height` = low / high 32 bits of a 64-bit pointer to a `TextPayload` in the Arena
+  - `width` / `height` = low / high 32 bits of a 64-bit `TextPayload` pointer in the Arena
 
 Keeping the command array homogeneous means the rasterizer can walk it with a fixed stride; text metadata lives in the Arena, not in the stream.
 
@@ -81,9 +114,11 @@ When freeing, pass the exact size that was originally requested so Rust can reco
 
 ## Resource packages: MHP and MSP
 
-Malphas packages are self-describing binary blobs with 16-byte aligned headers.
+Malphas packages are self-describing binary blobs with 16-byte aligned headers. The canonical producer is `malphas-cli compile <manifest.json>`.
 
 ### MHP — Malphas Host Package
+
+`MhpHeader` is 112 bytes, `#[repr(C, align(16))]`.
 
 ```rust
 #[repr(C, align(16))]
@@ -108,11 +143,59 @@ pub struct MhpHeader {
 }
 ```
 
+| Offset | Size | Field |
+|--------|------|-------|
+| 0 | 4 | `magic` `[u8; 4]` (`b"MLPH"`) |
+| 4 | 4 | `version` `u32` |
+| 8 | 8 | `total_size` `u64` |
+| 16 | 32 | `checksum` `[u8; 32]` (SHA-256) |
+| 48 | 16 | `pack_id` `[u8; 16]` |
+| 64 | 2 | `canvas_width` `u16` |
+| 66 | 2 | `canvas_height` `u16` |
+| 68 | 4 | `font_metrics_offset` `u32` |
+| 72 | 4 | `font_atlas_offset` `u32` |
+| 76 | 4 | `objects_table_offset` `u32` |
+| 80 | 4 | `objects_table_count` `u32` |
+| 84 | 4 | `skins_offset` `u32` |
+| 88 | 4 | `skins_size` `u32` |
+| 92 | 4 | `has_embedded_msp` `u32` |
+| 96 | 4 | `embedded_msp_offset` `u32` |
+| 100 | 4 | `embedded_msp_size` `u32` |
+| 104 | 4 | `padding` `[u8; 4]` |
+| **108** | **4** | *alignment padding to 16 bytes* |
+| **112** | | **total size** |
+
 The header is followed by the font metrics table, the alpha font atlas, the objects table, the data pool, and an optional embedded MSP payload. Every section is padded to a 16-byte boundary before the next section starts. The SHA-256 checksum covers everything after the header.
 
-The alpha font atlas is a 512x512 A8 texture. Dart converts it to `rgba8888` by filling RGB with white and using the stored alpha value as the alpha channel (`rgbaBytes[i * 4 + 3] = alpha`).
+#### `MhpObjectDescriptor` (32 bytes)
+
+```rust
+#[repr(C, align(16))]
+pub struct MhpObjectDescriptor {
+    pub object_id: u32,
+    pub properties_offset: u32,
+    pub properties_size: u32,
+    pub skins_offset: u32,
+    pub skins_size: u32,
+    pub padding: [u8; 12],
+}
+```
+
+| Offset | Size | Field |
+|--------|------|-------|
+| 0 | 4 | `object_id` `u32` |
+| 4 | 4 | `properties_offset` `u32` |
+| 8 | 4 | `properties_size` `u32` |
+| 12 | 4 | `skins_offset` `u32` |
+| 16 | 4 | `skins_size` `u32` |
+| 20 | 12 | `padding` `[u8; 12]` |
+| **32** | | **total size** |
+
+The alpha font atlas is a 512×512 A8 texture generated by `malphas-cli`. Dart converts it to `rgba8888` by filling RGB with white and using the stored alpha value as the alpha channel (`rgbaBytes[i * 4 + 3] = alpha`).
 
 ### MSP — Malphas Script Package
+
+`MspHeader` is 64 bytes, `#[repr(C, align(16))]`.
 
 ```rust
 #[repr(C, align(16))]
@@ -126,7 +209,29 @@ pub struct MspHeader {
 }
 ```
 
+| Offset | Size | Field |
+|--------|------|-------|
+| 0 | 4 | `magic` `[u8; 4]` (`b"MLPS"`) |
+| 4 | 4 | `version` `u32` |
+| 8 | 32 | `checksum` `[u8; 32]` (SHA-256) |
+| 40 | 4 | `bytecode_size` `u32` |
+| 44 | 4 | `entry_point` `u32` |
+| 48 | 16 | `padding` `[u8; 16]` |
+| **64** | | **total size** |
+
 MSP contains sandboxed bytecode for the entity VM. The checksum covers the bytecode payload only. MSP files can be loaded standalone or embedded inside an MHP file.
+
+## `malphas-cli` usage
+
+```bash
+# Compile a manifest into <pack_id>.mhp and <pack_id>.msp
+malphas-cli compile <manifest.json>
+
+# Sign any file with a 32-byte Ed25519 private key in hex
+malphas-cli sign <file> <private_key_hex>
+```
+
+The `sign` subcommand writes a 64-byte Ed25519 signature to `<file>.sig`. The core verifies these signatures when loading packages if signature checking is enabled.
 
 ## Runtime hot-swap
 
@@ -154,7 +259,7 @@ Engine startup and shutdown are serialised by `INIT_LOCK`. `shutdown_engine` dro
 
 ## Fuzzing and correctness
 
-The Rust test suite includes deterministic fuzz tests that exercise the bytecode VM with:
+The Rust workspace test suite includes deterministic fuzz tests that exercise the bytecode VM with:
 
 - 100,000 random bytecodes of varying length
 - truncated bytecodes
@@ -165,29 +270,38 @@ Unit tests also verify struct sizes and alignments, the 16-byte aligned allocato
 
 ## Build, test and release
 
-```powershell
-# Windows native core release
-powershell -ExecutionPolicy Bypass -File .\build_core.ps1
+All Rust commands are run from the workspace root:
 
-# Rust unit tests
-cargo test --manifest-path malphas_core/Cargo.toml --release
+```bash
+# Build the entire Rust workspace in release mode
+cargo build --release
+
+# Run Rust tests
+cargo test --release
+
+# Run Rust lints
+cargo clippy --release -- -D warnings
+
+# Cross-platform native core + CLI build (Linux, macOS, Windows Git Bash)
+./build.sh
 
 # Flutter unit tests
 cd flutter_app && flutter test
 
-# Windows release build
+# Flutter release build (example: Windows)
 cd flutter_app && flutter build windows --release
 ```
 
-The `build_core.ps1` script compiles `malphas_core.dll` and copies it to the project root, into `flutter_app/`, and into any existing Windows runner build directories.
+The `./build.sh` script detects the host platform, builds `malphas_core` and `malphas_cli` from the workspace root, copies the resulting native library to `flutter_app/motors/` with a timestamped name, keeps the three most recent motors, and deploys the latest library plus its signature into existing Flutter build directories.
 
 ## Repository layout
 
 ```
-malphas_core/          Rust cdylib, C-ABI exports, entity VM, package loader
-flutter_app/           Flutter UI, FFI bindings, package compiler
+malphas_core/          Rust cdylib, C-ABI exports, decoupled modules (pipeline/vm/bridge/input/crypto)
+malphas_cli/           Rust executable, package compiler and Ed25519 signer
+flutter_app/           Flutter UI, FFI bindings, package compiler wrapper
   lib/core/ffi/        Dart mirrors of Rust structs and the bindings class
-  lib/core/compiler/   MHP/MSP assembler and font-atlas generator
+  lib/core/compiler/   Dart wrapper that invokes malphas-cli
   lib/features/        Engine manager, package manager, workspace UI
 .agents/AGENTS.md      Agent conventions, build commands and FFI safety rules
 .github/workflows/     CI/CD pipeline (Rust builds first, Flutter consumes artifacts)
@@ -205,8 +319,8 @@ Tagged versions are built and published automatically by GitHub Actions. Pushing
 To publish a new version:
 
 ```bash
-git tag -a v2.2.1 -m "Release v2.2.1"
-git push origin v2.2.1
+git tag -a v2.3.0 -m "Release v2.3.0"
+git push origin v2.3.0
 ```
 
 After the workflow finishes, the release will be available on the repository's [Releases](../../releases) page.

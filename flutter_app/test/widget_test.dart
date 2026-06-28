@@ -22,7 +22,7 @@ void main() {
     }
 
     // Allocate a large contiguous block of memory
-    final totalSize = 256 * 1024;
+    const totalSize = 256 * 1024;
     final ptr = bindings.malphasAlloc(totalSize);
     expect(ptr, isNot(dffi.nullptr));
 
@@ -72,6 +72,11 @@ void main() {
 
     // 1. Compile a manifest with at least one rectangle and one text entity.
     final compiler = MalphasPackageCompiler();
+    if (!await compiler.isCliAvailable()) {
+      markTestSkipped('malphas-cli not available');
+      return;
+    }
+
     final manifest = {
       'pack_id': 'integration_test_pack',
       'objects': [
@@ -90,7 +95,6 @@ void main() {
     // 2. Write .mhp and .msp bytes to temporary files.
     final tmpDir = Directory.systemTemp.createTempSync('malphas_integration');
     final mhpFile = File('${tmpDir.path}/test.mhp')..writeAsBytesSync(output.mhpBytes);
-    final mspFile = File('${tmpDir.path}/test.msp')..writeAsBytesSync(output.mspBytes);
 
     // 3. Load the pack through the FFI bridge.
     final loadResult = bindings.loadPack(mhpFile.path);

@@ -29,12 +29,12 @@ jobs:
       - name: Place native library where MalphasBindings expects it
         shell: bash
         run: |
-          if [ -f native/libmalphas_core.so ]; then
-            cp native/libmalphas_core.so ../libmalphas_core.so
-          elif [ -f native/malphas_core.dll ]; then
-            cp native/malphas_core.dll ../malphas_core.dll
-          elif [ -f native/libmalphas_core.dylib ]; then
-            cp native/libmalphas_core.dylib ../libmalphas_core.dylib
+          if [ -f native/target/release/libmalphas_core.so ]; then
+            cp native/target/release/libmalphas_core.so ../libmalphas_core.so
+          elif [ -f native/target/release/malphas_core.dll ]; then
+            cp native/target/release/malphas_core.dll ../malphas_core.dll
+          elif [ -f native/target/release/libmalphas_core.dylib ]; then
+            cp native/target/release/libmalphas_core.dylib ../libmalphas_core.dylib
           fi
 
       - name: Set up Flutter

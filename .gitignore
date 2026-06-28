@@ -21,6 +21,7 @@ Thumbs.db
 *.dylib
 malphas_core.dll
 flutter_app/malphas_core.dll
+flutter_app/motors/
 
 # Temp zip and extraction files
 kanjivg.zip

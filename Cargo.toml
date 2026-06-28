@@ -1,0 +1,3 @@
+[workspace]
+members = ["malphas_core", "malphas_cli"]
+resolver = "2"

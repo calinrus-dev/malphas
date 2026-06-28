@@ -15,9 +15,6 @@ jobs:
       matrix:
         os: [windows-latest, ubuntu-latest, macos-14]
     runs-on: ${{ matrix.os }}
-    defaults:
-      run:
-        working-directory: malphas_core
     steps:
       - uses: actions/checkout@v4
 
@@ -27,7 +24,7 @@ jobs:
       - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: malphas_core
+          workspaces: "."
 
       - name: Check formatting
         run: cargo fmt -- --check
@@ -46,7 +43,7 @@ jobs:
         with:
           name: malphas_core-${{ matrix.os }}
           path: |
-            malphas_core/target/release/malphas_core.dll
-            malphas_core/target/release/libmalphas_core.so
-            malphas_core/target/release/libmalphas_core.dylib
+            target/release/malphas_core.dll
+            target/release/libmalphas_core.so
+            target/release/libmalphas_core.dylib
           if-no-files-found: ignore

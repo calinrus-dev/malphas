@@ -2,11 +2,11 @@
 $root = if ($PSScriptRoot) { $PSScriptRoot } else { Get-Location }
 
 Write-Host "Compilando Rust Core en modo Release..." -ForegroundColor Green
-Push-Location "$root/malphas_core"
-cargo build --release
+Push-Location "$root"
+cargo build --release --package malphas_core
 Pop-Location
 
-$dllSource = "$root/malphas_core/target/release/malphas_core.dll"
+$dllSource = "$root/target/release/malphas_core.dll"
 if (Test-Path $dllSource) {
     Write-Host "Copiando DLL a la raíz y a carpetas de Flutter..." -ForegroundColor Green
     Copy-Item $dllSource "$root/malphas_core.dll" -Force

@@ -1,4 +1,4 @@
-# Malphas Agent Instructions
+# Malphas Agent Instructions — v2.3
 
 These rules define the design language, build/test workflow, FFI safety constraints, and agent conventions of the Malphas project. All agents modifying code, documentation, or system mechanics must follow them.
 
@@ -29,27 +29,32 @@ Malphas functions and behaves like an immersive graphical terminal. It rejects s
 - Maintain the virtual coordinates matrix of `1000x1000` logical units and apply letterboxing to preserve aspect ratios on dynamic screens.
 - Flutter owns the only clock. The engine advances one tick per VSync via `trigger_engine_pulse()`. Do not add timers or sleeps in the Rust simulation thread.
 - The render command stream is a homogeneous array of 24-byte `DartRenderCommand` slots. Text commands pack length in `x`, style in `y`, and split the 64-bit `TextPayload` pointer across `width`/`height`.
+- `malphas_core` is a Rust `cdylib` with decoupled modules: `pipeline`, `vm`, `bridge`, `input`, and `crypto`. It exports a C-ABI boundary; Flutter is a passive display server that only pulses and reads the front buffer.
+- `malphas-cli` is the canonical package compiler and signer. Dart's `MalphasPackageCompiler` is a thin wrapper that invokes the CLI executable.
 
 ## 6. Build, Test & Release Commands
 
-Always verify changes with the relevant commands before finishing.
+Always verify changes with the relevant commands before finishing. All Rust commands run from the workspace root.
 
 | Target | Command |
 |--------|---------|
-| Build native core (release, Windows) | `powershell -ExecutionPolicy Bypass -File .\build_core.ps1` |
-| Rust unit tests | `cargo test --manifest-path malphas_core/Cargo.toml --release` |
-| Rust formatting check | `cargo fmt --manifest-path malphas_core/Cargo.toml -- --check` |
-| Rust Clippy | `cargo clippy --manifest-path malphas_core/Cargo.toml --release -- -D warnings` |
+| Build Rust workspace (release) | `cargo build --release` |
+| Rust unit tests | `cargo test --release` |
+| Rust formatting check | `cargo fmt -- --check` |
+| Rust Clippy | `cargo clippy --release -- -D warnings` |
+| Cross-platform native build | `./build.sh` |
 | Flutter unit tests | `cd flutter_app && flutter test` |
 | Flutter analyze | `cd flutter_app && flutter analyze --no-fatal-infos --no-fatal-warnings` |
-| Release Windows build | `cd flutter_app && flutter build windows --release` |
+| Flutter release build (Windows example) | `cd flutter_app && flutter build windows --release` |
 
-The `build_core.ps1` script compiles `malphas_core.dll` and copies it to the project root, `flutter_app/`, and any existing Windows runner build directories.
+The `./build.sh` script detects the host platform, builds `malphas_core` and `malphas_cli`, copies the native library into `flutter_app/motors/` with a timestamped name, keeps the three most recent motors, and deploys the latest library plus signature into existing Flutter build directories.
 
 When changing the C-ABI surface, run the full local verification sequence:
 
-```powershell
-cargo test --manifest-path malphas_core/Cargo.toml --release
+```bash
+cargo test --release
+cargo clippy --release -- -D warnings
+./build.sh
 cd flutter_app && flutter test
 cd flutter_app && flutter build windows --release
 ```
@@ -69,7 +74,7 @@ Malphas shares memory between Dart and Rust. Breaking these rules causes crashes
 ### 7.2 Struct Layout Stability
 
 - All C-ABI structs are `#[repr(C)]` and explicitly aligned to 16 bytes where required (`#[repr(C, align(16))]`).
-- Do **not** change field order, sizes, or alignment of `DartRenderCommand`, `CoreCommandBuffer`, `MalphasDoubleBufferBridge`, `MhpHeader`, `MhpObjectDescriptor`, `MspHeader`, or `TextPayload` without updating both Rust and Dart definitions and the layout tests in `malphas_core/src/lib.rs`.
+- Do **not** change field order, sizes, or alignment of `DartRenderCommand`, `CoreCommandBuffer`, `MalphasDoubleBufferBridge`, `MhpHeader`, `MhpObjectDescriptor`, `MspHeader`, or `TextPayload` without updating both Rust and Dart definitions and the layout tests in `malphas_core/src/lib.rs` and `malphas_cli/src/main.rs`.
 - Dart FFI struct mirrors live in `flutter_app/lib/core/ffi/types.dart` and must remain byte-compatible with the Rust side.
 
 ### 7.3 Pointer Delegates
@@ -124,16 +129,25 @@ Malphas shares memory between Dart and Rust. Breaking these rules causes crashes
 
 ## 8. Package Compiler Conventions
 
-- `MalphasPackageCompiler` lives in `flutter_app/lib/core/compiler/package_compiler.dart`.
+- The canonical compiler is `malphas-cli`, a Rust executable in `malphas_cli/`.
+- `MalphasPackageCompiler` in `flutter_app/lib/core/compiler/package_compiler.dart` is a thin wrapper that resolves the `malphas-cli` executable and invokes it with `compile <manifest.json>`.
+- The CLI produces `<pack_id>.mhp` and `<pack_id>.msp` next to the manifest.
 - All binary sections must be padded to 16-byte alignment before the next section starts.
-- Font atlas generation must extract the alpha channel with `rgbaBytes[i * 4 + 3]`. The CI enforces this pattern; do not change it without updating the linter check.
+- Font atlas generation and alpha extraction happen inside `malphas-cli`. The CLI emits a 512×512 A8 atlas; Dart converts it to `rgba8888` by filling RGB with white and using the stored alpha value as the alpha channel (`rgbaBytes[i * 4 + 3] = alpha`).
 
-## 9. Fuzzing and Correctness
+## 9. Unified Cross-Platform Build
 
-- The Rust crate contains deterministic fuzz tests for the bytecode VM. Do not disable or weaken them.
+- The `./build.sh` script is the unified, cross-platform replacement for `build_core.ps1` on Linux, macOS, and Windows (Git Bash).
+- It builds the workspace in release mode, then copies the native motor into `flutter_app/motors/` using a timestamped filename (`malphas_core_YYYYMMDD_HHMMSS.<ext>`).
+- It keeps only the three most recent timestamped motors plus their `.sig` files to avoid unbounded growth.
+- It also copies the CLI executable into `flutter_app/motors/` so Dart can invoke it, and deploys a non-timestamped copy of the motor plus signature to the workspace root and into existing Flutter build directories.
+
+## 10. Fuzzing and Correctness
+
+- The Rust workspace contains deterministic fuzz tests for the bytecode VM. Do not disable or weaken them.
 - When modifying the VM, Arena access helper, or package loader, consider adding new fuzz cases or unit tests that exercise edge conditions (truncated input, out-of-bounds jumps, misaligned access).
 
-## 10. Minimal, Surgical Changes
+## 11. Minimal, Surgical Changes
 
 - Preserve existing file and style conventions.
 - Do not refactor for style; only change what is necessary for the task.
