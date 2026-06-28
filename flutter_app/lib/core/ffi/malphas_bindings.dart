@@ -62,6 +62,8 @@ class MalphasBindings extends ChangeNotifier {
   late final void Function(dffi.Pointer<dffi.Uint8>, int) malphasFree;
   late final int Function(dffi.Pointer<dffi.Uint8>, int) loadResourcePackRaw;
   late final int Function(dffi.Pointer<ffi.Utf8>, dffi.Pointer<ffi.Utf8>) verifyBinaryIntegrity;
+  late final int Function(dffi.Pointer<ffi.Utf8>, dffi.Pointer<ffi.Utf8>, dffi.Pointer<ffi.Utf8>)
+      verifyEngineSignature;
   late final int Function(dffi.Pointer<ffi.Utf8>, dffi.Pointer<ffi.Utf8>) extractZipPackage;
   late final int Function(int) _pauseEngine;
 
@@ -237,6 +239,12 @@ class MalphasBindings extends ChangeNotifier {
     verifyBinaryIntegrity = _nativeLib
         .lookup<dffi.NativeFunction<dffi.Int32 Function(dffi.Pointer<ffi.Utf8>, dffi.Pointer<ffi.Utf8>)>>
             ('verify_binary_integrity')
+        .asFunction();
+    verifyEngineSignature = _nativeLib
+        .lookup<
+            dffi.NativeFunction<
+                dffi.Int32 Function(dffi.Pointer<ffi.Utf8>, dffi.Pointer<ffi.Utf8>,
+                    dffi.Pointer<ffi.Utf8>)>>('verify_engine_signature')
         .asFunction();
     extractZipPackage = _nativeLib
         .lookup<dffi.NativeFunction<dffi.Int32 Function(dffi.Pointer<ffi.Utf8>, dffi.Pointer<ffi.Utf8>)>>
@@ -491,6 +499,20 @@ class MalphasBindings extends ChangeNotifier {
     } finally {
       ffi.calloc.free(fPtr);
       ffi.calloc.free(sPtr);
+    }
+  }
+
+  int verifyEngine(String filepath, String signatureHex, String publicKeyHex) {
+    if (!isNativeAvailable) return 0;
+    final fPtr = filepath.toNativeUtf8();
+    final sPtr = signatureHex.toNativeUtf8();
+    final pPtr = publicKeyHex.toNativeUtf8();
+    try {
+      return verifyEngineSignature(fPtr, sPtr, pPtr);
+    } finally {
+      ffi.calloc.free(fPtr);
+      ffi.calloc.free(sPtr);
+      ffi.calloc.free(pPtr);
     }
   }
 

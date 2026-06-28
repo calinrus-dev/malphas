@@ -8,6 +8,12 @@ class EngineController {
 
   EngineController._internal();
 
+  // MALPHAS REINFORCED v2.2 Phase 6 — Ed25519 public key for engine
+  // signature verification. This is the test key generated for local builds.
+  // Public key hex: d6bb3217a16e68819a37f68488c4f3726bc97cdd8b7e7a5b15d77bcdf0e63dab
+  static const String _enginePublicKeyHex =
+      'd6bb3217a16e68819a37f68488c4f3726bc97cdd8b7e7a5b15d77bcdf0e63dab';
+
   final List<MalphasEngine> engines = [
     MalphasEngine(
       id: 'eng_liquid_01',
@@ -29,29 +35,39 @@ class EngineController {
 
   void verifyEngineIntegrity(String id, [String? fullWorkspacePath]) {
     final index = engines.indexWhere((e) => e.id == id);
-    if (index != -1) {
-      final engine = engines[index];
-      
-      // Resolve workspace root directory dynamically
-      final workspace = fullWorkspacePath ?? Directory.current.path;
-      
-      // Construct target paths
-      String targetPath = Platform.isWindows
-          ? "$workspace\\malphas_core\\target\\release\\${engine.binaryName}"
-          : "$workspace/malphas_core/target/release/${engine.binaryName}";
-          
-      // Check fallback location (e.g. root workspace or app folder) if release target doesn't exist
-      if (!File(targetPath).existsSync()) {
-        targetPath = Platform.isWindows ? "$workspace\\${engine.binaryName}" : "$workspace/${engine.binaryName}";
-      }
+    if (index == -1) return;
 
-      final result = _bindings.verifyBinary(targetPath, engine.sha256);
-      
-      if (result == 0 || File(targetPath).existsSync()) {
-        engines[index].status = EngineStatus.standby;
-      } else {
-        engines[index].status = EngineStatus.corrupt; // File not found or corrupt
-      }
+    final engine = engines[index];
+
+    // Resolve workspace root directory dynamically
+    final workspace = fullWorkspacePath ?? Directory.current.path;
+
+    // Construct target paths
+    String targetPath = Platform.isWindows
+        ? "$workspace\\malphas_core\\target\\release\\${engine.binaryName}"
+        : "$workspace/malphas_core/target/release/${engine.binaryName}";
+
+    // Check fallback location (e.g. root workspace or app folder) if release target doesn't exist
+    if (!File(targetPath).existsSync()) {
+      targetPath = Platform.isWindows ? "$workspace\\${engine.binaryName}" : "$workspace/${engine.binaryName}";
+    }
+
+    // MALPHAS REINFORCED v2.2 Phase 6 — Ed25519 signature verification.
+    // A companion .sig file must exist next to the engine binary.
+    final sigPath = '$targetPath.sig';
+    final sigFile = File(sigPath);
+    if (!sigFile.existsSync()) {
+      engines[index].status = EngineStatus.corrupt;
+      return;
+    }
+
+    final signatureHex = sigFile.readAsStringSync().trim();
+    final result = _bindings.verifyEngine(targetPath, signatureHex, _enginePublicKeyHex);
+
+    if (result == 0) {
+      engines[index].status = EngineStatus.standby;
+    } else {
+      engines[index].status = EngineStatus.corrupt;
     }
   }
 

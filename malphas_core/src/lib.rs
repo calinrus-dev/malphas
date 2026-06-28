@@ -12,6 +12,7 @@ use std::os::raw::c_char;
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicU64, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use sha2::{Digest, Sha256};
 use std::time::Instant;
 use zip::ZipArchive;
@@ -549,6 +550,68 @@ pub extern "C" fn verify_binary_integrity(
         0
     } else {
         1
+    }
+}
+
+/// Verifies an Ed25519 signature over the file at `filepath`.
+///
+/// `signature_hex` and `public_key_hex` must be lower-case ASCII hex strings
+/// representing a 64-byte signature and a 32-byte public key respectively.
+/// Returns 0 if the signature is valid, non-zero otherwise.
+#[no_mangle]
+pub extern "C" fn verify_engine_signature(
+    filepath: *const c_char,
+    signature_hex: *const c_char,
+    public_key_hex: *const c_char,
+) -> i32 {
+    let filepath_str = match c_str_to_str(filepath) {
+        Some(s) => s,
+        None => return -1,
+    };
+    let signature_hex_str = match c_str_to_str(signature_hex) {
+        Some(s) => s,
+        None => return -2,
+    };
+    let public_key_hex_str = match c_str_to_str(public_key_hex) {
+        Some(s) => s,
+        None => return -3,
+    };
+
+    let signature_bytes = match hex::decode(signature_hex_str.trim()) {
+        Ok(b) if b.len() == 64 => b,
+        _ => return -4,
+    };
+    let public_key_bytes: [u8; 32] = match hex::decode(public_key_hex_str.trim()) {
+        Ok(b) if b.len() == 32 => {
+            let mut arr = [0u8; 32];
+            arr.copy_from_slice(&b);
+            arr
+        }
+        _ => return -5,
+    };
+
+    let signature = match Signature::from_slice(&signature_bytes) {
+        Ok(s) => s,
+        Err(_) => return -6,
+    };
+    let public_key = match VerifyingKey::from_bytes(&public_key_bytes) {
+        Ok(k) => k,
+        Err(_) => return -7,
+    };
+
+    let mut file = match File::open(filepath_str) {
+        Ok(f) => f,
+        Err(_) => return -8,
+    };
+
+    let mut message = Vec::new();
+    if file.read_to_end(&mut message).is_err() {
+        return -9;
+    }
+
+    match public_key.verify(&message, &signature) {
+        Ok(_) => 0,
+        Err(_) => -10,
     }
 }
 
@@ -1339,6 +1402,56 @@ mod tests {
         std::fs::remove_file(temp_path).unwrap();
 
         assert_eq!(res, 0);
+    }
+
+    #[test]
+    fn test_verify_engine_signature_valid() {
+        use ed25519_dalek::{Signer, SigningKey};
+        use rand_core::OsRng;
+
+        let temp_path = std::path::Path::new("temp_test_engine.bin");
+        std::fs::write(temp_path, b"MALPHAS REINFORCED v2.2 Phase 6 engine").unwrap();
+
+        let data = b"MALPHAS REINFORCED v2.2 Phase 6 engine";
+        let signing_key = SigningKey::generate(&mut OsRng);
+        let signature = signing_key.sign(data);
+        let verifying_key = signing_key.verifying_key();
+
+        let filepath_c = std::ffi::CString::new(temp_path.to_str().unwrap()).unwrap();
+        let sig_hex = hex::encode(signature.to_bytes());
+        let pk_hex = hex::encode(verifying_key.to_bytes());
+        let sig_c = std::ffi::CString::new(sig_hex.as_str()).unwrap();
+        let pk_c = std::ffi::CString::new(pk_hex.as_str()).unwrap();
+
+        let res = verify_engine_signature(filepath_c.as_ptr(), sig_c.as_ptr(), pk_c.as_ptr());
+        std::fs::remove_file(temp_path).unwrap();
+
+        assert_eq!(res, 0);
+    }
+
+    #[test]
+    fn test_verify_engine_signature_invalid() {
+        use ed25519_dalek::{Signer, SigningKey};
+        use rand_core::OsRng;
+
+        let temp_path = std::path::Path::new("temp_test_engine_tampered.bin");
+        std::fs::write(temp_path, b"MALPHAS REINFORCED v2.2 Phase 6 engine").unwrap();
+
+        let data = b"MALPHAS REINFORCED v2.2 Phase 6 engine";
+        let signing_key = SigningKey::generate(&mut OsRng);
+        let signature = signing_key.sign(data);
+        let other_key = SigningKey::generate(&mut OsRng);
+
+        let filepath_c = std::ffi::CString::new(temp_path.to_str().unwrap()).unwrap();
+        let sig_hex = hex::encode(signature.to_bytes());
+        let pk_hex = hex::encode(other_key.verifying_key().to_bytes());
+        let sig_c = std::ffi::CString::new(sig_hex.as_str()).unwrap();
+        let pk_c = std::ffi::CString::new(pk_hex.as_str()).unwrap();
+
+        let res = verify_engine_signature(filepath_c.as_ptr(), sig_c.as_ptr(), pk_c.as_ptr());
+        std::fs::remove_file(temp_path).unwrap();
+
+        assert_ne!(res, 0);
     }
 
     #[test]
