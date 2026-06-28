@@ -11,8 +11,29 @@ class PackageController {
 
   final List<MalphasPackage> _registry = [];
 
+  /// Resolves the repository root. If the current working directory is
+  /// `flutter_app/`, walks up one level so that `examples/` and `packages/`
+  /// are found consistently in tests and CI.
+  static String resolveWorkspaceRoot() {
+    final current = Directory.current.path;
+    final separator = Platform.pathSeparator;
+    final parts = current.split(separator);
+    // Walk up the path components until we find the repository root marker
+    // (Cargo.toml) or the Malphas examples folder.
+    for (int i = parts.length; i > 0; i--) {
+      final candidate = parts.sublist(0, i).join(separator);
+      if (File('$candidate${separator}Cargo.toml').existsSync()) {
+        return candidate;
+      }
+      if (Directory('$candidate${separator}examples').existsSync()) {
+        return candidate;
+      }
+    }
+    return current;
+  }
+
   Future<void> init() async {
-    final workspace = Directory.current.path;
+    final workspace = resolveWorkspaceRoot();
     final packagesDir = Directory('$workspace/packages');
     if (!packagesDir.existsSync()) {
       packagesDir.createSync(recursive: true);

@@ -75,7 +75,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
 
   /// Searches the compiled package in `examples/` and `packages/`.
   Future<File?> _resolveMhpFile(String packId) async {
-    final workspace = Directory.current.path;
+    final workspace = PackageController.resolveWorkspaceRoot();
     final candidates = [
       File('$workspace/examples/bouncing_demo/$packId.mhp'),
       File('$workspace/examples/$packId/$packId.mhp'),

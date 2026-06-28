@@ -19,8 +19,19 @@ Thumbs.db
 *.dll
 *.so
 *.dylib
+*.sig
 malphas_core.dll
+malphas_core.dll.sig
+libmalphas_core.so
+libmalphas_core.so.sig
+libmalphas_core.dylib
+libmalphas_core.dylib.sig
 flutter_app/malphas_core.dll
+flutter_app/malphas_core.dll.sig
+flutter_app/libmalphas_core.so
+flutter_app/libmalphas_core.so.sig
+flutter_app/libmalphas_core.dylib
+flutter_app/libmalphas_core.dylib.sig
 flutter_app/motors/
 
 # Temp zip and extraction files

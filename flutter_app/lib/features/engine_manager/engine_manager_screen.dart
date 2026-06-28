@@ -121,7 +121,7 @@ class _EngineManagerPanelState extends State<EngineManagerPanel> {
                     subtitle: Padding(
                       padding: const EdgeInsets.only(top: 4),
                       child: Text(
-                          'Runtime: ${engine.runtimeLabel}\nStatus: $statusLabel\nHash: ${engine.sha256.substring(0, 16)}...',
+                          'Runtime: ${engine.runtimeLabel}\nStatus: $statusLabel\nHash: ${engine.sha256.length >= 16 ? '${engine.sha256.substring(0, 16)}...' : engine.sha256}',
                           style: const TextStyle(
                               fontFamily: 'Courier',
                               fontSize: 10,

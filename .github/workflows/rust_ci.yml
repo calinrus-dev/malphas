@@ -41,7 +41,7 @@ jobs:
       - name: Sign native engine with test key
         shell: bash
         env:
-          TEST_PRIVATE_KEY: 4246f84c82a737da1d31c4aa2011961eb09018a9070de39d3dc4e6db0062299d
+          TEST_SIGNING_KEY: ${{ secrets.TEST_SIGNING_KEY }}
         run: |
           CLI=./target/release/malphas-cli
           if [ -f "$CLI.exe" ]; then
@@ -49,7 +49,7 @@ jobs:
           fi
           for lib in target/release/libmalphas_core.so target/release/libmalphas_core.dylib target/release/malphas_core.dll; do
             if [ -f "$lib" ]; then
-              "$CLI" sign "$lib" "$TEST_PRIVATE_KEY"
+              "$CLI" sign "$lib" "$TEST_SIGNING_KEY"
             fi
           done
 
