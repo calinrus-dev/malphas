@@ -5,14 +5,17 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_call:
 
 jobs:
   rust-core:
+    if: github.event_name != 'workflow_call'
     uses: ./.github/workflows/rust_ci.yml
 
   build-windows:
     name: Flutter Windows release build
     needs: rust-core
+    if: always() && (needs.rust-core.result == 'success' || needs.rust-core.result == 'skipped')
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4

@@ -1,0 +1,60 @@
+name: Multiplatform Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  rust-core:
+    name: Build native core artifacts
+    uses: ./.github/workflows/rust_ci.yml
+
+  flutter-windows:
+    name: Build Flutter Windows release
+    needs: rust-core
+    uses: ./.github/workflows/flutter_windows_build.yml
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: [rust-core, flutter-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download native core artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/native
+          pattern: malphas_core-*
+          merge-multiple: false
+
+      - name: Download Flutter Windows app bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: malphas-app-windows
+          path: artifacts/malphas-app-windows
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release
+          # Native libraries: keep the per-platform directories produced by download-artifact
+          # and create a single zip for each platform so the release page is tidy.
+          for dir in artifacts/native/malphas_core-*; do
+            [ -d "$dir" ] || continue
+            base=$(basename "$dir")
+            zip -r "release/${base}.zip" "$dir"
+          done
+          # Windows app bundle
+          cd artifacts/malphas-app-windows
+          zip -r ../../release/malphas-app-windows.zip .
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true

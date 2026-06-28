@@ -193,6 +193,24 @@ flutter_app/           Flutter UI, FFI bindings, package compiler
 .github/workflows/     CI/CD pipeline (Rust builds first, Flutter consumes artifacts)
 ```
 
+## Releases
+
+Tagged versions are built and published automatically by GitHub Actions. Pushing a tag that starts with `v` triggers a release workflow that:
+
+1. Builds the native Rust core for Windows, Linux, and macOS.
+2. Builds the Flutter Windows release executable.
+3. Packages the native libraries and the Windows app bundle.
+4. Creates a GitHub Release and attaches the binaries.
+
+To publish a new version:
+
+```bash
+git tag -a v2.2.1 -m "Release v2.2.1"
+git push origin v2.2.1
+```
+
+After the workflow finishes, the release will be available on the repository's [Releases](../../releases) page.
+
 ## License
 
 MIT
