@@ -1,6 +1,6 @@
 {
-    "name": "malphas_app",
-    "short_name": "malphas_app",
+    "name": "malphas",
+    "short_name": "malphas",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

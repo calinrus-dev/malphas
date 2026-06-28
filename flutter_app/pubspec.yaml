@@ -10,6 +10,8 @@ dependencies:
   flutter:
     sdk: flutter
   ffi: ^2.1.2
+  archive: ^3.3.7
+  path_provider: ^2.1.1
 
 dev_dependencies:
   flutter_test:
@@ -18,3 +20,8 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  # Sección de recursos declarada para futura integración de assets del motor
+  assets:
+    - assets/fonts/
+    - assets/sprites/

@@ -31,7 +31,7 @@ $btnAll.FlatStyle = "Flat"
 $btnAll.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(60, 30, 30)
 
 $btnStruct.Add_Click({
-    $root = "C:\Users\calin\Desktop\malphas"
+    $root = if ($PSScriptRoot) { $PSScriptRoot } else { Get-Location }
     $items = Get-ChildItem -Path $root -Recurse | Where-Object {
         $_.FullName -notmatch "(\\target\\|\\build\\|\\\.dart_tool\\|\\\.git\\|\\\.idea\\|\\\.vscode\\)"
     }
@@ -47,7 +47,7 @@ $btnStruct.Add_Click({
 })
 
 $btnAll.Add_Click({
-    $root = "C:\Users\calin\Desktop\malphas"
+    $root = if ($PSScriptRoot) { $PSScriptRoot } else { Get-Location }
     $files = Get-ChildItem -Path $root -Recurse -File | Where-Object {
         $_.FullName -notmatch "(\\target\\|\\build\\|\\\.dart_tool\\|\\\.git\\|\\\.idea\\|\\\.vscode\\)" -and
         $_.Extension -match "(\.rs|\.toml|\.yaml|\.dart|gitignore|md)" -and

@@ -1,14 +1,8 @@
-.dart_tool/
-.flutter-plugins
-.flutter-plugins-dependencies
-.packages
-.pub-cache/
-.pub/
-build/
-*.g.dart
+# Rust build artifacts
 target/
 **/*.rs.bk
-Cargo.lock
+
+# IDE and Project configuration
 .idea/
 .vscode/
 *.suo
@@ -16,12 +10,20 @@ Cargo.lock
 *.njsproj
 *.sln
 *.swp
+
+# System files
 Thumbs.db
 .DS_Store
 
-# Generated platform folders (keep sources only)
-/flutter_app/android/
-/flutter_app/ios/
-/flutter_app/macos/
-/flutter_app/linux/
-/flutter_app/windows/
+# Malphas Core Compiled Binaries
+*.dll
+*.so
+*.dylib
+malphas_core.dll
+flutter_app/malphas_core.dll
+
+# Temp zip and extraction files
+kanjivg.zip
+kanjivg_extracted/
+packages/
+

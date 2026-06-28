@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 
 class MalphasTheme {
-  static const Color ink = Color(0xff000000);
-  static const Color slate = Color(0xff0d0d0d);
-  static const Color bone = Color(0xffe0dcd3);
-  static const Color mist = Color(0xff8a8a8a);
+  static const Color ink = Color(0xff000000); // Negro absoluto
+  static const Color slate = Color(0xff0d0d0d); // Antracita mate
+  static const Color bone = Color(0xffe0dcd3); // Hueso de alto contraste
+  static const Color borderAccent = Color(0xff1b1b1b); // Gris de contorno
+  static const Color mist = Color(0xff8a8a8a); // Datos secundarios
 
   static ThemeData get darkTheme {
     return ThemeData(
@@ -22,12 +23,36 @@ class MalphasTheme {
       textTheme: const TextTheme(
         headlineLarge: TextStyle(
           fontFamily: 'Georgia',
-          fontSize: 32,
+          fontSize: 28,
           fontWeight: FontWeight.w700,
           color: bone,
+          letterSpacing: -0.5,
         ),
-        titleMedium: TextStyle(fontFamily: 'Arial', fontSize: 14, color: bone),
-        bodyMedium: TextStyle(fontFamily: 'Arial', fontSize: 13, color: mist),
+        headlineMedium: TextStyle(
+          fontFamily: 'Georgia',
+          fontSize: 20,
+          fontWeight: FontWeight.w600,
+          color: bone,
+        ),
+        titleMedium: TextStyle(
+          fontFamily: 'Arial',
+          fontSize: 14,
+          fontWeight: FontWeight.w500,
+          color: bone,
+          letterSpacing: 0.2,
+        ),
+        bodyMedium: TextStyle(
+          fontFamily: 'Courier',
+          fontSize: 13,
+          color: mist,
+          height: 1.4,
+        ),
+        labelSmall: TextStyle(
+          fontFamily: 'Courier',
+          fontSize: 11,
+          fontWeight: FontWeight.bold,
+          color: bone,
+        ),
       ),
     );
   }
