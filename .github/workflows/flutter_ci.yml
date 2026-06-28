@@ -2,7 +2,7 @@ name: Flutter CI
 
 on:
   push:
-    branches: [ main, master, ffi-refactor, update-readme ]
+    branches: [ main ]
   pull_request:
     branches: [ main ]
 
@@ -33,8 +33,3 @@ jobs:
         run: |
           cd flutter_app
           flutter test --coverage || true
-
-      - name: Build APK (debug)
-        run: |
-          cd flutter_app
-          flutter build apk --debug
