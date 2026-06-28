@@ -95,10 +95,10 @@ unsafe impl Send for ResourcePackRuntime {}
 unsafe impl Sync for ResourcePackRuntime {}
 
 static RUNTIME: std::sync::Mutex<Option<ResourcePackRuntime>> = std::sync::Mutex::new(None);
-static BYTECODE_VM: std::sync::OnceLock<arc_swap::ArcSwap<Vec<u8>>> = std::sync::OnceLock::new();
+static BYTECODE_VM: std::sync::OnceLock<arc_swap::ArcSwap<Box<[u8]>>> = std::sync::OnceLock::new();
 
-fn get_bytecode_vm() -> &'static arc_swap::ArcSwap<Vec<u8>> {
-    BYTECODE_VM.get_or_init(|| arc_swap::ArcSwap::from(std::sync::Arc::new(Vec::new())))
+fn get_bytecode_vm() -> &'static arc_swap::ArcSwap<Box<[u8]>> {
+    BYTECODE_VM.get_or_init(|| arc_swap::ArcSwap::from(std::sync::Arc::new(Vec::new().into_boxed_slice())))
 }
 
 fn c_str_to_str<'a>(ptr: *const c_char) -> Option<&'a str> {
@@ -410,7 +410,7 @@ pub extern "C" fn load_resource_pack_raw(ptr: *const u8, size: u32) -> i32 {
             }
         }
 
-        let nuevo_bytecode = std::sync::Arc::new(bytecode);
+        let nuevo_bytecode = std::sync::Arc::new(bytecode.into_boxed_slice());
         get_bytecode_vm().store(nuevo_bytecode);
 
         let mut runtime = RUNTIME.lock().unwrap();
@@ -446,7 +446,7 @@ pub extern "C" fn load_resource_pack_raw(ptr: *const u8, size: u32) -> i32 {
         }
 
         let bytecode = buffer[payload_start..payload_end].to_vec();
-        let nuevo_bytecode = std::sync::Arc::new(bytecode);
+        let nuevo_bytecode = std::sync::Arc::new(bytecode.into_boxed_slice());
         get_bytecode_vm().store(nuevo_bytecode);
 
         0
@@ -500,7 +500,7 @@ fn process_engine_tick_internal() {
     if bridge_addr == 0 { return; }
 
     let bridge = unsafe { &mut *(bridge_addr as *mut MalphasDoubleBufferBridge) };
-    let back_index = bridge.atomic_back_index.load(Ordering::SeqCst);
+    let back_index = bridge.atomic_back_index.load(std::sync::atomic::Ordering::Acquire);
 
     let back_buffer = if back_index == 0 {
         &mut bridge.buffer_a
@@ -521,7 +521,7 @@ fn process_engine_tick_internal() {
 
         // Load bytecode atomically and lock-free
         let bytecode_guard = get_bytecode_vm().load();
-        let bytecode = &*bytecode_guard;
+        let bytecode = &***bytecode_guard;
 
         // 1. Run bytecode script inside the sandbox runtime
         {
@@ -585,12 +585,12 @@ fn process_engine_tick_internal() {
         }
         back_buffer.command_count = write_idx as u32;
         // Update atomic handshake written count
-        bridge.commands_written.store(write_idx as u32, Ordering::SeqCst);
+        bridge.commands_written.store(write_idx as u32, std::sync::atomic::Ordering::Release);
     }
 
     // 3. Swap atomic back index
     let next_back = 1 - back_index;
-    bridge.atomic_back_index.store(next_back, Ordering::SeqCst);
+    bridge.atomic_back_index.store(next_back, std::sync::atomic::Ordering::Release);
 }
 
 #[no_mangle]
