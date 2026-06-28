@@ -96,4 +96,4 @@ jobs:
       - name: Run Flutter Tests
         env:
           LD_LIBRARY_PATH: ${{ github.workspace }}/flutter_app/motors
-        run: flutter test --no-pub --coverage
+        run: flutter test
