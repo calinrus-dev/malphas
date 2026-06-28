@@ -9,10 +9,11 @@ use std::ffi::{c_void, CStr};
 use std::fs::File;
 use std::io::Read;
 use std::os::raw::c_char;
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicU8, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicU64, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use sha2::{Digest, Sha256};
+use std::time::Instant;
 use zip::ZipArchive;
 
 // ---------------------------------------------------------------------------
@@ -26,6 +27,25 @@ static MAX_COMMANDS_CAPACITY: AtomicU32 = AtomicU32::new(2048);
 static ENGINE_RUNNING: AtomicBool = AtomicBool::new(false);
 static ENGINE_PAUSED: AtomicBool = AtomicBool::new(false);
 static ACTIVE_THREADS: AtomicUsize = AtomicUsize::new(0);
+
+// ---------------------------------------------------------------------------
+// Lock-free telemetry counters for MALPHAS REINFORCED v2.2 Phase 5.
+// All values are written Relaxed and read from FFI without synchronising
+// engine state, so they add no contention on the hot path.
+// ---------------------------------------------------------------------------
+static TELEMETRY_ORIGIN: OnceLock<Instant> = OnceLock::new();
+static LAST_PULSE_MICROS: AtomicU64 = AtomicU64::new(0);
+static VM_TICK_MICROS: AtomicU64 = AtomicU64::new(0);
+static PULSE_LATENCY_MICROS: AtomicU64 = AtomicU64::new(0);
+static HIT_TESTS_COUNT: AtomicU64 = AtomicU64::new(0);
+static COMMANDS_GENERATED_COUNT: AtomicU64 = AtomicU64::new(0);
+
+fn telemetry_now_micros() -> u64 {
+    TELEMETRY_ORIGIN
+        .get_or_init(Instant::now)
+        .elapsed()
+        .as_micros() as u64
+}
 
 /// Sender end of the single-clock pulse channel.  Flutter's Ticker pushes one
 /// `()` message per vsync; the simulation thread blocks on `recv` between
@@ -335,6 +355,9 @@ pub extern "C" fn trigger_engine_pulse() -> i32 {
     if !ENGINE_RUNNING.load(Ordering::SeqCst) {
         return -1;
     }
+    // Timestamp the pulse as early as possible so latency reflects the time
+    // from Flutter's Ticker through the channel to the worker thread wake-up.
+    LAST_PULSE_MICROS.store(telemetry_now_micros(), Ordering::Relaxed);
     match PULSE_SENDER.lock() {
         Ok(guard) => {
             if let Some(sender) = guard.as_ref() {
@@ -433,6 +456,30 @@ pub extern "C" fn get_commands_written(bridge: *mut MalphasDoubleBufferBridge) -
         return 0;
     }
     unsafe { (*bridge).commands_written.load(Ordering::Acquire) }
+}
+
+// ---------------------------------------------------------------------------
+// Telemetry getters for MALPHAS REINFORCED v2.2 Phase 5.
+// These read Relaxed atomic counters updated on the engine thread.
+// ---------------------------------------------------------------------------
+#[no_mangle]
+pub extern "C" fn get_vm_tick_micros() -> u64 {
+    VM_TICK_MICROS.load(Ordering::Relaxed)
+}
+
+#[no_mangle]
+pub extern "C" fn get_pulse_latency_micros() -> u64 {
+    PULSE_LATENCY_MICROS.load(Ordering::Relaxed)
+}
+
+#[no_mangle]
+pub extern "C" fn get_hit_tests_count() -> u64 {
+    HIT_TESTS_COUNT.load(Ordering::Relaxed)
+}
+
+#[no_mangle]
+pub extern "C" fn get_commands_generated_count() -> u64 {
+    COMMANDS_GENERATED_COUNT.load(Ordering::Relaxed)
 }
 
 // ---------------------------------------------------------------------------
@@ -849,6 +896,17 @@ pub extern "C" fn process_engine_tick(_dt_micros: u64) -> i32 {
 // Background simulation tick.
 // ---------------------------------------------------------------------------
 fn process_engine_tick_internal() {
+    let tick_start_micros = telemetry_now_micros();
+    let last_pulse_micros = LAST_PULSE_MICROS.load(Ordering::Relaxed);
+    PULSE_LATENCY_MICROS.store(
+        tick_start_micros.saturating_sub(last_pulse_micros),
+        Ordering::Relaxed,
+    );
+
+    // Telemetry counters for this frame.  These are locals because the atomic
+    // stores happen once at the end of the tick.
+    let mut hit_tests_this_frame: u64 = 0;
+
     let bridge_addr = BRIDGE_ADDRESS.load(Ordering::SeqCst);
     if bridge_addr == 0 {
         return;
@@ -907,6 +965,7 @@ fn process_engine_tick_internal() {
                     continue;
                 }
 
+                hit_tests_this_frame += 1;
                 if x >= cmd.x && x <= cmd.x + cmd.width && y >= cmd.y && y <= cmd.y + cmd.height {
                     unsafe {
                         let speed_x_ptr = entity_ptr.add(24) as *mut f32;
@@ -944,6 +1003,7 @@ fn process_engine_tick_internal() {
         let entities_count = unsafe { *(arena_start.add(16) as *const u32) } as usize;
 
         // Run bytecode script inside the sandbox runtime.
+        let vm_start_micros = telemetry_now_micros();
         {
             // Acquire load matches the AcqRel swap in load_mhp_package, ensuring we
             // see a fully initialised runtime and that the package loader sees our
@@ -961,6 +1021,11 @@ fn process_engine_tick_internal() {
                 }
             }
         }
+        let vm_end_micros = telemetry_now_micros();
+        VM_TICK_MICROS.store(
+            vm_end_micros.saturating_sub(vm_start_micros),
+            Ordering::Relaxed,
+        );
 
         // Generate render commands into the back buffer.
         let commands_ptr = unsafe { (*back_buffer_ptr).commands };
@@ -1033,6 +1098,9 @@ fn process_engine_tick_internal() {
                 .commands_written
                 .store(write_idx as u32, Ordering::Release);
         }
+
+        HIT_TESTS_COUNT.store(hit_tests_this_frame, Ordering::Relaxed);
+        COMMANDS_GENERATED_COUNT.store(write_idx as u64, Ordering::Relaxed);
 
         let next_back = 1 - back_index;
         unsafe {
@@ -1351,6 +1419,16 @@ mod tests {
             );
             std::thread::yield_now();
         }
+    }
+
+    #[test]
+    fn test_telemetry_getters_return_zero_before_first_tick() {
+        // The engine is not running; all telemetry counters must report zero
+        // and the exported getters must be reachable symbols.
+        assert_eq!(get_vm_tick_micros(), 0);
+        assert_eq!(get_pulse_latency_micros(), 0);
+        assert_eq!(get_hit_tests_count(), 0);
+        assert_eq!(get_commands_generated_count(), 0);
     }
 
     #[test]

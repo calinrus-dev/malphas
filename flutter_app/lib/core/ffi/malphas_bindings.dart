@@ -5,6 +5,33 @@ import 'package:flutter/foundation.dart';
 import 'package:ffi/ffi.dart' as ffi;
 import 'types.dart';
 
+/// Immutable snapshot of the native engine telemetry counters.
+///
+/// All durations are in microseconds.  A zero value means either that the
+/// metric has not yet been sampled (e.g. the engine has not ticked) or that
+/// the counter is legitimately zero.
+class TelemetrySnapshot {
+  final int vmTickMicros;
+  final int pulseLatencyMicros;
+  final int hitTestsCount;
+  final int commandsGeneratedCount;
+
+  const TelemetrySnapshot({
+    required this.vmTickMicros,
+    required this.pulseLatencyMicros,
+    required this.hitTestsCount,
+    required this.commandsGeneratedCount,
+  });
+
+  @override
+  String toString() {
+    return 'TelemetrySnapshot(vmTickMicros: $vmTickMicros, '
+        'pulseLatencyMicros: $pulseLatencyMicros, '
+        'hitTestsCount: $hitTestsCount, '
+        'commandsGeneratedCount: $commandsGeneratedCount)';
+  }
+}
+
 /// Singleton FFI gateway to the Rust `malphas_core` cdylib.
 ///
 /// Design rules enforced here:
@@ -45,6 +72,12 @@ class MalphasBindings extends ChangeNotifier {
   late final int Function(dffi.Pointer<CoreCommandBuffer>) getCommandCount;
   late final dffi.Pointer<DartRenderCommand> Function(dffi.Pointer<CoreCommandBuffer>) getCommandsPointer;
   late final int Function(dffi.Pointer<MalphasDoubleBufferBridge>) getCommandsWritten;
+
+  // Telemetry getters for MALPHAS REINFORCED v2.2 Phase 5.
+  late final int Function() getVmTickMicros;
+  late final int Function() getPulseLatencyMicros;
+  late final int Function() getHitTestsCount;
+  late final int Function() getCommandsGeneratedCount;
 
   // Safe Arena setup helpers (Rust holds the write lock).
   late final int Function(int) setEntitiesCount;
@@ -238,6 +271,19 @@ class MalphasBindings extends ChangeNotifier {
             ('get_commands_written')
         .asFunction();
 
+    getVmTickMicros = _nativeLib
+        .lookup<dffi.NativeFunction<dffi.Uint64 Function()>>('get_vm_tick_micros')
+        .asFunction();
+    getPulseLatencyMicros = _nativeLib
+        .lookup<dffi.NativeFunction<dffi.Uint64 Function()>>('get_pulse_latency_micros')
+        .asFunction();
+    getHitTestsCount = _nativeLib
+        .lookup<dffi.NativeFunction<dffi.Uint64 Function()>>('get_hit_tests_count')
+        .asFunction();
+    getCommandsGeneratedCount = _nativeLib
+        .lookup<dffi.NativeFunction<dffi.Uint64 Function()>>('get_commands_generated_count')
+        .asFunction();
+
     setEntitiesCount = _nativeLib
         .lookup<dffi.NativeFunction<dffi.Int32 Function(dffi.Uint32)>>('set_entities_count')
         .asFunction();
@@ -369,6 +415,27 @@ class MalphasBindings extends ChangeNotifier {
         fontAtlasImage = img;
         notifyListeners();
       },
+    );
+  }
+
+  /// Reads the current telemetry counters from the native engine.
+  ///
+  /// Returns a zero-filled snapshot when the native library is unavailable,
+  /// so callers can safely call this every frame without branching.
+  TelemetrySnapshot readTelemetry() {
+    if (!isNativeAvailable) {
+      return const TelemetrySnapshot(
+        vmTickMicros: 0,
+        pulseLatencyMicros: 0,
+        hitTestsCount: 0,
+        commandsGeneratedCount: 0,
+      );
+    }
+    return TelemetrySnapshot(
+      vmTickMicros: getVmTickMicros(),
+      pulseLatencyMicros: getPulseLatencyMicros(),
+      hitTestsCount: getHitTestsCount(),
+      commandsGeneratedCount: getCommandsGeneratedCount(),
     );
   }
 

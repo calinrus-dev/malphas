@@ -116,6 +116,8 @@ class EnginePainter extends CustomPainter {
 
   void _drawFrameTimeOverlay(Canvas canvas) {
     final ms = _lastFrameMicros / 1000.0;
+    final telemetry = bindings.readTelemetry();
+
     final builder = ui.ParagraphBuilder(
       ui.ParagraphStyle(
         textAlign: TextAlign.left,
@@ -123,10 +125,14 @@ class EnginePainter extends CustomPainter {
       ),
     )
       ..pushStyle(ui.TextStyle(color: Colors.white))
-      ..addText('${ms.toStringAsFixed(2)} ms');
+      ..addText('frame ${ms.toStringAsFixed(2)} ms\n')
+      ..addText('vm ${telemetry.vmTickMicros} us\n')
+      ..addText('pulse ${telemetry.pulseLatencyMicros} us\n')
+      ..addText('hits ${telemetry.hitTestsCount}\n')
+      ..addText('cmds ${telemetry.commandsGeneratedCount}');
 
     final paragraph = builder.build()
-      ..layout(const ui.ParagraphConstraints(width: 120));
+      ..layout(const ui.ParagraphConstraints(width: 160));
 
     canvas.drawParagraph(paragraph, const Offset(8, 8));
   }
