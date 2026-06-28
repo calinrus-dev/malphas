@@ -1,0 +1,29 @@
+# Rust build artifacts
+target/
+**/*.rs.bk
+
+# IDE and Project configuration
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+
+# System files
+Thumbs.db
+.DS_Store
+
+# Malphas Core Compiled Binaries
+*.dll
+*.so
+*.dylib
+malphas_core.dll
+flutter_app/malphas_core.dll
+
+# Temp zip and extraction files
+kanjivg.zip
+kanjivg_extracted/
+packages/
+

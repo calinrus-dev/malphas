@@ -1,0 +1,29 @@
+name: Flutter Lint and Format
+
+on:
+  push:
+    branches: [ main, ffi-refactor ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  format-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 'stable'
+      - name: Install dependencies
+        run: |
+          cd flutter_app
+          flutter pub get
+      - name: Flutter format check
+        run: |
+          cd flutter_app
+          dart format --set-exit-if-changed .
+      - name: Flutter analyze
+        run: |
+          cd flutter_app
+          flutter analyze

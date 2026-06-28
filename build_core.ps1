@@ -1,0 +1,31 @@
+# build_core.ps1
+$root = if ($PSScriptRoot) { $PSScriptRoot } else { Get-Location }
+
+Write-Host "Compilando Rust Core en modo Release..." -ForegroundColor Green
+Push-Location "$root/malphas_core"
+cargo build --release
+Pop-Location
+
+$dllSource = "$root/malphas_core/target/release/malphas_core.dll"
+if (Test-Path $dllSource) {
+    Write-Host "Copiando DLL a la raíz y a carpetas de Flutter..." -ForegroundColor Green
+    Copy-Item $dllSource "$root/malphas_core.dll" -Force
+    Copy-Item $dllSource "$root/flutter_app/malphas_core.dll" -Force
+    
+    # Intentar copiar a carpetas de compilación de Windows de Flutter si existen
+    $debugPath = "$root/flutter_app/build/windows/x64/runner/Debug"
+    if (Test-Path $debugPath) {
+        Copy-Item $dllSource "$debugPath/malphas_core.dll" -Force
+        Write-Host "Copiando DLL a $debugPath" -ForegroundColor Green
+    }
+    
+    $releasePath = "$root/flutter_app/build/windows/x64/runner/Release"
+    if (Test-Path $releasePath) {
+        Copy-Item $dllSource "$releasePath/malphas_core.dll" -Force
+        Write-Host "Copiando DLL a $releasePath" -ForegroundColor Green
+    }
+    
+    Write-Host "Proceso completado con éxito." -ForegroundColor Cyan
+} else {
+    Write-Error "No se pudo encontrar el DLL compilado en $dllSource"
+}
