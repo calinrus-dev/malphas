@@ -352,9 +352,11 @@ Tagged versions are built and published automatically by GitHub Actions. Pushing
 To publish a new version:
 
 ```bash
-git tag -a v2.3.0 -m "Release v2.3.0"
-git push origin v2.3.0
+git tag -a v2.4.0 -m "Release v2.4.0"
+git push origin v2.4.0
 ```
+
+> **Note:** The release workflow depends on the repository secret `TEST_SIGNING_KEY` to sign the native engine artifacts. Make sure the secret is configured before pushing the tag.
 
 After the workflow finishes, the release will be available on the repository's [Releases](../../releases) page.
 

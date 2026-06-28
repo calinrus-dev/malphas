@@ -185,6 +185,7 @@ Malphas shares memory between Dart and Rust. Breaking these rules causes crashes
 - The Rust workspace version in `Cargo.toml` and the Flutter version in `flutter_app/pubspec.yaml` must remain in sync.
 - Use the workspace `version` key for both crates; do not override per-crate versions manually.
 - A version bump is a deliberate release action and must be accompanied by an updated tag and release notes.
+- Pushing a tag matching `v*` triggers `.github/workflows/release.yml`, which builds the Rust core for Windows/Linux/macOS, the Flutter Windows bundle, and creates a GitHub Release. Ensure `TEST_SIGNING_KEY` is set as a repository secret before publishing.
 
 ## 15. Dart Formatting
 
