@@ -2,10 +2,10 @@ use std::ffi::{c_void, CStr};
 use std::os::raw::c_char;
 use std::fs::File;
 use std::io::Read;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex, OnceLock};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicUsize, AtomicPtr, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use arc_swap::ArcSwap;
-use std::time::{Duration, Instant};
+
 use sha2::{Sha256, Digest};
 use zip::ZipArchive;
 
@@ -21,11 +21,11 @@ static ENGINE_RUNNING: AtomicBool = AtomicBool::new(false);
 static ENGINE_PAUSED: AtomicBool = AtomicBool::new(false);
 static ACTIVE_THREADS: AtomicUsize = AtomicUsize::new(0);
 
-/// Single-clock synchronisation primitive.  Flutter's Ticker is the only
-/// clock source; the Rust simulation thread waits on this condvar and is
-/// woken by `trigger_engine_pulse` once per vsync.
-static PULSE_CONDVAR: Condvar = Condvar::new();
-static PULSE_COUNTER: Mutex<u64> = Mutex::new(0);
+/// Sender end of the single-clock pulse channel.  Flutter's Ticker pushes one
+/// `()` message per vsync; the simulation thread blocks on `recv` between
+/// ticks.  Dropping the sender (during shutdown) wakes the receiver so the
+/// thread can exit cleanly.
+static PULSE_SENDER: Mutex<Option<std::sync::mpsc::Sender<()>>> = Mutex::new(None);
 
 /// Serialises `init_engine` re-initialisation so two FFI callers cannot race
 /// to spawn overlapping simulation threads.
@@ -57,11 +57,29 @@ pub struct DartRenderCommand {
     pub command_type: u8,
     pub layer: u8,
     pub pad: u16,
+    /// Logical union payload.  For `command_type == 1` this is the rectangle
+    /// geometry (`x`, `y`, `width`, `height`).  For `command_type == 2` the
+    /// same bytes are reinterpreted: `x` holds the text length, `y` holds the
+    /// text style/font size, and `width`/`height` hold the low/high 32 bits of
+    /// a pointer to a `TextPayload` in the Arena.  The struct stays 24 bytes
+    /// with 4-byte alignment so the command array remains homogeneous.
     pub x: f32,
     pub y: f32,
     pub width: f32,
     pub height: f32,
     pub color_rgba: u32,
+}
+
+/// In-Arena text object pointed to by text render commands.  The command only
+/// stores the pointer; geometry lives here so the double-buffered command
+/// array stays a homogeneous 24-byte stride.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct TextPayload {
+    pub x: f32,
+    pub y: f32,
+    pub font_size: f32,
+    // Null-terminated UTF-8 string bytes follow immediately in Arena memory.
 }
 
 #[repr(C, align(16))]
@@ -135,7 +153,11 @@ pub struct ResourcePackRuntime {
 unsafe impl Send for ResourcePackRuntime {}
 unsafe impl Sync for ResourcePackRuntime {}
 
-static RUNTIME: Mutex<Option<ResourcePackRuntime>> = Mutex::new(None);
+/// Live runtime pointer.  Stored as an atomic raw pointer so it can be
+/// hot-swapped during package loading without taking a lock on the simulation
+/// hot path. The tick `load`s it with `Acquire`; package loading `swap`s it
+/// with `AcqRel` while the engine is paused and the Arena write lock is held.
+static RUNTIME: AtomicPtr<ResourcePackRuntime> = AtomicPtr::new(std::ptr::null_mut());
 
 /// Lock-free, atomic single-writer / multi-reader bytecode container.
 ///
@@ -217,10 +239,10 @@ pub extern "C" fn init_engine(
         *(arena_start.add(16) as *mut u32) = 0;     // entities_count
     }
 
-    // 5. Reset the single-clock pulse counter so this engine session starts
-    //    from a clean synchronisation point.
-    if let Ok(mut counter) = PULSE_COUNTER.lock() {
-        *counter = 0;
+    // 5. Create a fresh single-clock pulse channel for this session.
+    let (pulse_tx, pulse_rx) = std::sync::mpsc::channel::<()>();
+    if let Ok(mut guard) = PULSE_SENDER.lock() {
+        *guard = Some(pulse_tx);
     }
 
     // 6. Start the background simulation thread.  It no longer has its own
@@ -228,27 +250,33 @@ pub extern "C" fn init_engine(
     ENGINE_PAUSED.store(false, Ordering::SeqCst);
     ENGINE_RUNNING.store(true, Ordering::SeqCst);
 
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel::<()>();
     ACTIVE_THREADS.fetch_add(1, Ordering::SeqCst);
     std::thread::spawn(move || {
         let _guard = ActiveThreadGuard;
-        let mut last_counter: u64 = 0;
+        // Signal that we are alive and about to enter the event loop.  This
+        // prevents `trigger_engine_pulse` from racing the worker startup.
+        let _ = ready_tx.send(());
 
         while ENGINE_RUNNING.load(Ordering::SeqCst) {
-            let mut counter = PULSE_COUNTER.lock().unwrap();
-            while *counter == last_counter && ENGINE_RUNNING.load(Ordering::SeqCst) {
-                counter = PULSE_CONDVAR.wait(counter).unwrap();
-            }
-            if !ENGINE_RUNNING.load(Ordering::SeqCst) {
-                break;
-            }
-            last_counter = *counter;
-            drop(counter);
-
-            if !ENGINE_PAUSED.load(Ordering::SeqCst) {
-                process_engine_tick_internal();
+            match pulse_rx.recv() {
+                Ok(()) => {
+                    if !ENGINE_RUNNING.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    if !ENGINE_PAUSED.load(Ordering::SeqCst) {
+                        process_engine_tick_internal();
+                    }
+                }
+                Err(_) => break,
             }
         }
     });
+
+    // Block until the worker has entered its event loop.  Real callers never
+    // pulse before `init_engine` returns, so this only costs one context
+    // switch during app startup.
+    let _ = ready_rx.recv();
 
     0
 }
@@ -257,15 +285,24 @@ pub extern "C" fn init_engine(
 pub extern "C" fn shutdown_engine() -> i32 {
     let _init_guard = INIT_LOCK.lock();
     ENGINE_RUNNING.store(false, Ordering::SeqCst);
-    // Wake the simulation thread so it observes the stop signal and exits
-    // without waiting for the next vsync pulse.
-    PULSE_CONDVAR.notify_all();
+    // Drop the pulse sender so the simulation thread's `recv` returns an Err
+    // and the thread exits without waiting for the next vsync pulse.
+    if let Ok(mut guard) = PULSE_SENDER.lock() {
+        *guard = None;
+    }
     // Spin-wait (no sleep) until the background thread exits.
     while ACTIVE_THREADS.load(Ordering::SeqCst) > 0 {
         std::thread::yield_now();
     }
     BRIDGE_ADDRESS.store(0, Ordering::SeqCst);
     ARENA_ADDRESS.store(0, Ordering::SeqCst);
+
+    // By now the simulation thread has exited (ACTIVE_THREADS == 0), so no
+    // reader can observe the old runtime. Swap it out and drop it.
+    let old_ptr = RUNTIME.swap(std::ptr::null_mut(), Ordering::Acquire);
+    if !old_ptr.is_null() {
+        unsafe { drop(Box::from_raw(old_ptr)); }
+    }
     0
 }
 
@@ -273,6 +310,27 @@ pub extern "C" fn shutdown_engine() -> i32 {
 pub extern "C" fn pause_engine(paused: i32) -> i32 {
     ENGINE_PAUSED.store(paused != 0, Ordering::SeqCst);
     0
+}
+
+/// Trigger one engine tick from Flutter's Ticker (single-clock sync).
+/// Sends one `()` message through the pulse channel.  If the simulation
+/// thread is blocked on `recv` it wakes immediately; if it is busy the
+/// message sits in the channel buffer until the next loop iteration.
+#[no_mangle]
+pub extern "C" fn trigger_engine_pulse() -> i32 {
+    if !ENGINE_RUNNING.load(Ordering::SeqCst) {
+        return -1;
+    }
+    match PULSE_SENDER.lock() {
+        Ok(guard) => {
+            if let Some(sender) = guard.as_ref() {
+                if sender.send(()).is_ok() { 0 } else { -4 }
+            } else {
+                -3 // channel not yet initialised
+            }
+        }
+        Err(_) => -2,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -653,11 +711,25 @@ fn load_mhp_package(buffer: &[u8]) -> i32 {
     let nuevo_bytecode = Arc::new(bytecode.into_boxed_slice());
     get_bytecode_vm().store(nuevo_bytecode);
 
-    let mut runtime = RUNTIME.lock().unwrap();
-    *runtime = Some(ResourcePackRuntime {
+    // Build the new runtime on the heap; the old one will be dropped after the
+    // engine has been paused and the atomic pointer swapped with AcqRel.
+    let new_runtime = Box::new(ResourcePackRuntime {
         arena_start_ptr: arena_addr as *mut u8,
         arena_size,
     });
+    let new_ptr = Box::into_raw(new_runtime);
+
+    pause_engine(1);
+    {
+        // Wait (block) until any in-flight tick has released the Arena write
+        // lock, which guarantees the old runtime is no longer in use.
+        let _guard = ARENA_WRITE_LOCK.lock();
+        let old_ptr = RUNTIME.swap(new_ptr, Ordering::AcqRel);
+        if !old_ptr.is_null() {
+            unsafe { drop(Box::from_raw(old_ptr)); }
+        }
+    }
+    pause_engine(0);
 
     0
 }
@@ -708,6 +780,9 @@ pub extern "C" fn load_resource_pack(filepath: *const c_char) -> i32 {
     }
 
     let size = buffer.len();
+    // Copy the file into a Rust-allocated buffer so `load_resource_pack_raw`
+    // receives memory with the same 16-byte alignment guarantees as Dart shared
+    // buffers. The allocation is freed immediately after parsing.
     let ptr = malphas_alloc(size);
     if ptr.is_null() {
         return -4;
@@ -786,6 +861,12 @@ fn process_engine_tick_internal() {
                 continue;
             }
 
+            // Text commands (type 2) carry a pointer in their width/height
+            // fields, not geometry, so skip them for hit testing.
+            if cmd.command_type == 2 {
+                continue;
+            }
+
             if x >= cmd.x && x <= cmd.x + cmd.width && y >= cmd.y && y <= cmd.y + cmd.height {
                 unsafe {
                     let speed_x_ptr = entity_ptr.add(24) as *mut f32;
@@ -813,13 +894,19 @@ fn process_engine_tick_internal() {
 
     // 3. Run bytecode script inside the sandbox runtime.
     {
-        let mut runtime_opt = RUNTIME.lock().unwrap();
-        if let Some(ref mut runtime) = *runtime_opt {
-            runtime.arena_start_ptr = arena_start;
-            runtime.arena_size = arena_size;
+        // Acquire load matches the AcqRel swap in load_mhp_package, ensuring we
+        // see a fully initialised runtime and that the package loader sees our
+        // subsequent Arena reads complete before the pointer is reused.
+        let runtime_ptr = RUNTIME.load(Ordering::Acquire);
+        if !runtime_ptr.is_null() {
+            unsafe {
+                let runtime = &mut *runtime_ptr;
+                runtime.arena_start_ptr = arena_start;
+                runtime.arena_size = arena_size;
 
-            for entity_id in 0..entities_count {
-                runtime.execute_logic_tick(entity_id as u16, bytecode);
+                for entity_id in 0..entities_count {
+                    runtime.execute_logic_tick(entity_id as u16, bytecode);
+                }
             }
         }
     }
@@ -844,17 +931,42 @@ fn process_engine_tick_internal() {
         if write_idx < max_capacity {
             commands_slice[write_idx] = *cmd;
 
+            // Union text command: command_type == 2 stores text metadata in
+            // x/y and a pointer to the Arena-resident TextPayload in width/height.
+            // This keeps the command array a homogeneous 24-byte stride.
             if cmd.command_type == 2 {
                 let str_offset = unsafe { *(entity_ptr.add(48) as *const u32) } as usize;
-                let text_ptr = unsafe { arena_start.add(str_offset) };
+                let payload_size = std::mem::size_of::<TextPayload>();
 
-                if write_idx + 1 < max_capacity {
-                    let slot_ptr = unsafe { commands_ptr.add(write_idx + 1) as *mut *const u8 };
-                    unsafe { *slot_ptr = text_ptr; }
-                    write_idx += 2;
-                } else {
-                    write_idx += 1;
+                if str_offset + payload_size <= arena_size {
+                    let text_payload_ptr = unsafe { arena_start.add(str_offset) as *mut TextPayload };
+
+                    // Synchronise the payload geometry with the entity so the
+                    // text moves with the simulation while the command buffer
+                    // remains a simple fixed-size array.
+                    unsafe {
+                        (*text_payload_ptr).x = cmd.x;
+                        (*text_payload_ptr).y = cmd.y;
+                        (*text_payload_ptr).font_size = cmd.width;
+                    }
+
+                    let text_bytes_ptr = unsafe { (text_payload_ptr as *mut u8).add(payload_size) };
+                    let mut text_len = 0usize;
+                    unsafe {
+                        let max_len = arena_size - str_offset - payload_size;
+                        while text_len < max_len && *text_bytes_ptr.add(text_len) != 0 {
+                            text_len += 1;
+                        }
+                    }
+
+                    let payload_addr = text_payload_ptr as usize;
+                    commands_slice[write_idx].x = text_len as f32;
+                    commands_slice[write_idx].y = cmd.width; // style = font size
+                    commands_slice[write_idx].width = f32::from_bits(payload_addr as u32);
+                    commands_slice[write_idx].height = f32::from_bits((payload_addr >> 32) as u32);
                 }
+
+                write_idx += 1;
             } else {
                 write_idx += 1;
             }
@@ -1134,4 +1246,5 @@ mod tests {
             std::thread::yield_now();
         }
     }
+
 }

@@ -25,6 +25,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> with SingleTickerProv
     bindings = MalphasBindings();
 
     _ticker = createTicker((elapsed) {
+      // Single-clock sync: one engine pulse per vsync from Flutter's Ticker.
       bindings.tick();
       // Refresco visual repaint-driven sin re-layouts globales en alta frecuencia (Regla 5)
     });

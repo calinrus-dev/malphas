@@ -29,23 +29,25 @@ The virtual canvas is a fixed, normalized **1000×1000 logical unit** coordinate
 
 ## Single-Clock Pulse Engine
 
-The native runtime is driven by a single background simulation thread that pulses at **~120 Hz** (8.33 ms frame budget). Flutter does **not** drive the simulation; it only observes the committed render buffer.
+Flutter's Ticker is the **single clock source**. On every vsync pulse Dart calls `trigger_engine_pulse()`, which wakes a parked Rust simulation thread. The Rust thread then processes one logical frame and writes render commands into the back buffer.
 
 ```
-Dart:  ticker ──► read atomic_back_index ──► draw front buffer
-                       │
-Rust:  sleep(8.33ms) ◄─┘
-       process_engine_tick_internal()
-         ├─ drain input queue
-         ├─ execute bytecode per entity
-         ├─ write render commands to back buffer
-         └─ atomic swap back/front index
+Dart:  Ticker ──► trigger_engine_pulse() ──► read atomic_back_index ──► draw front buffer
+                                                  │
+Rust:  PULSE_CONDVAR.wait() ◄─────────────────────┘
+        process_engine_tick_internal()
+          ├─ drain input queue
+          ├─ execute bytecode per entity
+          ├─ write render commands to back buffer
+          └─ atomic swap back/front index
 ```
+
+The Rust thread spends almost all of its time parked on a condition variable, so it does not burn CPU between frames and never blocks the Flutter UI thread.
 
 ### Lifecycle Guarantees
 
 * `init_engine` acquires `INIT_LOCK`, stops any previous simulation thread, and **spin-waits** on `ACTIVE_THREADS` until the old thread has truly exited. No arbitrary sleeps are used.
-* `shutdown_engine` signals the thread to stop and spin-waits until `ACTIVE_THREADS` reaches zero.
+* `shutdown_engine` signals the thread to stop, wakes the condition variable so the thread exits immediately, and spin-waits until `ACTIVE_THREADS` reaches zero.
 * `ActiveThreadGuard` decrements `ACTIVE_THREADS` even if the thread panics, preventing leaked lifecycle state.
 
 ---
@@ -109,20 +111,43 @@ These sizes and alignments are enforced by unit tests so layouts stay identical 
 
 ## Union Text Command
 
-`command_type == 2` is a **text command**. The text command occupies **two consecutive slots** in the command buffer:
+`command_type == 2` is a **text command**.  Unlike the earlier heterogeneous
+pointer-slot layout, every slot in the command buffer is now a fixed-size
+`DartRenderCommand`.  The same 16-byte float payload is reinterpreted as a text
+command:
 
-1. The first slot is a normal `DartRenderCommand` where:
-   * `x`, `y` define the baseline position in logical units.
-   * `width` is reused as the font size (32 px baseline).
-   * `color_rgba` is the text tint.
-2. The second slot stores a raw `*const u8` pointer to the null-terminated UTF-8 string in the Arena.
+* `x` holds the text length (in characters).
+* `y` holds the text style/font size metadata.
+* `width` holds the low 32 bits of a pointer to an Arena-resident `TextPayload`.
+* `height` holds the high 32 bits of that pointer.
+* `color_rgba` is the text tint.
+
+The `TextPayload` lives in the Arena and contains the real geometry and font
+size, followed immediately by the null-terminated UTF-8 string bytes:
+
+```rust
+#[repr(C)]
+pub struct TextPayload {
+    pub x: f32,
+    pub y: f32,
+    pub font_size: f32,
+    // string bytes follow...
+}
+```
 
 ```
-slot i:   DartRenderCommand { command_type=2, ..., width=font_size, color_rgba=tint }
-slot i+1: *const u8 ──► "MALPHAS LIVE CORE\0"
+slot i:   DartRenderCommand { command_type=2,
+                              x=text_length,
+                              y=style,
+                              width=ptr_low,
+                              height=ptr_high,
+                              color_rgba=tint }
+
+ptr = width | (height << 32) ──► TextPayload { x, y, font_size } + "MALPHAS LIVE CORE\0"
 ```
 
-This union keeps the command stream compact while avoiding extra struct fields or serialization overhead. The rasterizer skips the pointer slot when advancing through the buffer.
+This keeps the command stream a homogeneous 24-byte stride on both sides while
+still carrying an arbitrary-length string through a single pointer.
 
 ---
 

@@ -87,7 +87,15 @@ class _PackageConfigScreenState extends State<PackageConfigScreen> {
 
         const text = "MALPHAS LIVE CORE";
         final textBytes = utf8.encode(text);
-        bindings.writeArenaString(2048, Uint8List.fromList([...textBytes, 0]));
+        // Write the text payload header (geometry + font size) followed by the
+        // null-terminated string bytes into the Arena.
+        bindings.writeArenaText(
+          2048,
+          300.0, // x
+          400.0, // y
+          48.0,  // font size
+          Uint8List.fromList([...textBytes, 0]),
+        );
 
         bindings.configureEntity(
           entityId: 0,

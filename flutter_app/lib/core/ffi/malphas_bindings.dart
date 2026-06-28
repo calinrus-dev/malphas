@@ -28,6 +28,7 @@ class MalphasBindings extends ChangeNotifier {
   late final int Function(dffi.Pointer<MalphasDoubleBufferBridge>, dffi.Pointer<dffi.Void>, int, int) initEngine;
   late final int Function() shutdownEngine;
   late final int Function(int, double, double) processInputEvent;
+  late final int Function() triggerEnginePulse;
   late final int Function(int) processEngineTick;
   late final int Function(dffi.Pointer<ffi.Utf8>) loadResourcePack;
   late final dffi.Pointer<dffi.Uint8> Function(int) malphasAlloc;
@@ -178,6 +179,9 @@ class MalphasBindings extends ChangeNotifier {
         .lookup<dffi.NativeFunction<dffi.Int32 Function(dffi.Int32, dffi.Float, dffi.Float)>>
             ('process_input_event')
         .asFunction();
+    triggerEnginePulse = _nativeLib
+        .lookup<dffi.NativeFunction<dffi.Int32 Function()>>('trigger_engine_pulse')
+        .asFunction();
     processEngineTick = _nativeLib
         .lookup<dffi.NativeFunction<dffi.Int32 Function(dffi.Uint64)>>('process_engine_tick')
         .asFunction();
@@ -314,6 +318,9 @@ class MalphasBindings extends ChangeNotifier {
     _initializeSharedMemory();
   }
 
+  /// Returns the buffer that Flutter should read from (the *front* buffer).
+  /// The Rust engine writes into the back buffer selected by `atomicBackIndex`;
+  /// the opposite buffer is therefore immutable for the duration of this frame.
   dffi.Pointer<CoreCommandBuffer>? get commandBuffer {
     if (!isNativeAvailable) {
       return _simulatedBuffer?.buffer ?? dffi.nullptr;
@@ -373,7 +380,10 @@ class MalphasBindings extends ChangeNotifier {
         count = _simulatedBuffer!.buffer!.ref.commandCount;
       }
     } else {
-      processEngineTick(0);
+      // Single-clock sync: Flutter's Ticker is the only clock source.  Wake
+      // the Rust simulation thread once per vsync; it will process the tick
+      // asynchronously on its own core while we read the latest front buffer.
+      triggerEnginePulse();
       final backIndex = getBackIndex(_doubleBufferBridge!);
       final frontBuffer = (backIndex == 0) ? _bufferBPtr! : _bufferAPtr!;
       count = getCommandCount(frontBuffer);
@@ -482,6 +492,35 @@ class MalphasBindings extends ChangeNotifier {
     }
   }
 
+  /// Writes a [TextPayload] header followed by the string bytes into the Arena.
+  /// The written offset is the pointer passed to `setEntity` as `strOffset`.
+  int writeArenaText(
+    int offset,
+    double x,
+    double y,
+    double fontSize,
+    Uint8List bytes,
+  ) {
+    if (!isNativeAvailable) return -1;
+    final payloadSize = dffi.sizeOf<TextPayload>();
+    final totalSize = payloadSize + bytes.length;
+    final ptr = ffi.calloc<dffi.Uint8>(totalSize);
+    try {
+      final payload = ptr.cast<TextPayload>().ref;
+      payload.x = x;
+      payload.y = y;
+      payload.fontSize = fontSize;
+      final stringPtr = ptr + payloadSize;
+      stringPtr.asTypedList(bytes.length).setAll(0, bytes);
+      return writeArenaBytes(offset, ptr, totalSize);
+    } finally {
+      ffi.calloc.free(ptr);
+    }
+  }
+
+  /// Frees every shared-memory buffer through the Rust allocator.  Must only
+  /// be called after `shutdownEngine()` has returned and the simulation thread
+  /// has exited, otherwise the engine could dereference freed memory.
   void _freeSharedMemory() {
     if (_doubleBufferBridge != null && _doubleBufferBridge != dffi.nullptr) {
       if (_bufferAPtr != null && _bufferAPtr != dffi.nullptr) {

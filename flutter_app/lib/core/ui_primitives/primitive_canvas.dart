@@ -63,20 +63,32 @@ class EnginePainter extends CustomPainter {
           );
           i += 1;
           break;
-        case 2: // Text command (occupies 2 slots)
-          if (i + 1 < count) {
-            final pointerSlot = (commands + i + 1).cast<dffi.Pointer<dffi.Uint8>>().value;
-            _renderTextFromFonts(canvas, command, pointerSlot, scaleX, scaleY);
-            i += 2;
-          } else {
-            i += 1;
+        case 2: // Union text command: metadata in x/y, pointer in width/height.
+          final textPtr = _decodeTextPointer(commands + i);
+          if (textPtr != dffi.nullptr) {
+            _renderTextFromFonts(canvas, command, textPtr, scaleX, scaleY);
           }
+          i += 1;
           break;
         default:
           i += 1;
           break;
       }
     }
+  }
+
+  /// Decodes the 64-bit pointer stored across the `width` (low 32 bits) and
+  /// `height` (high 32 bits) fields of a text command.  The fields are read as
+  /// raw integers to avoid any NaN canonicalisation that could happen when
+  /// round-tripping through Dart `double` values.
+  dffi.Pointer<dffi.Uint8> _decodeTextPointer(dffi.Pointer<DartRenderCommand> cmdPtr) {
+    const widthOffset = 12; // offset of `width` inside DartRenderCommand
+    const heightOffset = 16; // offset of `height` inside DartRenderCommand
+    final lowPtr = dffi.Pointer<dffi.Uint32>.fromAddress(cmdPtr.address + widthOffset);
+    final highPtr = dffi.Pointer<dffi.Uint32>.fromAddress(cmdPtr.address + heightOffset);
+    final address = lowPtr.value | (highPtr.value << 32);
+    if (address == 0) return dffi.nullptr;
+    return dffi.Pointer<dffi.Uint8>.fromAddress(address);
   }
 
   void _renderTextFromFonts(
@@ -92,23 +104,28 @@ class EnginePainter extends CustomPainter {
     final arenaStart = bindings.arena;
     if (arenaStart == dffi.nullptr) return;
 
-    final arenaUint32 = arenaStart.cast<dffi.Uint32>();
-    final metricsOffset = arenaUint32[5];
-
-    // command.width represents the font size
-    final fontSize = command.width > 0 ? command.width : 32.0;
+    final payload = textPtr.cast<TextPayload>().ref;
+    final fontSize = payload.fontSize > 0 ? payload.fontSize : 32.0;
     final fontScale = fontSize / 32.0;
 
-    double currentX = command.x * scaleX;
-    final double startY = command.y * scaleY;
+    double currentX = payload.x * scaleX;
+    final double startY = payload.y * scaleY;
 
     final paint = Paint()
       ..color = Color(command.colorRgba)
       ..filterQuality = FilterQuality.low;
 
+    final arenaUint32 = arenaStart.cast<dffi.Uint32>();
+    final metricsOffset = arenaUint32[5];
+
+    // The command's x field carries the text length; use it as a safety cap
+    // and fall back to scanning for the null terminator.
+    final maxChars = command.x > 0 ? command.x.toInt() : 0x7FFFFFFF;
+    final stringStart = textPtr + dffi.sizeOf<TextPayload>();
+
     int charIdx = 0;
-    while (true) {
-      final charCode = textPtr[charIdx];
+    while (charIdx < maxChars) {
+      final charCode = stringStart[charIdx];
       if (charCode == 0) break; // null-terminator
 
       final glyphOffset = metricsOffset + (charCode * 16);
