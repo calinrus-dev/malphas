@@ -39,5 +39,8 @@ final class MalphasDoubleBufferBridge extends Struct {
 
   @Uint8()
   external int atomicBackIndex;
+
+  @Uint32()
+  external int commandsWritten;
 }
 

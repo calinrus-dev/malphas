@@ -14,10 +14,13 @@ class MalphasBindings extends ChangeNotifier {
   factory MalphasBindings() => _instance;
 
   late final dffi.DynamicLibrary _nativeLib;
-  late final int Function(dffi.Pointer<MalphasDoubleBufferBridge>, dffi.Pointer<dffi.Void>, int) initEngine;
+  late final int Function(dffi.Pointer<MalphasDoubleBufferBridge>, dffi.Pointer<dffi.Void>, int, int) initEngine;
   late final int Function(int, double, double) processInputEvent;
   late final int Function(int) processEngineTick;
   late final int Function(dffi.Pointer<ffi.Utf8>) loadResourcePack;
+  late final dffi.Pointer<dffi.Uint8> Function(int) malphasAlloc;
+  late final void Function(dffi.Pointer<dffi.Uint8>, int) malphasFree;
+  late final int Function(dffi.Pointer<dffi.Uint8>, int) loadResourcePackRaw;
   late final int Function(dffi.Pointer<ffi.Utf8>, dffi.Pointer<ffi.Utf8>) _verifyBinaryIntegrity;
   late final int Function(dffi.Pointer<ffi.Utf8>, dffi.Pointer<ffi.Utf8>) _extractZipPackage;
 
@@ -29,24 +32,78 @@ class MalphasBindings extends ChangeNotifier {
   bool isNativeAvailable = false;
   SnapshotCommandBuffer? _simulatedBuffer;
 
+  static void cleanupTempLibraries() {
+    try {
+      final workspace = Directory.current.path;
+      final motorsDir = Directory('$workspace/motors');
+      if (motorsDir.existsSync()) {
+        final List<FileSystemEntity> files = motorsDir.listSync();
+        for (final file in files) {
+          if (file is File) {
+            final name = file.uri.pathSegments.last;
+            if (name.startsWith('malphas_core_temp_') && 
+                (name.endsWith('.dll') || name.endsWith('.so') || name.endsWith('.dylib'))) {
+              try {
+                file.deleteSync();
+              } catch (_) {
+                // Ignore files currently locked by OS
+              }
+            }
+          }
+        }
+      }
+    } catch (_) {
+      // Silent catch
+    }
+  }
+
   MalphasBindings._internal() {
     _initializeBridge();
   }
 
   void _initializeBridge() {
     try {
-      if (Platform.isAndroid) {
-        _nativeLib = dffi.DynamicLibrary.open('libmalphas_core.so');
-      } else if (Platform.isWindows) {
-        _nativeLib = dffi.DynamicLibrary.open('malphas_core.dll');
-      } else {
-        _nativeLib = dffi.DynamicLibrary.open('libmalphas_core.so');
+      final workspace = Directory.current.path;
+      final motorsDir = Directory('$workspace/motors');
+      if (!motorsDir.existsSync()) {
+        motorsDir.createSync(recursive: true);
       }
 
-      initEngine = _nativeLib.lookup<dffi.NativeFunction<dffi.Int32 Function(dffi.Pointer<MalphasDoubleBufferBridge>, dffi.Pointer<dffi.Void>, dffi.Uint32)>>('init_engine').asFunction();
+      cleanupTempLibraries();
+
+      String originalName = '';
+      String ext = '';
+      if (Platform.isWindows) {
+        originalName = 'malphas_core.dll';
+        ext = '.dll';
+      } else if (Platform.isMacOS) {
+        originalName = 'libmalphas_core.dylib';
+        ext = '.dylib';
+      } else {
+        originalName = 'libmalphas_core.so';
+        ext = '.so';
+      }
+
+      File originalFile = File('$workspace/$originalName');
+      if (!originalFile.existsSync()) {
+        originalFile = File('$workspace/malphas_core/target/release/$originalName');
+      }
+
+      if (originalFile.existsSync()) {
+        final tempPath = '${motorsDir.path}/malphas_core_temp_${DateTime.now().millisecondsSinceEpoch}$ext';
+        originalFile.copySync(tempPath);
+        _nativeLib = dffi.DynamicLibrary.open(tempPath);
+      } else {
+        _nativeLib = dffi.DynamicLibrary.open(originalName);
+      }
+
+      initEngine = _nativeLib.lookup<dffi.NativeFunction<dffi.Int32 Function(dffi.Pointer<MalphasDoubleBufferBridge>, dffi.Pointer<dffi.Void>, dffi.Uint32, dffi.Uint32)>>('init_engine').asFunction();
       processInputEvent = _nativeLib.lookup<dffi.NativeFunction<dffi.Int32 Function(dffi.Int32, dffi.Float, dffi.Float)>>('process_input_event').asFunction();
       processEngineTick = _nativeLib.lookup<dffi.NativeFunction<dffi.Int32 Function(dffi.Uint64)>>('process_engine_tick').asFunction();
       loadResourcePack = _nativeLib.lookup<dffi.NativeFunction<dffi.Int32 Function(dffi.Pointer<ffi.Utf8>)>>('load_resource_pack').asFunction();
+      malphasAlloc = _nativeLib.lookup<dffi.NativeFunction<dffi.Pointer<dffi.Uint8> Function(dffi.IntPtr)>>('malphas_alloc').asFunction();
+      malphasFree = _nativeLib.lookup<dffi.NativeFunction<dffi.Void Function(dffi.Pointer<dffi.Uint8>, dffi.IntPtr)>>('malphas_free').asFunction();
+      loadResourcePackRaw = _nativeLib.lookup<dffi.NativeFunction<dffi.Int32 Function(dffi.Pointer<dffi.Uint8>, dffi.Uint32)>>('load_resource_pack_raw').asFunction();
       _verifyBinaryIntegrity = _nativeLib.lookup<dffi.NativeFunction<dffi.Int32 Function(dffi.Pointer<ffi.Utf8>, dffi.Pointer<ffi.Utf8>)>>('verify_binary_integrity').asFunction();
       _extractZipPackage = _nativeLib.lookup<dffi.NativeFunction<dffi.Int32 Function(dffi.Pointer<ffi.Utf8>, dffi.Pointer<ffi.Utf8>)>>('extract_zip_package').asFunction();
 
@@ -76,10 +133,11 @@ class MalphasBindings extends ChangeNotifier {
     _bufferBPtr!.ref.commands = commandsB;
 
     _doubleBufferBridge!.ref.atomicBackIndex = 0;
+    _doubleBufferBridge!.ref.commandsWritten = 0;
 
     _arena = ffi.calloc<dffi.Uint8>(_arenaSize).cast<dffi.Void>();
 
-    initEngine(_doubleBufferBridge!, _arena!, _arenaSize);
+    initEngine(_doubleBufferBridge!, _arena!, _arenaSize, maxCommandBufferCapacity);
   }
 
   dffi.Pointer<CoreCommandBuffer>? get commandBuffer {
@@ -153,15 +211,30 @@ class MalphasBindings extends ChangeNotifier {
 
   int loadPack(String path) {
     if (!isNativeAvailable) return -1;
-    final pathPtr = path.toNativeUtf8();
+    final file = File(path);
+    if (!file.existsSync()) return -2;
+    
+    final bytes = file.readAsBytesSync();
+    final size = bytes.length;
+    
+    // Request a 16-byte aligned allocation from Rust Core (Memory Armoring)
+    final ptr = malphasAlloc(size);
+    if (ptr == dffi.nullptr) return -3;
+    
     try {
-      final res = loadResourcePack(pathPtr);
+      // Write the bytes directly to the Rust allocated aligned pointer
+      final byteView = ptr.asTypedList(size);
+      byteView.setAll(0, bytes);
+      
+      // Load the pack directly from the aligned buffer
+      final res = loadResourcePackRaw(ptr, size);
       if (res == 0) {
         checkAndLoadFontAtlas();
       }
       return res;
     } finally {
-      ffi.calloc.free(pathPtr);
+      // Free aligned buffer
+      malphasFree(ptr, size);
     }
   }
 

@@ -11,8 +11,7 @@ use zip::ZipArchive;
 static ARENA_ADDRESS: AtomicUsize = AtomicUsize::new(0);
 static ARENA_SIZE: AtomicUsize = AtomicUsize::new(0);
 static BRIDGE_ADDRESS: AtomicUsize = AtomicUsize::new(0);
-
-const MAX_COMMANDS_CAPACITY: usize = 2048;
+static MAX_COMMANDS_CAPACITY: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(2048);
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -38,6 +37,7 @@ pub struct MalphasDoubleBufferBridge {
     pub buffer_a: CoreCommandBuffer,
     pub buffer_b: CoreCommandBuffer,
     pub atomic_back_index: AtomicU8,
+    pub commands_written: std::sync::atomic::AtomicU32,
 }
 
 #[repr(C, align(16))]
@@ -94,6 +94,11 @@ unsafe impl Send for ResourcePackRuntime {}
 unsafe impl Sync for ResourcePackRuntime {}
 
 static RUNTIME: std::sync::Mutex<Option<ResourcePackRuntime>> = std::sync::Mutex::new(None);
+static BYTECODE_VM: std::sync::OnceLock<arc_swap::ArcSwap<Vec<u8>>> = std::sync::OnceLock::new();
+
+fn get_bytecode_vm() -> &'static arc_swap::ArcSwap<Vec<u8>> {
+    BYTECODE_VM.get_or_init(|| arc_swap::ArcSwap::from(std::sync::Arc::new(Vec::new())))
+}
 
 fn c_str_to_str<'a>(ptr: *const c_char) -> Option<&'a str> {
     if ptr.is_null() {
@@ -107,6 +112,7 @@ pub extern "C" fn init_engine(
     bridge_ptr: *mut MalphasDoubleBufferBridge,
     arena_ptr: *mut c_void,
     arena_size: u32,
+    max_commands: u32,
 ) -> i32 {
     if bridge_ptr.is_null() || arena_ptr.is_null() {
         return -1;
@@ -114,6 +120,7 @@ pub extern "C" fn init_engine(
     BRIDGE_ADDRESS.store(bridge_ptr as usize, Ordering::SeqCst);
     ARENA_ADDRESS.store(arena_ptr as usize, Ordering::SeqCst);
     ARENA_SIZE.store(arena_size as usize, Ordering::SeqCst);
+    MAX_COMMANDS_CAPACITY.store(max_commands, Ordering::SeqCst);
 
     // Initialise Memory Map in first 32 bytes of the Arena
     unsafe {
@@ -290,26 +297,26 @@ pub extern "C" fn extract_zip_package(zip_path: *const c_char, output_dir: *cons
 }
 
 #[no_mangle]
-pub extern "C" fn load_resource_pack(filepath: *const c_char) -> i32 {
-    let path = match c_str_to_str(filepath) {
-        Some(s) => s,
-        None => return -1,
-    };
+pub extern "C" fn malphas_alloc(size: usize) -> *mut u8 {
+    let layout = std::alloc::Layout::from_size_align(size, 16).unwrap();
+    unsafe { std::alloc::alloc(layout) }
+}
 
-    let mut file = match File::open(path) {
-        Ok(f) => f,
-        Err(_) => return -2,
-    };
-
-    let mut buffer = Vec::new();
-    if file.read_to_end(&mut buffer).is_err() {
-        return -3;
+#[no_mangle]
+pub extern "C" fn malphas_free(ptr: *mut u8, size: usize) {
+    if !ptr.is_null() {
+        let layout = std::alloc::Layout::from_size_align(size, 16).unwrap();
+        unsafe { std::alloc::dealloc(ptr, layout) }
     }
+}
 
-    if buffer.len() < 4 {
-        return -4;
+#[no_mangle]
+pub extern "C" fn load_resource_pack_raw(ptr: *const u8, size: u32) -> i32 {
+    if ptr.is_null() || size < 4 {
+        return -1;
     }
-
+    
+    let buffer = unsafe { std::slice::from_raw_parts(ptr, size as usize) };
     let magic = &buffer[0..4];
 
     if magic == b"MLPH" {
@@ -382,11 +389,14 @@ pub extern "C" fn load_resource_pack(filepath: *const c_char) -> i32 {
             }
         }
 
+        let nuevo_bytecode = std::sync::Arc::new(bytecode);
+        get_bytecode_vm().store(nuevo_bytecode);
+
         let mut runtime = RUNTIME.lock().unwrap();
         *runtime = Some(ResourcePackRuntime {
             arena_start_ptr: arena_addr as *mut u8,
             arena_size,
-            bytecode_buffer: bytecode,
+            bytecode_buffer: Vec::new(),
         });
 
         0
@@ -415,20 +425,46 @@ pub extern "C" fn load_resource_pack(filepath: *const c_char) -> i32 {
         }
 
         let bytecode = buffer[payload_start..payload_end].to_vec();
+        let nuevo_bytecode = std::sync::Arc::new(bytecode);
+        get_bytecode_vm().store(nuevo_bytecode);
 
-        let mut runtime_opt = RUNTIME.lock().unwrap();
-        if let Some(ref mut runtime) = *runtime_opt {
-            // Hot-swap bytecode buffer in the active logic VM sandbox
-            runtime.bytecode_buffer = bytecode;
-            0
-        } else {
-            // MHP must be loaded before hot-swapping behavior scripts
-            -23
-        }
+        0
     } else {
         // Invalid Magic Header
         -30
     }
+}
+
+#[no_mangle]
+pub extern "C" fn load_resource_pack(filepath: *const c_char) -> i32 {
+    let path = match c_str_to_str(filepath) {
+        Some(s) => s,
+        None => return -1,
+    };
+
+    let mut file = match File::open(path) {
+        Ok(f) => f,
+        Err(_) => return -2,
+    };
+
+    let mut buffer = Vec::new();
+    if file.read_to_end(&mut buffer).is_err() {
+        return -3;
+    }
+
+    let size = buffer.len();
+    let ptr = malphas_alloc(size);
+    if ptr.is_null() {
+        return -4;
+    }
+
+    unsafe {
+        std::ptr::copy_nonoverlapping(buffer.as_ptr(), ptr, size);
+    }
+
+    let res = load_resource_pack_raw(ptr, size as u32);
+    malphas_free(ptr, size);
+    res
 }
 
 #[no_mangle]
@@ -448,6 +484,7 @@ pub extern "C" fn process_engine_tick(dt_micros: u64) -> i32 {
 
     let arena_addr = ARENA_ADDRESS.load(Ordering::SeqCst);
     let arena_size = ARENA_SIZE.load(Ordering::SeqCst);
+    let max_capacity = MAX_COMMANDS_CAPACITY.load(Ordering::SeqCst) as usize;
 
     if arena_addr != 0 {
         let arena_start = arena_addr as *mut u8;
@@ -455,6 +492,10 @@ pub extern "C" fn process_engine_tick(dt_micros: u64) -> i32 {
         // Read entity properties from the memory map
         let entities_offset = unsafe { *(arena_start.add(12) as *const u32) } as usize;
         let entities_count = unsafe { *(arena_start.add(16) as *const u32) } as usize;
+
+        // Load bytecode atomically and lock-free
+        let bytecode_guard = get_bytecode_vm().load();
+        let bytecode = &*bytecode_guard;
 
         // 1. Run bytecode script inside the sandbox runtime
         {
@@ -464,14 +505,14 @@ pub extern "C" fn process_engine_tick(dt_micros: u64) -> i32 {
                 runtime.arena_size = arena_size;
 
                 for entity_id in 0..entities_count {
-                    runtime.execute_logic_tick(entity_id as u16);
+                    runtime.execute_logic_tick(entity_id as u16, bytecode);
                 }
             }
         }
 
         // 2. Generate render commands to back_buffer
         let commands_slice = unsafe {
-            std::slice::from_raw_parts_mut(back_buffer.commands, MAX_COMMANDS_CAPACITY)
+            std::slice::from_raw_parts_mut(back_buffer.commands, max_capacity)
         };
 
         let mut write_idx = 0;
@@ -483,7 +524,7 @@ pub extern "C" fn process_engine_tick(dt_micros: u64) -> i32 {
                 continue;
             }
 
-            if write_idx < MAX_COMMANDS_CAPACITY {
+            if write_idx < max_capacity {
                 commands_slice[write_idx] = DartRenderCommand {
                     command_type: cmd.command_type,
                     layer: cmd.layer,
@@ -497,11 +538,10 @@ pub extern "C" fn process_engine_tick(dt_micros: u64) -> i32 {
 
                 if cmd.command_type == 2 {
                     // String pointer passing for Case 2 (text)
-                    // The entity structure stores string offset in the Arena at offset 48
                     let str_offset = unsafe { *(entity_ptr.add(48) as *const u32) } as usize;
                     let text_ptr = unsafe { arena_start.add(str_offset) };
 
-                    if write_idx + 1 < MAX_COMMANDS_CAPACITY {
+                    if write_idx + 1 < max_capacity {
                         let slot_ptr = unsafe {
                             back_buffer.commands.add(write_idx + 1) as *mut *const u8
                         };
@@ -518,6 +558,8 @@ pub extern "C" fn process_engine_tick(dt_micros: u64) -> i32 {
             }
         }
         back_buffer.command_count = write_idx as u32;
+        // Update atomic handshake written count
+        bridge.commands_written.store(write_idx as u32, Ordering::SeqCst);
     }
 
     // 3. Swap atomic back index
@@ -550,18 +592,18 @@ pub extern "C" fn render_tick(buffer_ptr: *mut DartRenderCommand, max_commands: 
 }
 
 impl ResourcePackRuntime {
-    pub fn execute_logic_tick(&mut self, entity_id: u16) {
-        if self.bytecode_buffer.is_empty() { return; }
+    pub fn execute_logic_tick(&mut self, entity_id: u16, bytecode_buffer: &[u8]) {
+        if bytecode_buffer.is_empty() { return; }
 
         // Each entity in Arena has size of 64 bytes
         let entity_offset = 32 + (entity_id as usize * 64);
         let mut pc = 0;
         let mut regs = [0.0f32; 8];
 
-        while pc + 4 <= self.bytecode_buffer.len() {
-            let opcode = self.bytecode_buffer[pc];
-            let arg1 = self.bytecode_buffer[pc + 1];
-            let val_u16 = ((self.bytecode_buffer[pc + 2] as u16) << 8) | (self.bytecode_buffer[pc + 3] as u16);
+        while pc + 4 <= bytecode_buffer.len() {
+            let opcode = bytecode_buffer[pc];
+            let arg1 = bytecode_buffer[pc + 1];
+            let val_u16 = ((bytecode_buffer[pc + 2] as u16) << 8) | (bytecode_buffer[pc + 3] as u16);
 
             match opcode {
                 0x00 => { // HALT
@@ -716,6 +758,20 @@ mod tests {
         assert_eq!(std::mem::align_of::<MhpHeader>(), 16);
         assert_eq!(std::mem::align_of::<MhpObjectDescriptor>(), 16);
         assert_eq!(std::mem::align_of::<MspHeader>(), 16);
+    }
+
+    #[test]
+    fn test_lockless_bytecode_latency() {
+        let iterations = 100_000;
+        let start = std::time::Instant::now();
+        for _ in 0..iterations {
+            let guard = get_bytecode_vm().load();
+            let _ = &**guard;
+        }
+        let duration = start.elapsed();
+        let ns_per_iter = (duration.as_nanos() as f64) / (iterations as f64);
+        println!("ArcSwap read latency: {:.4} ns/iter", ns_per_iter);
+        assert!(ns_per_iter < 120.0, "Latency too high: {} ns/iter", ns_per_iter);
     }
 }
 

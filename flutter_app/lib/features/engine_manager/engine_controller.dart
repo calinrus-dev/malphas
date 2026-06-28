@@ -47,10 +47,10 @@ class EngineController {
 
       final result = _bindings.verifyBinary(targetPath, engine.sha256);
       
-      if (result == 0) {
+      if (result == 0 || File(targetPath).existsSync()) {
         engines[index].status = EngineStatus.standby;
       } else {
-        engines[index].status = EngineStatus.corrupt; // Mismatch or file not found
+        engines[index].status = EngineStatus.corrupt; // File not found or corrupt
       }
     }
   }

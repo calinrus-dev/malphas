@@ -11,3 +11,4 @@ crate-type = ["cdylib"]
 [dependencies]
 sha2 = "0.10.8"
 zip = "0.6.6"
+arc-swap = "1.7.1"
