@@ -7,10 +7,29 @@ on:
     branches: [main]
 
 jobs:
+  rust-core:
+    uses: ./.github/workflows/rust_ci.yml
+
   build-windows:
+    name: Flutter Windows release build
+    needs: rust-core
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Download Windows native artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: malphas_core-windows-latest
+          path: native/
+
+      - name: Place native library where MalphasBindings expects it
+        shell: powershell
+        run: |
+          if (Test-Path native/malphas_core.dll) {
+            Copy-Item native/malphas_core.dll -Destination malphas_core.dll -Force
+            Copy-Item native/malphas_core.dll -Destination flutter_app/malphas_core.dll -Force
+          }
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -18,19 +37,7 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Cargo dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: malphas_core
-
-      - name: Build native core (Windows)
-        run: cargo build --release --locked
-        working-directory: malphas_core
-
-      - name: Install Flutter dependencies
+      - name: Install dependencies
         run: flutter pub get
         working-directory: flutter_app
 

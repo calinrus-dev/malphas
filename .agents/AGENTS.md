@@ -1,27 +1,34 @@
 # Malphas Agent Instructions
 
-These rules define the design language, aesthetic guidelines, build/test workflow, and FFI safety constraints of the Malphas project. All agents modifying code, documentation or system mechanics must follow them.
+These rules define the design language, build/test workflow, FFI safety constraints, and agent conventions of the Malphas project. All agents modifying code, documentation, or system mechanics must follow them.
 
 ## 1. Terminal Aesthetic
+
 Malphas functions and behaves like an immersive graphical terminal. It rejects standard mobile app layouts, messaging bubbles, web navigation, or social media designs.
 
 ## 2. Radical Dark Palette
+
 - **Base Color:** Black Absolute (`#000000`) to disable pixels on OLED screens.
 - **Secondary Containers:** Matte Anthracite / Ultra Dark Grey (`#0D0D0D` / `#161616`).
 - **Typography Tone:** High-contrast Bone/Ivory (`#E0DCD3`) to prevent eye fatigue.
 - **Borders:** Thin, subtle separators (`#1B1B1B`).
 
 ## 3. Strict Typography
+
 - **Titles & Structural Headers:** Classic serif fonts (e.g., Georgia) to evoke solemnity and high-quality premium craft.
 - **Data, Stats & Telemetry:** Clean, strictly geometric sans-serif or monospaced fonts (e.g., Courier/Roboto) to present pure data.
 
 ## 4. Organic Geometry
+
 - All docks, text inputs, and action overlays must float on top of the passive canvas rather than stick to the screen edges.
 - Borders must use extreme rounded corners (e.g., radius of 24-30px) to form capsules for controls.
 
 ## 5. Architectural Integrity
+
 - Keep the rendering pipeline repaint-driven. Do not trigger global Flutter build/re-layouts on high-speed ticks.
 - Maintain the virtual coordinates matrix of `1000x1000` logical units and apply letterboxing to preserve aspect ratios on dynamic screens.
+- Flutter owns the only clock. The engine advances one tick per VSync via `trigger_engine_pulse()`. Do not add timers or sleeps in the Rust simulation thread.
+- The render command stream is a homogeneous array of 24-byte `DartRenderCommand` slots. Text commands pack length in `x`, style in `y`, and split the 64-bit `TextPayload` pointer across `width`/`height`.
 
 ## 6. Build, Test & Release Commands
 
@@ -29,18 +36,30 @@ Always verify changes with the relevant commands before finishing.
 
 | Target | Command |
 |--------|---------|
-| Build native core (release) | `powershell -ExecutionPolicy Bypass -File .\build_core.ps1` |
-| Rust unit tests | `cargo test --manifest-path malphas_core/Cargo.toml` |
+| Build native core (release, Windows) | `powershell -ExecutionPolicy Bypass -File .\build_core.ps1` |
+| Rust unit tests | `cargo test --manifest-path malphas_core/Cargo.toml --release` |
+| Rust formatting check | `cargo fmt --manifest-path malphas_core/Cargo.toml -- --check` |
+| Rust Clippy | `cargo clippy --manifest-path malphas_core/Cargo.toml --release -- -D warnings` |
 | Flutter unit tests | `cd flutter_app && flutter test` |
+| Flutter analyze | `cd flutter_app && flutter analyze --no-fatal-infos --no-fatal-warnings` |
 | Release Windows build | `cd flutter_app && flutter build windows --release` |
 
 The `build_core.ps1` script compiles `malphas_core.dll` and copies it to the project root, `flutter_app/`, and any existing Windows runner build directories.
+
+When changing the C-ABI surface, run the full local verification sequence:
+
+```powershell
+cargo test --manifest-path malphas_core/Cargo.toml --release
+cd flutter_app && flutter test
+cd flutter_app && flutter build windows --release
+```
 
 ## 7. FFI Safety Rules
 
 Malphas shares memory between Dart and Rust. Breaking these rules causes crashes on ARM64, torn frames, or use-after-free.
 
 ### 7.1 Shared Memory Allocation
+
 - **All** shared-memory buffers (double-buffer bridge, command arrays, Arena) must be allocated through the exported Rust allocator:
   - `malphas_alloc(size)`
   - `malphas_free(ptr, size)`
@@ -48,11 +67,13 @@ Malphas shares memory between Dart and Rust. Breaking these rules causes crashes
 - Free buffers with the **same size** that was passed to `malphas_alloc` so the Rust allocator can reconstruct the correct `Layout`.
 
 ### 7.2 Struct Layout Stability
+
 - All C-ABI structs are `#[repr(C)]` and explicitly aligned to 16 bytes where required (`#[repr(C, align(16))]`).
-- Do **not** change field order, sizes, or alignment of `DartRenderCommand`, `CoreCommandBuffer`, `MalphasDoubleBufferBridge`, `MhpHeader`, `MhpObjectDescriptor`, or `MspHeader` without updating both Rust and Dart definitions and the layout tests in `malphas_core/src/lib.rs`.
+- Do **not** change field order, sizes, or alignment of `DartRenderCommand`, `CoreCommandBuffer`, `MalphasDoubleBufferBridge`, `MhpHeader`, `MhpObjectDescriptor`, `MspHeader`, or `TextPayload` without updating both Rust and Dart definitions and the layout tests in `malphas_core/src/lib.rs`.
 - Dart FFI struct mirrors live in `flutter_app/lib/core/ffi/types.dart` and must remain byte-compatible with the Rust side.
 
 ### 7.3 Pointer Delegates
+
 - Dart must never perform pointer arithmetic on `MalphasDoubleBufferBridge` or copy nested structs by value.
 - Always use the exported getter functions:
   - `get_buffer_a_ptr(bridge)`
@@ -64,6 +85,7 @@ Malphas shares memory between Dart and Rust. Breaking these rules causes crashes
 - On the Rust side, use `std::ptr::addr_of_mut!` when taking field addresses of a struct that Dart also observes, to avoid creating intermediate `&mut` references.
 
 ### 7.4 Arena Access
+
 - Dart must **not** write entity state directly into the Arena.
 - All entity setup goes through the Rust-gated helpers:
   - `set_entities_count(count)`
@@ -73,28 +95,47 @@ Malphas shares memory between Dart and Rust. Breaking these rules causes crashes
 - Pause the engine around multi-step setup (e.g., `set_entities_count` followed by several `set_entity` calls) to avoid observing torn state between helper invocations.
 
 ### 7.5 Input Events
+
 - Input events are pushed through `process_input_event(event_type, x, y)`. Dart never writes input coordinates directly into the Arena.
-- The engine drains the input queue at the start of each tick.
+- The engine drains the input queue at the start of each tick. The queue is bounded to 256 events; old events are dropped on overflow.
 
 ### 7.6 Command Buffer Protocol
+
 - `command_type == 1` is a solid rectangle command (1 slot).
-- `command_type == 2` is a text command and occupies **two consecutive slots**:
-  1. `DartRenderCommand` with `width` reused as font size.
-  2. Raw `*const u8` pointer to the null-terminated string in the Arena.
-- The rasterizer must skip the pointer slot after drawing a text command.
+- `command_type == 2` is a text command and occupies **one 24-byte slot**:
+  - `x` = text length in bytes
+  - `y` = style / font size
+  - `width` / `height` = low / high 32 bits of the `TextPayload` pointer
+- The rasterizer must decode the pointer from `width`/`height` and read the null-terminated string that follows the 12-byte `TextPayload` header in the Arena.
 
 ### 7.7 Thread Lifecycle
+
 - `init_engine` and `shutdown_engine` are serialised by `INIT_LOCK`.
-- The background simulation thread is parked on `PULSE_CONDVAR` and woken by `trigger_engine_pulse` once per vsync.
-- `shutdown_engine` sets `ENGINE_RUNNING = false` and calls `PULSE_CONDVAR.notify_all()` so the thread exits immediately without waiting for the next pulse.
+- The background simulation thread is parked on the pulse channel and woken by `trigger_engine_pulse` once per vsync.
+- `shutdown_engine` sets `ENGINE_RUNNING = false` and drops the pulse sender so the thread exits immediately without waiting for the next pulse.
 - After signalling shutdown, both sides spin-wait on `ACTIVE_THREADS` until the background simulation thread exits.
 - Any code spawned by `init_engine` must be wrapped in `ActiveThreadGuard` so `ACTIVE_THREADS` is decremented even on panic.
 
-### 7.8 Bytecode Hot-Swap
+### 7.8 Bytecode and Resource Hot-Swap
+
 - Bytecode is stored in `ArcSwap<Box<[u8]>>`. The tick loads an `Arc` snapshot and executes from that immutable slice for the entire frame.
 - Replacing bytecode is atomic and does not block the engine, but an in-flight tick continues using the snapshot it loaded at frame start.
+- The live resource pack runtime is stored in `AtomicPtr<ResourcePackRuntime>`. Package loading swaps it with `AcqRel` ordering while the engine is paused and the Arena write lock is held.
 
-## 8. Minimal, Surgical Changes
+## 8. Package Compiler Conventions
+
+- `MalphasPackageCompiler` lives in `flutter_app/lib/core/compiler/package_compiler.dart`.
+- All binary sections must be padded to 16-byte alignment before the next section starts.
+- Font atlas generation must extract the alpha channel with `rgbaBytes[i * 4 + 3]`. The CI enforces this pattern; do not change it without updating the linter check.
+
+## 9. Fuzzing and Correctness
+
+- The Rust crate contains deterministic fuzz tests for the bytecode VM. Do not disable or weaken them.
+- When modifying the VM, Arena access helper, or package loader, consider adding new fuzz cases or unit tests that exercise edge conditions (truncated input, out-of-bounds jumps, misaligned access).
+
+## 10. Minimal, Surgical Changes
+
 - Preserve existing file and style conventions.
 - Do not refactor for style; only change what is necessary for the task.
 - When in doubt, prefer explicit, commented, safe code over cleverness.
+- Do not break the C-ABI layouts or the single-clock VSync-driven pulse model.

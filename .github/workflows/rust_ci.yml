@@ -5,10 +5,16 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_call:
 
 jobs:
   build-test:
-    runs-on: ubuntu-latest
+    name: Build and test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-14]
+    runs-on: ${{ matrix.os }}
     defaults:
       run:
         working-directory: malphas_core
@@ -33,4 +39,14 @@ jobs:
         run: cargo build --release --locked
 
       - name: Run tests
-        run: cargo test --locked --verbose
+        run: cargo test --release --locked
+
+      - name: Upload native artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: malphas_core-${{ matrix.os }}
+          path: |
+            malphas_core/target/release/malphas_core.dll
+            malphas_core/target/release/libmalphas_core.so
+            malphas_core/target/release/libmalphas_core.dylib
+          if-no-files-found: ignore
