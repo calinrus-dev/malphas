@@ -32,23 +32,42 @@ class MalphasHubScreen extends StatefulWidget {
 
 class _MalphasHubScreenState extends State<MalphasHubScreen> {
   bool _isGridView = true;
-  final List<MalphasEnvironment> _environments = [
-    MalphasEnvironment(
-      id: 'env_01',
-      name: 'Mecatron Core Target',
-      accentColor: const Color(0xffe0dcd3),
-      isPinned: true,
-      engineId: 'eng_liquid_01',
-      packageIds: ['pack_kanji_01'],
-    ),
-    MalphasEnvironment(
-      id: 'env_02',
-      name: 'Isolated Sandboxed Buffer',
-      accentColor: const Color(0xff8a8a8a),
-      engineId: 'eng_liquid_01',
-      packageIds: ['pack_sprites_retro'],
-    ),
-  ];
+  late List<MalphasEnvironment> _environments;
+
+  @override
+  void initState() {
+    super.initState();
+    EngineController().scanAvailableEngines();
+    _buildEnvironments();
+  }
+
+  void _buildEnvironments() {
+    final packages = PackageController().getAllPackages();
+    final engines = EngineController().getAllEngines();
+    final firstEngineId = engines.firstOrNull?.id;
+
+    if (packages.isEmpty) {
+      _environments = [
+        MalphasEnvironment(
+          id: 'env_sandbox',
+          name: 'Malphas Sandbox',
+          accentColor: const Color(0xffe0dcd3),
+          engineId: firstEngineId,
+          packageIds: [],
+        ),
+      ];
+    } else {
+      _environments = packages.map((pack) {
+        return MalphasEnvironment(
+          id: pack.id,
+          name: pack.name,
+          accentColor: const Color(0xffe0dcd3),
+          engineId: firstEngineId,
+          packageIds: [pack.id],
+        );
+      }).toList();
+    }
+  }
 
   void _showCreateEnvironmentDialog() {
     showDialog(

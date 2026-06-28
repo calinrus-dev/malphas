@@ -47,3 +47,10 @@ jobs:
             target/release/libmalphas_core.so
             target/release/libmalphas_core.dylib
           if-no-files-found: ignore
+
+      - name: Upload CLI executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: malphas-cli-${{ matrix.os }}
+          path: ${{ matrix.os == 'windows-latest' && 'target/release/malphas-cli.exe' || 'target/release/malphas-cli' }}
+          if-no-files-found: error

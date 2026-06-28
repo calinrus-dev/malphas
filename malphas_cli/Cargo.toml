@@ -1,8 +1,8 @@
 [package]
 name = "malphas_cli"
-version = "1.0.0"
-edition = "2021"
-authors = ["Calin Rus"]
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
 
 [[bin]]
 name = "malphas-cli"

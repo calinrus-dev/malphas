@@ -7,7 +7,7 @@ class MalphasEngine {
   final String version;
   final NativeRuntime runtime;
   final String binaryName;
-  final String sha256;
+  String sha256;
   final int allocatedMemoryBytes; // Simulación de la Arena
   EngineStatus status;
 

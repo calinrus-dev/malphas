@@ -1,3 +1,8 @@
 [workspace]
 members = ["malphas_core", "malphas_cli"]
 resolver = "2"
+
+[workspace.package]
+version = "2.3.0"
+edition = "2021"
+authors = ["Calin Rus"]

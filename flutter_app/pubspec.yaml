@@ -1,7 +1,7 @@
 name: malphas_app
-description: "Consola Virtual Agnostica Malphas v1.0"
+description: "Malphas v2.3.0"
 publish_to: 'none'
-version: 1.0.0+1
+version: 2.3.0+1
 
 environment:
   sdk: '>=3.0.0 <4.0.0'

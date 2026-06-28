@@ -26,6 +26,12 @@ jobs:
           name: malphas_core-ubuntu-latest
           path: native/
 
+      - name: Download CLI executable
+        uses: actions/download-artifact@v4
+        with:
+          name: malphas-cli-ubuntu-latest
+          path: native/
+
       - name: Place native library where MalphasBindings expects it
         shell: bash
         run: |
@@ -36,6 +42,13 @@ jobs:
           elif [ -f native/target/release/libmalphas_core.dylib ]; then
             cp native/target/release/libmalphas_core.dylib ../libmalphas_core.dylib
           fi
+
+      - name: Place CLI binary where MalphasPackageCompiler finds it
+        shell: bash
+        run: |
+          mkdir -p motors
+          cp native/target/release/malphas-cli motors/malphas-cli
+          chmod +x motors/malphas-cli
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
