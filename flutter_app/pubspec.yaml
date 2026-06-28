@@ -22,6 +22,11 @@ dev_dependencies:
 flutter:
   uses-material-design: true
 
+  fonts:
+    - family: JetBrainsMono
+      fonts:
+        - asset: assets/fonts/JetBrainsMono-Regular.ttf
+
   # Sección de recursos declarada para futura integración de assets del motor
   assets:
     - assets/fonts/

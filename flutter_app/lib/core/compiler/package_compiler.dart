@@ -195,7 +195,7 @@ class MalphasPackageCompiler {
           text: charStr,
           style: const TextStyle(
             fontSize: 24,
-            fontFamily: 'Courier',
+            fontFamily: 'JetBrainsMono',
             color: Colors.white,
           ),
         ),
@@ -233,7 +233,7 @@ class MalphasPackageCompiler {
 
     final a8Bytes = Uint8List(512 * 512);
     for (int i = 0; i < 512 * 512; i++) {
-      a8Bytes[i] = rgbaBytes[i * 4]; // Extract R channel intensity
+      a8Bytes[i] = rgbaBytes[i * 4 + 3]; // Extract alpha channel
     }
 
     return {
