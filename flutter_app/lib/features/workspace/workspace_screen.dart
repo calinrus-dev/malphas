@@ -1,9 +1,13 @@
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import '../../core/ffi/malphas_bindings.dart';
 import '../../core/ui_primitives/primitive_canvas.dart';
 import '../hub/hub_screen.dart';
 import '../package_manager/package_manager_screen.dart';
+import '../package_manager/package_controller.dart';
 import '../engine_manager/engine_manager_screen.dart';
 
 class WorkspaceScreen extends StatefulWidget {
@@ -31,6 +35,106 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
       // Refresco visual repaint-driven sin re-layouts globales en alta frecuencia (Regla 5)
     });
     _ticker.start();
+
+    _autoLoadPackages();
+  }
+
+  /// Loads the environment's first package (or the default bouncing demo) into
+  /// the native core, configures the entities, and starts the simulation pulse.
+  Future<void> _autoLoadPackages() async {
+    await PackageController().init();
+
+    final packageIds = widget.environment.packageIds;
+    final targetPackId =
+        packageIds.isNotEmpty ? packageIds.first : 'bouncing_demo';
+
+    final mhpFile = await _resolveMhpFile(targetPackId);
+    if (mhpFile == null || !mhpFile.existsSync()) {
+      debugPrint('Workspace auto-load: no .mhp found for $targetPackId');
+      return;
+    }
+
+    if (!bindings.isNativeAvailable) {
+      debugPrint('Workspace auto-load: native core not available');
+      return;
+    }
+
+    bindings.pauseEngine(true);
+    try {
+      final loadResult = bindings.loadPack(mhpFile.path);
+      if (loadResult != 0) {
+        debugPrint('Workspace auto-load: loadPack failed with $loadResult');
+        return;
+      }
+
+      _configureDefaultEntities();
+    } finally {
+      bindings.pauseEngine(false);
+    }
+  }
+
+  /// Searches the compiled package in `examples/` and `packages/`.
+  Future<File?> _resolveMhpFile(String packId) async {
+    final workspace = Directory.current.path;
+    final candidates = [
+      File('$workspace/examples/bouncing_demo/$packId.mhp'),
+      File('$workspace/examples/$packId/$packId.mhp'),
+      File('$workspace/packages/$packId.mhp'),
+      File('$workspace/examples/$packId.mhp'),
+    ];
+    for (final candidate in candidates) {
+      if (candidate.existsSync()) return candidate;
+    }
+    return null;
+  }
+
+  /// Configures a default rectangle + text scene matching the integration test.
+  void _configureDefaultEntities() {
+    bindings.setEntitiesCount(2);
+
+    bindings.configureEntity(
+      entityId: 0,
+      commandType: 1, // rectangle
+      layer: 0,
+      x: 50.0,
+      y: 50.0,
+      width: 100.0,
+      height: 100.0,
+      colorRgba: 0xFF00FFCC,
+      speedX: 4.0,
+      speedY: 3.0,
+      minX: 0.0,
+      maxX: 1000.0,
+      minY: 0.0,
+      maxY: 1000.0,
+    );
+
+    const textOffset = 8192;
+    bindings.writeArenaText(
+      textOffset,
+      100.0,
+      100.0,
+      24.0,
+      Uint8List.fromList([...utf8.encode('MALPHAS'), 0]),
+    );
+
+    bindings.configureEntity(
+      entityId: 1,
+      commandType: 2, // text
+      layer: 1,
+      x: 100.0,
+      y: 100.0,
+      width: 24.0,
+      height: 0.0,
+      colorRgba: 0xFFFFFFFF,
+      speedX: 0.0,
+      speedY: 0.0,
+      minX: 0.0,
+      maxX: 1000.0,
+      minY: 0.0,
+      maxY: 1000.0,
+      strOffset: textOffset,
+    );
   }
 
   @override

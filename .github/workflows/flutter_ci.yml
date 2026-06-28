@@ -99,7 +99,7 @@ jobs:
           export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${{ github.workspace }}/flutter_app/motors:${{ github.workspace }}
           cd flutter_app
           mkdir -p test_logs
-          xvfb-run flutter test --machine > test_logs/flutter_test_log.json 2> test_logs/flutter_test_stderr.log || TEST_EXIT=$?
+          xvfb-run --auto-servernum flutter test --machine > test_logs/flutter_test_log.json 2> test_logs/flutter_test_stderr.log || TEST_EXIT=$?
           echo '--- FLUTTER TEST STDERR ---'
           cat test_logs/flutter_test_stderr.log
           echo '--- END STDERR ---'

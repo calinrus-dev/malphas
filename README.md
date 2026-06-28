@@ -1,8 +1,8 @@
-# Malphas v2.3 — Onboarding v2.4
+# Malphas v2.4.0 — Decoupled & Automated Onboarding
 
 A high-performance, terminal-inspired graphical engine with a modular Rust core and a passive Flutter frontend. The two sides communicate through a small, explicit C-ABI boundary and share memory directly instead of marshalling messages across an isolating bridge.
 
-> **Onboarding v2.4** closes the local development loop: a real `examples/bouncing_demo/` package is compiled by `malphas-cli`, the Flutter front-end discovers engines and packages from disk instead of using hard-coded mocks, and CI is blinded to native artifacts so tests run with the real `malphas_core` motor and CLI on every push.
+> **v2.4.0** closes the local development loop: a real `examples/bouncing_demo/` package is compiled by `malphas-cli`, the Flutter front-end auto-loads packages when entering a workspace, discovers engines and packages from disk instead of using hard-coded mocks, and CI is blinded to native artifacts so tests run with the real `malphas_core` motor and CLI on every push.
 
 ## Architecture at a glance
 
@@ -305,7 +305,13 @@ cd flutter_app && flutter build windows --release
 
 The `./build.sh` script and `build_core.ps1` are kept in parity. They detect the host platform, build `malphas_core` and `malphas_cli` from the workspace root, copy the resulting native library to `flutter_app/motors/` with a timestamped name, keep the three most recent motors, copy the CLI executable into the same folder, and deploy a non-timestamped motor plus signature into existing Flutter build directories.
 
-When running Flutter tests locally or in CI, the dynamic linker must be able to find the native motor. On Linux this is done by exporting `LD_LIBRARY_PATH` to include `flutter_app/motors/`; on Windows the motor is picked up from the same directory automatically once copied.
+On Linux and macOS, `./build.sh` also deploys `libmalphas_core.so` into `flutter_app/android/app/src/main/jniLibs/arm64-v8a/` so the Android Gradle Plugin bundles the native motor into the APK/AAB automatically.
+
+When running Flutter tests locally or in CI, the dynamic linker must be able to find the native motor. On Linux this is done by exporting `LD_LIBRARY_PATH` to include `flutter_app/motors/`; on Windows the motor is picked up from the same directory automatically once copied. On Android, the motor is loaded from the bundled `jniLibs` via the standard platform search path.
+
+## Auto-load behavior
+
+When a user enters a workspace from the Hub, `WorkspaceScreen` automatically loads the environment's first package (or the default `examples/bouncing_demo/` demo) into the native core, configures the rectangle and text entities in the Arena, and starts the VSync-driven simulation pulse. No manual visit to the `PACKS` tab is required; the canvas is live on entry.
 
 ## Repository layout
 

@@ -146,6 +146,9 @@ case "$PLATFORM" in
             "$ROOT/flutter_app/build/linux/x64/debug/bundle/lib"
             "$ROOT/flutter_app/build/linux/x64/release/bundle/lib"
         )
+        android_targets=(
+            "$ROOT/flutter_app/android/app/src/main/jniLibs/arm64-v8a"
+        )
         ;;
     macos)
         flutter_targets=(
@@ -153,6 +156,9 @@ case "$PLATFORM" in
             "$ROOT/flutter_app/build/macos/Build/Products/Release"
             "$ROOT/flutter_app/build/macos/Build/Products/Debug/Malphas.app/Contents/Frameworks"
             "$ROOT/flutter_app/build/macos/Build/Products/Release/Malphas.app/Contents/Frameworks"
+        )
+        android_targets=(
+            "$ROOT/flutter_app/android/app/src/main/jniLibs/arm64-v8a"
         )
         ;;
 esac
@@ -166,6 +172,14 @@ for target in "${flutter_targets[@]}"; do
             ok "Copied signature to: $target/$LIB_NAME.sig"
         fi
     fi
+done
+
+# Deploy the native library into the Android jniLibs directory so it is bundled
+# into the APK/AAB automatically by the Android Gradle Plugin.
+for target in "${android_targets[@]}"; do
+    mkdir -p "$target"
+    cp -f "$SRC_LIB" "$target/$LIB_NAME"
+    ok "Copied Android library to: $target/$LIB_NAME"
 done
 
 ok "Build complete."

@@ -38,7 +38,14 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
   void initState() {
     super.initState();
     EngineController().scanAvailableEngines();
-    _buildEnvironments();
+    _initializePackagesAndBuild();
+  }
+
+  Future<void> _initializePackagesAndBuild() async {
+    await PackageController().init();
+    if (mounted) {
+      setState(() => _buildEnvironments());
+    }
   }
 
   void _buildEnvironments() {

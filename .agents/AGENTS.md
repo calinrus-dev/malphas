@@ -1,8 +1,8 @@
-# Malphas Agent Instructions — v2.4
+# Malphas Agent Instructions — v2.4.0
 
 These rules define the design language, build/test workflow, FFI safety constraints, and agent conventions of the Malphas project. All agents modifying code, documentation, or system mechanics must follow them.
 
-Version v2.4 closes the onboarding loop: the Flutter front-end scans real engines and packages from disk, CI consumes blinded native artifacts, and both the Bash and PowerShell build scripts are kept in parity.
+Version v2.4.0 — Decoupled & Automated Onboarding closes the loop: the Flutter front-end auto-loads the active package when entering a workspace, scans real engines and packages from disk, CI consumes blinded native artifacts, and both the Bash and PowerShell build scripts are kept in parity.
 
 ## 1. Terminal Aesthetic
 
@@ -151,21 +151,28 @@ Malphas shares memory between Dart and Rust. Breaking these rules causes crashes
 - They build the workspace in release mode, then copy the native motor into `flutter_app/motors/` using a timestamped filename (`malphas_core_YYYYMMDD_HHMMSS.<ext>`).
 - They keep only the three most recent timestamped motors plus their `.sig` files to avoid unbounded growth.
 - They also copy the CLI executable into `flutter_app/motors/` so Dart can invoke it, and deploy a non-timestamped copy of the motor plus signature to the workspace root and into existing Flutter build directories.
+- On Linux and macOS, `./build.sh` additionally deploys `libmalphas_core.so` into `flutter_app/android/app/src/main/jniLibs/arm64-v8a/` so Android builds bundle the motor automatically.
 - Neither script should leave the repository in a state that requires manual copying before `flutter test` or `flutter build` can succeed.
 
-## 10. Fuzzing and Correctness
+## 10. Workspace Auto-Load
+
+- `WorkspaceScreen` must auto-load the environment's first package (or the default `examples/bouncing_demo/` demo) in `initState`.
+- The load sequence must be: initialize `PackageController`, resolve the `.mhp` file on disk, call `MalphasBindings.loadPack()`, configure the default rectangle + text entities through the Rust-gated helpers, and unpause the engine.
+- The canvas must be live immediately; do not require the user to open the `PACKS` tab or compile manually.
+
+## 11. Fuzzing and Correctness
 
 - The Rust workspace contains deterministic fuzz tests for the bytecode VM. Do not disable or weaken them.
 - When modifying the VM, Arena access helper, or package loader, consider adding new fuzz cases or unit tests that exercise edge conditions (truncated input, out-of-bounds jumps, misaligned access).
 
-## 11. Minimal, Surgical Changes
+## 12. Minimal, Surgical Changes
 
 - Preserve existing file and style conventions.
 - Do not refactor for style; only change what is necessary for the task.
 - When in doubt, prefer explicit, commented, safe code over cleverness.
 - Do not break the C-ABI layouts or the single-clock VSync-driven pulse model.
 
-## 12. CI/CD Artifact Blindage
+## 13. CI/CD Artifact Blindage
 
 - Native binaries (`malphas_core` and `malphas-cli`) must never be committed to git. They are produced by `./build.sh` / `.\build_core.ps1` locally or downloaded from CI artifacts in GitHub Actions.
 - `rust_ci.yml` must upload the CLI and motor artifacts per OS so downstream Flutter jobs can consume them.
@@ -173,13 +180,13 @@ Malphas shares memory between Dart and Rust. Breaking these rules causes crashes
 - `flutter_lint.yml` must download the motor artifact so `flutter analyze` can resolve FFI bindings, and must run `dart format --set-exit-if-changed .` to enforce code style.
 - CI failures caused by stale artifact paths, missing `LD_LIBRARY_PATH`, or outdated format checks are treated as release blockers.
 
-## 13. Version Unification
+## 14. Version Unification
 
 - The Rust workspace version in `Cargo.toml` and the Flutter version in `flutter_app/pubspec.yaml` must remain in sync.
 - Use the workspace `version` key for both crates; do not override per-crate versions manually.
 - A version bump is a deliberate release action and must be accompanied by an updated tag and release notes.
 
-## 14. Dart Formatting
+## 15. Dart Formatting
 
 - All Dart source files must be formatted with the project's bundled `dart format`.
 - Run `cd flutter_app && dart format --set-exit-if-changed .` before considering Flutter work complete.
