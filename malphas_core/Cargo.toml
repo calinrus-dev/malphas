@@ -8,6 +8,10 @@ authors.workspace = true
 name = "malphas_core"
 crate-type = ["cdylib"]
 
+[[bin]]
+name = "sign_engine"
+path = "src/bin/sign_engine.rs"
+
 [dependencies]
 sha2 = "0.10.8"
 zip = "0.6.6"

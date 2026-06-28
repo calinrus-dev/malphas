@@ -38,6 +38,16 @@ jobs:
       - name: Run tests
         run: cargo test --release --locked
 
+      - name: Sign native engine with test key
+        env:
+          TEST_PRIVATE_KEY: 4246f84c82a737da1d31c4aa2011961eb09018a9070de39d3dc4e6db0062299d
+        run: |
+          for lib in target/release/libmalphas_core.so target/release/libmalphas_core.dylib target/release/malphas_core.dll; do
+            if [ -f "$lib" ]; then
+              cargo run --release --bin sign_engine -- sign "$lib" "$TEST_PRIVATE_KEY"
+            fi
+          done
+
       - name: Upload native artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -46,6 +56,16 @@ jobs:
             target/release/malphas_core.dll
             target/release/libmalphas_core.so
             target/release/libmalphas_core.dylib
+          if-no-files-found: ignore
+
+      - name: Upload engine signatures
+        uses: actions/upload-artifact@v4
+        with:
+          name: malphas_core-sig-${{ matrix.os }}
+          path: |
+            target/release/malphas_core.dll.sig
+            target/release/libmalphas_core.so.sig
+            target/release/libmalphas_core.dylib.sig
           if-no-files-found: ignore
 
       - name: Upload CLI executable

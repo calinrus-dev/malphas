@@ -9,11 +9,13 @@ class EngineController {
 
   EngineController._internal();
 
-  // MALPHAS REINFORCED v2.2 Phase 6 — Ed25519 public key for engine
-  // signature verification. This is the test key generated for local builds.
-  // Public key hex: d6bb3217a16e68819a37f68488c4f3726bc97cdd8b7e7a5b15d77bcdf0e63dab
+  // MALPHAS REINFORCED v2.4.3 — Ed25519 public key for engine
+  // signature verification. This is the test key generated for local builds
+  // and CI; it must match the private key used to sign the motor artifacts.
+  // Public key hex: e9cb56c4ed5850d6c2f1f1f697feb1e0f9b0b6bd9130a871bcd2ef287b78e963
   static const String _enginePublicKeyHex =
-      'd6bb3217a16e68819a37f68488c4f3726bc97cdd8b7e7a5b15d77bcdf0e63dab';
+      'e9cb56c4ed5850d6c2f1f1f697feb1e0f9b0b6bd9130a871bcd2ef287b78e963';
+  static String get publicKeyHex => _enginePublicKeyHex;
 
   final List<MalphasEngine> engines = [
     MalphasEngine(

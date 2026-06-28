@@ -15,10 +15,13 @@ void main() {
     }
 
     final controller = EngineController();
-    final workspace = Directory.current.path;
-    final dllPath = Platform.isWindows
-        ? '$workspace/malphas_core.dll'
-        : '$workspace/libmalphas_core.so';
+    // The test may run from flutter_app/ or from the repo root.
+    var workspace = Directory.current.path;
+    final binaryName = Platform.isWindows ? 'malphas_core.dll' : 'libmalphas_core.so';
+    if (!File('$workspace/$binaryName').existsSync()) {
+      workspace = Directory.current.parent.path;
+    }
+    final dllPath = '$workspace/$binaryName';
     final sigPath = '$dllPath.sig';
     final sigBackupPath = '$dllPath.sig.bak';
     final sigFile = File(sigPath);

@@ -32,7 +32,7 @@ class _PackageConfigScreenState extends State<PackageConfigScreen> {
       final compiler = MalphasPackageCompiler();
       final manifest = {
         "pack_id": "pack_custom_01",
-        "pack_name": "Mecatron Core System",
+        "pack_name": "Malphas Demo Pack",
         "version": "1.0.0",
         "target_canvas": {"width": 1000, "height": 1000},
         "objects": [
@@ -60,8 +60,8 @@ class _PackageConfigScreenState extends State<PackageConfigScreen> {
         packagesDir.createSync(recursive: true);
       }
 
-      final outputPathMhp = '${packagesDir.path}/mecatron.mhp';
-      final outputPathMsp = '${packagesDir.path}/mecatron.msp';
+      final outputPathMhp = '${packagesDir.path}/demo.mhp';
+      final outputPathMsp = '${packagesDir.path}/demo.msp';
 
       await File(outputPathMhp).writeAsBytes(output.mhpBytes);
       await File(outputPathMsp).writeAsBytes(output.mspBytes);
@@ -200,7 +200,7 @@ class _PackageConfigScreenState extends State<PackageConfigScreen> {
                       fontWeight: FontWeight.bold,
                       letterSpacing: 0.5)),
               const SizedBox(height: 12),
-              _buildField('PACKAGE NAME', 'Mecatron Geometry Core'),
+              _buildField('PACKAGE NAME', 'Malphas Geometry Core'),
               _buildField('GENERAL DESCRIPTION',
                   'Static structures mapped to raw native memory.'),
               Wrap(

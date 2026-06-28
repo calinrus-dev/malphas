@@ -1,6 +1,6 @@
 enum EngineStatus { active, standby, corrupt, unverified }
 
-enum NativeRuntime { rust, zig, cpp }
+enum NativeRuntime { rust }
 
 class MalphasEngine {
   final String id;
@@ -24,13 +24,6 @@ class MalphasEngine {
   });
 
   String get runtimeLabel {
-    switch (runtime) {
-      case NativeRuntime.rust:
-        return 'Rust Core (cdylib)';
-      case NativeRuntime.zig:
-        return 'Zig native (C-ABI)';
-      case NativeRuntime.cpp:
-        return 'C++ Bare-Metal';
-    }
+    return 'Rust Core (cdylib)';
   }
 }
