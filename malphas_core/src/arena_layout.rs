@@ -100,8 +100,8 @@ mod tests {
         assert_eq!(std::mem::align_of::<DartRenderCommand>(), 4);
         assert_eq!(std::mem::size_of::<CoreCommandBuffer>(), 16);
         assert_eq!(std::mem::align_of::<CoreCommandBuffer>(), 16);
-        assert_eq!(std::mem::size_of::<MalphasDoubleBufferBridge>(), 48);
-        assert_eq!(std::mem::align_of::<MalphasDoubleBufferBridge>(), 16);
+        assert_eq!(std::mem::size_of::<MalphasDoubleBufferBridge>(), 64);
+        assert_eq!(std::mem::align_of::<MalphasDoubleBufferBridge>(), 64);
         assert_eq!(std::mem::size_of::<MhpHeader>(), 112);
         assert_eq!(std::mem::align_of::<MhpHeader>(), 16);
         assert_eq!(std::mem::size_of::<MhpObjectDescriptor>(), 32);

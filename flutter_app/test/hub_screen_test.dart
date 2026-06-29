@@ -15,11 +15,13 @@ void main() {
   late Directory emptyWorkspace;
 
   setUp(() async {
-    persistenceDir =
-        Directory.systemTemp.createTempSync('malphas_hub_persistence');
+    persistenceDir = Directory.systemTemp.createTempSync(
+      'malphas_hub_persistence',
+    );
     emptyWorkspace = Directory.systemTemp.createTempSync('malphas_hub_ws');
-    AppStatePersistenceService()
-        .setDocumentsDirectoryOverride(persistenceDir.path);
+    AppStatePersistenceService().setDocumentsDirectoryOverride(
+      persistenceDir.path,
+    );
     // Ensure a fresh controller state for each test and point to an empty
     // workspace so package scanning does not influence the test.
     PackageController().reset();
@@ -37,8 +39,9 @@ void main() {
     } catch (_) {}
   });
 
-  testWidgets('HubScreen renders the default sandbox environment',
-      (WidgetTester tester) async {
+  testWidgets('HubScreen renders the default sandbox environment', (
+    WidgetTester tester,
+  ) async {
     await tester.pumpWidget(const MaterialApp(home: MalphasHubScreen()));
     await tester.pumpAndSettle();
 
@@ -46,8 +49,9 @@ void main() {
     expect(find.text('Malphas Sandbox'), findsOneWidget);
   });
 
-  testWidgets('Creating an environment persists it across reloads',
-      (WidgetTester tester) async {
+  testWidgets('Creating an environment persists it across reloads', (
+    WidgetTester tester,
+  ) async {
     await tester.pumpWidget(const MaterialApp(home: MalphasHubScreen()));
     await tester.pumpAndSettle();
 
@@ -60,7 +64,8 @@ void main() {
 
     expect(
       find.byWidgetPredicate(
-          (widget) => widget is Text && widget.data == 'Test Channel'),
+        (widget) => widget is Text && widget.data == 'Test Channel',
+      ),
       findsOneWidget,
     );
 
@@ -70,13 +75,15 @@ void main() {
 
     expect(
       find.byWidgetPredicate(
-          (widget) => widget is Text && widget.data == 'Test Channel'),
+        (widget) => widget is Text && widget.data == 'Test Channel',
+      ),
       findsOneWidget,
     );
   });
 
-  testWidgets('Pinning an environment is persisted',
-      (WidgetTester tester) async {
+  testWidgets('Pinning an environment is persisted', (
+    WidgetTester tester,
+  ) async {
     final persistence = AppStatePersistenceService();
     persistence.saveEnvironments([
       MalphasEnvironment(
@@ -99,8 +106,9 @@ void main() {
     expect(jsonList.first['isPinned'], isTrue);
   });
 
-  testWidgets('EngineController notifies listeners on scan',
-      (WidgetTester tester) async {
+  testWidgets('EngineController notifies listeners on scan', (
+    WidgetTester tester,
+  ) async {
     final controller = EngineController();
     var notified = false;
     controller.addListener(() => notified = true);

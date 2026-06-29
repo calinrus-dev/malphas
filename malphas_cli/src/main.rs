@@ -383,7 +383,7 @@ fn build_msp(bytecode: &[u8]) -> Vec<u8> {
     };
 
     let mut out = Vec::with_capacity(MSP_HEADER_SIZE + bytecode.len());
-    out.extend_from_slice(msp_header_as_bytes(&header));
+    out.extend_from_slice(&msp_header_as_bytes(&header));
     out.extend_from_slice(bytecode);
     out
 }
@@ -423,7 +423,7 @@ fn build_mhp(
             skins_size: 0,
             padding: [0; 12],
         };
-        objects_table.extend_from_slice(descriptor_as_bytes(&descriptor));
+        objects_table.extend_from_slice(&descriptor_as_bytes(&descriptor));
     }
     pad16(&mut objects_table);
     pad16(&mut data_pool);
@@ -507,22 +507,26 @@ fn header_as_bytes(header: &MhpHeader) -> [u8; MHP_HEADER_SIZE] {
     buf
 }
 
-fn descriptor_as_bytes(descriptor: &MhpObjectDescriptor) -> &[u8] {
-    unsafe {
-        std::slice::from_raw_parts(
-            std::ptr::from_ref::<MhpObjectDescriptor>(descriptor) as *const u8,
-            std::mem::size_of::<MhpObjectDescriptor>(),
-        )
-    }
+fn descriptor_as_bytes(descriptor: &MhpObjectDescriptor) -> [u8; 32] {
+    let mut buf = [0u8; 32];
+    buf[0..4].copy_from_slice(&descriptor.object_id.to_le_bytes());
+    buf[4..8].copy_from_slice(&descriptor.properties_offset.to_le_bytes());
+    buf[8..12].copy_from_slice(&descriptor.properties_size.to_le_bytes());
+    buf[12..16].copy_from_slice(&descriptor.skins_offset.to_le_bytes());
+    buf[16..20].copy_from_slice(&descriptor.skins_size.to_le_bytes());
+    buf[20..32].copy_from_slice(&descriptor.padding);
+    buf
 }
 
-fn msp_header_as_bytes(header: &MspHeader) -> &[u8] {
-    unsafe {
-        std::slice::from_raw_parts(
-            std::ptr::from_ref::<MspHeader>(header) as *const u8,
-            std::mem::size_of::<MspHeader>(),
-        )
-    }
+fn msp_header_as_bytes(header: &MspHeader) -> [u8; 64] {
+    let mut buf = [0u8; 64];
+    buf[0..4].copy_from_slice(&header.magic);
+    buf[4..8].copy_from_slice(&header.version.to_le_bytes());
+    buf[8..40].copy_from_slice(&header.checksum);
+    buf[40..44].copy_from_slice(&header.bytecode_size.to_le_bytes());
+    buf[44..48].copy_from_slice(&header.entry_point.to_le_bytes());
+    buf[48..64].copy_from_slice(&header.padding);
+    buf
 }
 
 #[derive(Debug)]
@@ -548,6 +552,13 @@ fn compile_manifest(manifest_path: &Path) -> Result<(PathBuf, PathBuf), Box<dyn 
     let pack_id = manifest.pack_id;
     let canvas_width = manifest.canvas_width;
     let canvas_height = manifest.canvas_height;
+
+    if canvas_width == 0 {
+        return Err("canvas_width must be greater than 0".into());
+    }
+    if canvas_height == 0 {
+        return Err("canvas_height must be greater than 0".into());
+    }
 
     let objects: Vec<ObjectEntry> = manifest
         .objects

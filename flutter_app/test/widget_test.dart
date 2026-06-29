@@ -36,8 +36,9 @@ void main() {
         final offset = i * slotSize;
         if (offset + slotSize > totalSize) break;
 
-        final cmdPtr =
-            dffi.Pointer<DartRenderCommand>.fromAddress(ptr.address + offset);
+        final cmdPtr = dffi.Pointer<DartRenderCommand>.fromAddress(
+          ptr.address + offset,
+        );
 
         // Write fields
         cmdPtr.ref.commandType = 2;

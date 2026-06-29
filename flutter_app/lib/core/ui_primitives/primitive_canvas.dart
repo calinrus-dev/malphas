@@ -14,8 +14,11 @@ class PrimitiveCanvas extends StatelessWidget {
   final MalphasBindings bindings;
   final Listenable repaintNotifier;
 
-  const PrimitiveCanvas(
-      {super.key, required this.bindings, required this.repaintNotifier});
+  const PrimitiveCanvas({
+    super.key,
+    required this.bindings,
+    required this.repaintNotifier,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -73,33 +76,45 @@ class EnginePainter extends CustomPainter {
       return;
     }
 
-    // Bidirectional normalization over immutable virtual matrix 1000x1000
-    final scaleX = size.width / 1000.0;
-    final scaleY = size.height / 1000.0;
+    // Bidirectional normalization over immutable virtual matrix 1000x1000 with letterboxing
+    final double scale =
+        (size.width < size.height ? size.width : size.height) / 1000.0;
+    final double offsetX = (size.width - (1000.0 * scale)) / 2.0;
+    final double offsetY = (size.height - (1000.0 * scale)) / 2.0;
+
+    canvas.save();
+    canvas.translate(offsetX, offsetY);
+
+    // Zero-Copy DMA using typed lists directly on the FFI memory
+    final uint32View = commands.cast<dffi.Uint32>().asTypedList(count * 6);
+    final float32View = commands.cast<dffi.Float>().asTypedList(count * 6);
 
     int i = 0;
     while (i < count) {
-      // Count is validated above; use element pointer arithmetic (the
-      // non-deprecated spelling of Pointer.elementAt in this SDK version).
-      final command = (commands + i).ref;
-      final colorRgba = command.colorRgba;
+      final offset = i * 6;
+      final commandType = uint32View[offset] & 0xFF;
+      final colorRgba = uint32View[offset + 5];
 
-      switch (command.commandType) {
+      switch (commandType) {
         case 1: // Solid Rectangle
           final paint = _rectPaints.getPaint(colorRgba);
-          final x = command.x * scaleX;
-          final y = command.y * scaleY;
-          final w = command.width * scaleX;
-          final h = command.height * scaleY;
+          final x = float32View[offset + 1] * scale;
+          final y = float32View[offset + 2] * scale;
+          final w = float32View[offset + 3] * scale;
+          final h = float32View[offset + 4] * scale;
           canvas.drawRect(Rect.fromLTWH(x, y, w, h), paint);
           i += 1;
           break;
-        case 2: // Union text command: metadata in x/y, pointer in width/height.
+        case 2: // Union text command
           final paint = _textPaints.getPaint(colorRgba);
-          final payloadPtr = bindings.getTextPayloadPointer(commands + i);
-          if (payloadPtr != dffi.nullptr) {
-            _renderTextFromFonts(
-                canvas, command, payloadPtr, scaleX, scaleY, paint);
+          final int low = uint32View[offset + 3];
+          final int high = uint32View[offset + 4];
+          final int addr = (high << 32) | (low & 0xFFFFFFFF);
+
+          if (addr != 0) {
+            final payloadPtr = dffi.Pointer<TextPayload>.fromAddress(addr);
+            final maxChars = float32View[offset + 1].toInt();
+            _renderTextFromFonts(canvas, maxChars, payloadPtr, scale, paint);
           }
           i += 1;
           break;
@@ -108,6 +123,8 @@ class EnginePainter extends CustomPainter {
           break;
       }
     }
+
+    canvas.restore();
 
     _stopAndMaybeDrawOverlay(canvas);
   }
@@ -125,10 +142,7 @@ class EnginePainter extends CustomPainter {
     final telemetry = bindings.readTelemetry();
 
     final builder = ui.ParagraphBuilder(
-      ui.ParagraphStyle(
-        textAlign: TextAlign.left,
-        fontSize: 14,
-      ),
+      ui.ParagraphStyle(textAlign: TextAlign.left, fontSize: 14),
     )
       ..pushStyle(ui.TextStyle(color: Colors.white))
       ..addText('frame ${ms.toStringAsFixed(2)} ms\n')
@@ -145,10 +159,9 @@ class EnginePainter extends CustomPainter {
 
   void _renderTextFromFonts(
     Canvas canvas,
-    DartRenderCommand command,
+    int maxChars,
     dffi.Pointer<TextPayload> payloadPtr,
-    double scaleX,
-    double scaleY,
+    double scale,
     Paint paint,
   ) {
     final atlasImage = bindings.fontAtlasImage;
@@ -161,8 +174,8 @@ class EnginePainter extends CustomPainter {
     final fontSize = payload.fontSize > 0 ? payload.fontSize : 32.0;
     final fontScale = fontSize / 32.0;
 
-    double currentX = payload.x * scaleX;
-    final double startY = payload.y * scaleY;
+    double currentX = payload.x * scale;
+    final double startY = payload.y * scale;
 
     final arenaUint32 = arenaStart.cast<dffi.Uint32>();
     final metricsOffset = arenaUint32[ArenaLayout.fontMetricsOffset ~/ 4];
@@ -171,9 +184,6 @@ class EnginePainter extends CustomPainter {
     if (metricsOffset < 0 || metricsOffset >= bindings.arenaSize) return;
     const int metricsEntrySize = 16;
 
-    // The command's x field carries the text length; use it as a safety cap
-    // and fall back to scanning for the null terminator.
-    final maxChars = command.x > 0 ? command.x.toInt() : 0x7FFFFFFF;
     final stringStart =
         payloadPtr.cast<dffi.Uint8>() + dffi.sizeOf<TextPayload>();
 
@@ -207,16 +217,16 @@ class EnginePainter extends CustomPainter {
         );
 
         final destRect = Rect.fromLTWH(
-          currentX + (gXOffset * fontScale * scaleX),
+          currentX + (gXOffset * fontScale * scale),
           startY,
-          gw * fontScale * scaleX,
-          gh * fontScale * scaleY,
+          gw * fontScale * scale,
+          gh * fontScale * scale,
         );
 
         canvas.drawImageRect(atlasImage, srcRect, destRect, paint);
       }
 
-      currentX += gAdvance * fontScale * scaleX;
+      currentX += gAdvance * fontScale * scale;
       charIdx++;
     }
   }

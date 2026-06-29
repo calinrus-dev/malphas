@@ -45,36 +45,47 @@ class _EngineManagerPanelState extends State<EngineManagerPanel> {
       animation: _controller,
       builder: (context, child) {
         return Padding(
-          padding:
-              const EdgeInsets.only(top: 100, left: 16, right: 16, bottom: 95),
+          padding: const EdgeInsets.only(
+            top: 100,
+            left: 16,
+            right: 16,
+            bottom: 95,
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('Engine Depot', style: theme.textTheme.headlineMedium),
               const SizedBox(height: 4),
-              const Text('Signature status and verification in ../motors/',
-                  style: TextStyle(
-                      fontFamily: 'Arial',
-                      fontSize: 11,
-                      color: Colors.white24)),
+              const Text(
+                'Signature status and verification in ../motors/',
+                style: TextStyle(
+                  fontFamily: 'Arial',
+                  fontSize: 11,
+                  color: Colors.white24,
+                ),
+              ),
               const SizedBox(height: 16),
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(18),
                 decoration: BoxDecoration(
-                    color: theme.cardColor,
-                    borderRadius: BorderRadius.circular(24),
-                    border: Border.all(color: const Color(0xff161616))),
+                  color: theme.cardColor,
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(color: const Color(0xff161616)),
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('NATIVE ARENA TELEMETRY',
-                        style: TextStyle(
-                            fontFamily: 'Arial',
-                            fontSize: 9,
-                            color: Colors.white38,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 0.5)),
+                    const Text(
+                      'NATIVE ARENA TELEMETRY',
+                      style: TextStyle(
+                        fontFamily: 'Arial',
+                        fontSize: 9,
+                        color: Colors.white38,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
                     const SizedBox(height: 12),
                     Wrap(
                       spacing: 16,
@@ -85,7 +96,7 @@ class _EngineManagerPanelState extends State<EngineManagerPanel> {
                         _statBlock('ALIGNMENT', '#[repr(C)]'),
                         _statBlock('VSYNC REFRESH', '120 HZ LOOP'),
                       ],
-                    )
+                    ),
                   ],
                 ),
               ),
@@ -125,26 +136,34 @@ class _EngineManagerPanelState extends State<EngineManagerPanel> {
                     return Container(
                       margin: const EdgeInsets.only(bottom: 12),
                       decoration: BoxDecoration(
-                          color: theme.cardColor,
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(color: const Color(0xff141414))),
+                        color: theme.cardColor,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: const Color(0xff141414)),
+                      ),
                       child: ListTile(
                         contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 6),
-                        title: Text(engine.name,
-                            style: const TextStyle(
-                                fontFamily: 'Arial',
-                                fontSize: 14,
-                                fontWeight: FontWeight.bold)),
+                          horizontal: 16,
+                          vertical: 6,
+                        ),
+                        title: Text(
+                          engine.name,
+                          style: const TextStyle(
+                            fontFamily: 'Arial',
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                         subtitle: Padding(
                           padding: const EdgeInsets.only(top: 4),
                           child: Text(
-                              'Runtime: ${engine.runtimeLabel}\nStatus: $statusLabel\nHash: ${engine.sha256.length >= 16 ? '${engine.sha256.substring(0, 16)}...' : engine.sha256}',
-                              style: const TextStyle(
-                                  fontFamily: 'Courier',
-                                  fontSize: 10,
-                                  color: Colors.white24,
-                                  height: 1.3)),
+                            'Runtime: ${engine.runtimeLabel}\nStatus: $statusLabel\nHash: ${engine.sha256.length >= 16 ? '${engine.sha256.substring(0, 16)}...' : engine.sha256}',
+                            style: const TextStyle(
+                              fontFamily: 'Courier',
+                              fontSize: 10,
+                              color: Colors.white24,
+                              height: 1.3,
+                            ),
+                          ),
                         ),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
@@ -157,15 +176,21 @@ class _EngineManagerPanelState extends State<EngineManagerPanel> {
                                 backgroundColor: const Color(0xff1b1b1b),
                                 foregroundColor: Colors.white,
                                 padding: const EdgeInsets.symmetric(
-                                    horizontal: 12, vertical: 4),
+                                  horizontal: 12,
+                                  vertical: 4,
+                                ),
                                 shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(12)),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
                               ),
-                              child: Text(actionText,
-                                  style: const TextStyle(
-                                      fontFamily: 'Arial',
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.bold)),
+                              child: Text(
+                                actionText,
+                                style: const TextStyle(
+                                  fontFamily: 'Arial',
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                             ),
                           ],
                         ),
@@ -178,16 +203,19 @@ class _EngineManagerPanelState extends State<EngineManagerPanel> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                    color: const Color(0xff050505),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: const Color(0xff111111))),
+                  color: const Color(0xff050505),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0xff111111)),
+                ),
                 child: const Text(
-                    '[SYSTEM] Passive Display Server coupled to the GPU synchronously.',
-                    style: TextStyle(
-                        fontFamily: 'Arial',
-                        fontSize: 10,
-                        color: Colors.white38)),
-              )
+                  '[SYSTEM] Passive Display Server coupled to the GPU synchronously.',
+                  style: TextStyle(
+                    fontFamily: 'Arial',
+                    fontSize: 10,
+                    color: Colors.white38,
+                  ),
+                ),
+              ),
             ],
           ),
         );
@@ -200,19 +228,25 @@ class _EngineManagerPanelState extends State<EngineManagerPanel> {
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(label,
-            style: const TextStyle(
-                fontFamily: 'Arial',
-                fontSize: 8,
-                color: Colors.white24,
-                fontWeight: FontWeight.bold)),
+        Text(
+          label,
+          style: const TextStyle(
+            fontFamily: 'Arial',
+            fontSize: 8,
+            color: Colors.white24,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
         const SizedBox(height: 2),
-        Text(val,
-            style: const TextStyle(
-                fontFamily: 'Courier',
-                fontSize: 13,
-                fontWeight: FontWeight.bold,
-                color: Colors.white)),
+        Text(
+          val,
+          style: const TextStyle(
+            fontFamily: 'Courier',
+            fontSize: 13,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
+        ),
       ],
     );
   }

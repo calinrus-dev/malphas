@@ -1,8 +1,8 @@
-# Malphas Agent Instructions — v2.5.1
+# Malphas Agent Instructions — v2.5.5
 
 These rules define the design language, build/test workflow, FFI safety constraints, and agent conventions of the Malphas project. All agents modifying code, documentation, or system mechanics must follow them.
 
-Version v2.5.1 — Multi-Architecture Android Deployment closes the loop: the Flutter front-end auto-loads the active package when entering a workspace, scans real engines and packages from disk, CI consumes blinded native artifacts with the automated headless test binding, the Android pipeline locks the NDK r26c cross-compilation path, and both the Bash and PowerShell build scripts are kept in parity.
+Version v2.5.5 — Multi-Architecture Android Deployment closes the loop with absolute bare-metal speed: utilizing workspace-wide Link-Time Optimization (LTO), single codegen units, panic abort behavior, 64-byte cache line alignment for FFI bridge false sharing mitigation, VM Jump Table native execution, unaligned memory safety guarantees for package loaders using `std::ptr::read_unaligned` to prevent ARM64 alignment crashes, and explicit field-by-field package serialization.
 
 ## 1. Terminal Aesthetic
 

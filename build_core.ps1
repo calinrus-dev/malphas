@@ -22,7 +22,7 @@ $libName = 'malphas_core.dll'
 $ext     = 'dll'
 
 # Workspace-wide build artifacts live in target/release at the repo root
-$srcLib = Join-Path $root 'target/release' $libName
+$srcLib = Join-Path (Join-Path $root 'target/release') $libName
 $sigSrc = "$srcLib.sig"
 $rootSig = Join-Path $root "$libName.sig"
 
@@ -53,7 +53,7 @@ Write-Ok "Built core: $srcLib"
 
 # Verify the compiled CLI executable
 $cliName = 'malphas-cli.exe'
-$cliSrc = Join-Path $root 'target/release' $cliName
+$cliSrc = Join-Path (Join-Path $root 'target/release') $cliName
 if (-not (Test-Path $cliSrc -PathType Leaf)) {
     Write-Warn "Compiled CLI executable not found: $cliSrc"
 } else {

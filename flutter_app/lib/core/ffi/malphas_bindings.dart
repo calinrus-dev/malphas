@@ -46,15 +46,29 @@ class TelemetrySnapshot {
 ///   writes directly into the Arena for events.
 class MalphasBindings extends ChangeNotifier {
   static const int maxCommandBufferCapacity = 2048;
-  static const int _arenaSize = 8 * 1024 * 1024; // 8 MB
+  static const int _arenaSize = 16 * 1024 * 1024; // 16 MB
 
-  static final MalphasBindings _instance = MalphasBindings._internal();
+  static MalphasBindings _instance = MalphasBindings._internal();
   factory MalphasBindings() => _instance;
+
+  /// Resets the singleton to a fresh engine instance.
+  ///
+  /// This is intended for tests only. It shuts down the native engine, frees
+  /// shared memory, and creates a new binding instance so each test starts from
+  /// a clean state.
+  static void reset() {
+    _instance.dispose();
+    _instance = MalphasBindings._internal();
+  }
 
   late dffi.DynamicLibrary _nativeLib;
 
-  late final int Function(dffi.Pointer<MalphasDoubleBufferBridge>,
-      dffi.Pointer<dffi.Void>, int, int) initEngine;
+  late final int Function(
+    dffi.Pointer<MalphasDoubleBufferBridge>,
+    dffi.Pointer<dffi.Void>,
+    int,
+    int,
+  ) initEngine;
   late final int Function() shutdownEngine;
   late final int Function(int, double, double) processInputEvent;
   late final int Function() triggerEnginePulse;
@@ -65,21 +79,27 @@ class MalphasBindings extends ChangeNotifier {
   late final int Function(dffi.Pointer<dffi.Uint8>, int) loadResourcePackRaw;
   late final int Function(dffi.Pointer<ffi.Utf8>, dffi.Pointer<ffi.Utf8>)
       verifyBinaryIntegrity;
-  late final int Function(dffi.Pointer<ffi.Utf8>, dffi.Pointer<ffi.Utf8>,
-      dffi.Pointer<ffi.Utf8>) verifyEngineSignature;
+  late final int Function(
+    dffi.Pointer<ffi.Utf8>,
+    dffi.Pointer<ffi.Utf8>,
+    dffi.Pointer<ffi.Utf8>,
+  ) verifyEngineSignature;
   late final int Function(dffi.Pointer<ffi.Utf8>, dffi.Pointer<ffi.Utf8>)
       extractZipPackage;
   late final int Function(int) _pauseEngine;
 
   // Portable pointer delegates exposed from Rust.
   late final dffi.Pointer<CoreCommandBuffer> Function(
-      dffi.Pointer<MalphasDoubleBufferBridge>) getBufferAPtr;
+    dffi.Pointer<MalphasDoubleBufferBridge>,
+  ) getBufferAPtr;
   late final dffi.Pointer<CoreCommandBuffer> Function(
-      dffi.Pointer<MalphasDoubleBufferBridge>) getBufferBPtr;
+    dffi.Pointer<MalphasDoubleBufferBridge>,
+  ) getBufferBPtr;
   late final int Function(dffi.Pointer<MalphasDoubleBufferBridge>) getBackIndex;
   late final int Function(dffi.Pointer<CoreCommandBuffer>) getCommandCount;
   late final dffi.Pointer<DartRenderCommand> Function(
-      dffi.Pointer<CoreCommandBuffer>) getCommandsPointer;
+    dffi.Pointer<CoreCommandBuffer>,
+  ) getCommandsPointer;
   late final int Function(dffi.Pointer<MalphasDoubleBufferBridge>)
       getCommandsWritten;
   late final dffi.Pointer<TextPayload> Function(dffi.Pointer<DartRenderCommand>)
@@ -192,13 +212,15 @@ class MalphasBindings extends ChangeNotifier {
       originalFile = File(explicitSourcePath);
       if (!originalFile.existsSync()) {
         throw Exception(
-            'Explicit native library not found: $explicitSourcePath');
+          'Explicit native library not found: $explicitSourcePath',
+        );
       }
     } else {
       originalFile = File('$workspace/$originalName');
       if (!originalFile.existsSync()) {
-        originalFile =
-            File('$workspace/malphas_core/target/release/$originalName');
+        originalFile = File(
+          '$workspace/malphas_core/target/release/$originalName',
+        );
       }
       if (!originalFile.existsSync()) {
         // Let DynamicLibrary.open try the platform search path.
@@ -217,17 +239,19 @@ class MalphasBindings extends ChangeNotifier {
         .lookup<
             dffi.NativeFunction<
                 dffi.Int32 Function(
-                    dffi.Pointer<MalphasDoubleBufferBridge>,
-                    dffi.Pointer<dffi.Void>,
-                    dffi.Uint32,
-                    dffi.Uint32)>>('init_engine')
+                  dffi.Pointer<MalphasDoubleBufferBridge>,
+                  dffi.Pointer<dffi.Void>,
+                  dffi.Uint32,
+                  dffi.Uint32,
+                )>>('init_engine')
         .asFunction();
     shutdownEngine = _nativeLib
         .lookup<dffi.NativeFunction<dffi.Int32 Function()>>('shutdown_engine')
         .asFunction();
     _pauseEngine = _nativeLib
         .lookup<dffi.NativeFunction<dffi.Int32 Function(dffi.Int32)>>(
-            'pause_engine')
+          'pause_engine',
+        )
         .asFunction();
     processInputEvent = _nativeLib
         .lookup<
@@ -237,11 +261,13 @@ class MalphasBindings extends ChangeNotifier {
         .asFunction();
     triggerEnginePulse = _nativeLib
         .lookup<dffi.NativeFunction<dffi.Int32 Function()>>(
-            'trigger_engine_pulse')
+          'trigger_engine_pulse',
+        )
         .asFunction();
     processEngineTick = _nativeLib
         .lookup<dffi.NativeFunction<dffi.Int32 Function(dffi.Uint64)>>(
-            'process_engine_tick')
+          'process_engine_tick',
+        )
         .asFunction();
     loadResourcePack = _nativeLib
         .lookup<
@@ -277,9 +303,10 @@ class MalphasBindings extends ChangeNotifier {
         .lookup<
             dffi.NativeFunction<
                 dffi.Int32 Function(
-                    dffi.Pointer<ffi.Utf8>,
-                    dffi.Pointer<ffi.Utf8>,
-                    dffi.Pointer<ffi.Utf8>)>>('verify_engine_signature')
+                  dffi.Pointer<ffi.Utf8>,
+                  dffi.Pointer<ffi.Utf8>,
+                  dffi.Pointer<ffi.Utf8>,
+                )>>('verify_engine_signature')
         .asFunction();
     extractZipPackage = _nativeLib
         .lookup<
@@ -290,17 +317,17 @@ class MalphasBindings extends ChangeNotifier {
 
     getBufferAPtr = _nativeLib
         .lookup<
-                dffi.NativeFunction<
-                    dffi.Pointer<CoreCommandBuffer> Function(
-                        dffi.Pointer<MalphasDoubleBufferBridge>)>>(
-            'get_buffer_a_ptr')
+            dffi.NativeFunction<
+                dffi.Pointer<CoreCommandBuffer> Function(
+                  dffi.Pointer<MalphasDoubleBufferBridge>,
+                )>>('get_buffer_a_ptr')
         .asFunction();
     getBufferBPtr = _nativeLib
         .lookup<
-                dffi.NativeFunction<
-                    dffi.Pointer<CoreCommandBuffer> Function(
-                        dffi.Pointer<MalphasDoubleBufferBridge>)>>(
-            'get_buffer_b_ptr')
+            dffi.NativeFunction<
+                dffi.Pointer<CoreCommandBuffer> Function(
+                  dffi.Pointer<MalphasDoubleBufferBridge>,
+                )>>('get_buffer_b_ptr')
         .asFunction();
     getBackIndex = _nativeLib
         .lookup<
@@ -318,7 +345,8 @@ class MalphasBindings extends ChangeNotifier {
         .lookup<
             dffi.NativeFunction<
                 dffi.Pointer<DartRenderCommand> Function(
-                    dffi.Pointer<CoreCommandBuffer>)>>('get_commands_pointer')
+                  dffi.Pointer<CoreCommandBuffer>,
+                )>>('get_commands_pointer')
         .asFunction();
     getCommandsWritten = _nativeLib
         .lookup<
@@ -337,30 +365,38 @@ class MalphasBindings extends ChangeNotifier {
 
     getVmTickMicros = _nativeLib
         .lookup<dffi.NativeFunction<dffi.Uint64 Function()>>(
-            'get_vm_tick_micros')
+          'get_vm_tick_micros',
+        )
         .asFunction();
     getPulseLatencyMicros = _nativeLib
         .lookup<dffi.NativeFunction<dffi.Uint64 Function()>>(
-            'get_pulse_latency_micros')
+          'get_pulse_latency_micros',
+        )
         .asFunction();
     getHitTestsCount = _nativeLib
         .lookup<dffi.NativeFunction<dffi.Uint64 Function()>>(
-            'get_hit_tests_count')
+          'get_hit_tests_count',
+        )
         .asFunction();
     getCommandsGeneratedCount = _nativeLib
         .lookup<dffi.NativeFunction<dffi.Uint64 Function()>>(
-            'get_commands_generated_count')
+          'get_commands_generated_count',
+        )
         .asFunction();
 
     setEntitiesCount = _nativeLib
         .lookup<dffi.NativeFunction<dffi.Int32 Function(dffi.Uint32)>>(
-            'set_entities_count')
+          'set_entities_count',
+        )
         .asFunction();
     writeArenaBytes = _nativeLib
         .lookup<
             dffi.NativeFunction<
-                dffi.Int32 Function(dffi.Uint32, dffi.Pointer<dffi.Uint8>,
-                    dffi.Uint32)>>('write_arena_bytes')
+                dffi.Int32 Function(
+                  dffi.Uint32,
+                  dffi.Pointer<dffi.Uint8>,
+                  dffi.Uint32,
+                )>>('write_arena_bytes')
         .asFunction();
     setEntity = _nativeLib
         .lookup<
@@ -389,8 +425,9 @@ class MalphasBindings extends ChangeNotifier {
     // Allocate the bridge and command arrays through the Rust allocator so we
     // are guaranteed 16-byte alignment on all architectures.
     final bridgeSize = dffi.sizeOf<MalphasDoubleBufferBridge>();
-    _doubleBufferBridge =
-        malphasAlloc(bridgeSize).cast<MalphasDoubleBufferBridge>();
+    _doubleBufferBridge = malphasAlloc(
+      bridgeSize,
+    ).cast<MalphasDoubleBufferBridge>();
     if (_doubleBufferBridge == dffi.nullptr) {
       throw Exception('Failed to allocate double-buffer bridge');
     }
@@ -421,7 +458,11 @@ class MalphasBindings extends ChangeNotifier {
     }
 
     final initResult = initEngine(
-        _doubleBufferBridge!, _arena!, _arenaSize, maxCommandBufferCapacity);
+      _doubleBufferBridge!,
+      _arena!,
+      _arenaSize,
+      maxCommandBufferCapacity,
+    );
     _checkFfiResult(initResult, 'init_engine');
   }
 
@@ -484,8 +525,10 @@ class MalphasBindings extends ChangeNotifier {
         atlasOffset > _arenaSize - atlasBytes ||
         packSize < 0 ||
         packSize > _arenaSize) {
-      debugPrint('Font atlas region out of bounds: '
-          'offset=$atlasOffset, packSize=$packSize, arenaSize=$_arenaSize');
+      debugPrint(
+        'Font atlas region out of bounds: '
+        'offset=$atlasOffset, packSize=$packSize, arenaSize=$_arenaSize',
+      );
       fontAtlasImage = null;
       return;
     }
@@ -671,7 +714,9 @@ class MalphasBindings extends ChangeNotifier {
     try {
       ptr.asTypedList(bytes.length).setAll(0, bytes);
       _checkFfiResult(
-          writeArenaBytes(offset, ptr, bytes.length), 'write_arena_bytes');
+        writeArenaBytes(offset, ptr, bytes.length),
+        'write_arena_bytes',
+      );
     } finally {
       ffi.calloc.free(ptr);
     }
@@ -698,7 +743,9 @@ class MalphasBindings extends ChangeNotifier {
       final stringPtr = ptr + payloadSize;
       stringPtr.asTypedList(bytes.length).setAll(0, bytes);
       _checkFfiResult(
-          writeArenaBytes(offset, ptr, totalSize), 'write_arena_bytes');
+        writeArenaBytes(offset, ptr, totalSize),
+        'write_arena_bytes',
+      );
     } finally {
       ffi.calloc.free(ptr);
     }
@@ -727,8 +774,10 @@ class MalphasBindings extends ChangeNotifier {
           );
         }
       }
-      malphasFree(_doubleBufferBridge!.cast(),
-          dffi.sizeOf<MalphasDoubleBufferBridge>());
+      malphasFree(
+        _doubleBufferBridge!.cast(),
+        dffi.sizeOf<MalphasDoubleBufferBridge>(),
+      );
     }
     if (_arena != null && _arena != dffi.nullptr) {
       malphasFree(_arena!.cast<dffi.Uint8>(), _arenaSize);
@@ -748,8 +797,9 @@ class MalphasBindings extends ChangeNotifier {
           _freeSharedMemory();
         } else {
           debugPrint(
-              'MalphasBindings.dispose: shutdown_engine failed with code $result; '
-              'shared memory not freed');
+            'MalphasBindings.dispose: shutdown_engine failed with code $result; '
+            'shared memory not freed',
+          );
         }
       } catch (e) {
         debugPrint('MalphasBindings.dispose error: $e');

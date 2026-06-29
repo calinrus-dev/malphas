@@ -101,12 +101,15 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                 borderRadius: BorderRadius.circular(24),
                 side: const BorderSide(color: Color(0xff1b1b1b)),
               ),
-              title: const Text('NUEVO ENTORNO',
-                  style: TextStyle(
-                      fontFamily: 'Georgia',
-                      color: Color(0xffe0dcd3),
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold)),
+              title: const Text(
+                'NUEVO ENTORNO',
+                style: TextStyle(
+                  fontFamily: 'Georgia',
+                  color: Color(0xffe0dcd3),
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
               content: SizedBox(
                 width: 320,
                 child: SingleChildScrollView(
@@ -114,54 +117,71 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('NOMBRE DEL CANAL',
-                          style: TextStyle(
-                              fontFamily: 'Arial',
-                              fontSize: 9,
-                              color: Colors.white38,
-                              fontWeight: FontWeight.bold)),
+                      const Text(
+                        'NOMBRE DEL CANAL',
+                        style: TextStyle(
+                          fontFamily: 'Arial',
+                          fontSize: 9,
+                          color: Colors.white38,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                       const SizedBox(height: 6),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 12),
                         decoration: BoxDecoration(
-                            color: Colors.black,
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: const Color(0xff1b1b1b))),
+                          color: Colors.black,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: const Color(0xff1b1b1b)),
+                        ),
                         child: TextField(
                           style: const TextStyle(
-                              color: Colors.white, fontSize: 13),
+                            color: Colors.white,
+                            fontSize: 13,
+                          ),
                           decoration: const InputDecoration(
-                              hintText: 'Ej. Mecatron Core v2',
-                              hintStyle: TextStyle(
-                                  color: Colors.white24, fontSize: 12),
-                              border: InputBorder.none),
+                            hintText: 'Ej. Mecatron Core v2',
+                            hintStyle: TextStyle(
+                              color: Colors.white24,
+                              fontSize: 12,
+                            ),
+                            border: InputBorder.none,
+                          ),
                           onChanged: (val) => name = val,
                         ),
                       ),
                       const SizedBox(height: 16),
-                      const Text('ACOPLAR MOTOR',
-                          style: TextStyle(
-                              fontFamily: 'Arial',
-                              fontSize: 9,
-                              color: Colors.white38,
-                              fontWeight: FontWeight.bold)),
+                      const Text(
+                        'ACOPLAR MOTOR',
+                        style: TextStyle(
+                          fontFamily: 'Arial',
+                          fontSize: 9,
+                          color: Colors.white38,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                       const SizedBox(height: 6),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 12),
                         decoration: BoxDecoration(
-                            color: Colors.black,
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: const Color(0xff1b1b1b))),
+                          color: Colors.black,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: const Color(0xff1b1b1b)),
+                        ),
                         child: DropdownButtonHideUnderline(
                           child: DropdownButton<String>(
                             dropdownColor: const Color(0xff0d0d0d),
                             value: selectedEngineId,
                             isExpanded: true,
                             style: const TextStyle(
-                                color: Colors.white, fontSize: 13),
+                              color: Colors.white,
+                              fontSize: 13,
+                            ),
                             items: EngineController().getAllEngines().map((e) {
                               return DropdownMenuItem(
-                                  value: e.id, child: Text(e.name));
+                                value: e.id,
+                                child: Text(e.name),
+                              );
                             }).toList(),
                             onChanged: (val) {
                               setDialogState(() {
@@ -172,25 +192,38 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                         ),
                       ),
                       const SizedBox(height: 16),
-                      const Text('CARGAR PAQUETES ACTIVOS',
-                          style: TextStyle(
-                              fontFamily: 'Arial',
-                              fontSize: 9,
-                              color: Colors.white38,
-                              fontWeight: FontWeight.bold)),
+                      const Text(
+                        'CARGAR PAQUETES ACTIVOS',
+                        style: TextStyle(
+                          fontFamily: 'Arial',
+                          fontSize: 9,
+                          color: Colors.white38,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                       const SizedBox(height: 6),
                       Column(
-                        children:
-                            PackageController().getAllPackages().map((pack) {
-                          final isSelected =
-                              selectedPackageIds.contains(pack.id);
+                        children: PackageController().getAllPackages().map((
+                          pack,
+                        ) {
+                          final isSelected = selectedPackageIds.contains(
+                            pack.id,
+                          );
                           return CheckboxListTile(
-                            title: Text(pack.name,
-                                style: const TextStyle(
-                                    color: Colors.white, fontSize: 12)),
-                            subtitle: Text(pack.version,
-                                style: const TextStyle(
-                                    color: Colors.white24, fontSize: 10)),
+                            title: Text(
+                              pack.name,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                              ),
+                            ),
+                            subtitle: Text(
+                              pack.version,
+                              style: const TextStyle(
+                                color: Colors.white24,
+                                fontSize: 10,
+                              ),
+                            ),
                             value: isSelected,
                             activeColor: const Color(0xffe0dcd3),
                             checkColor: Colors.black,
@@ -214,19 +247,25 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
               ),
               actions: [
                 TextButton(
-                  child: const Text('CANCELAR',
-                      style: TextStyle(
-                          color: Colors.white38,
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold)),
+                  child: const Text(
+                    'CANCELAR',
+                    style: TextStyle(
+                      color: Colors.white38,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                   onPressed: () => Navigator.of(context).pop(),
                 ),
                 TextButton(
-                  child: const Text('CREAR',
-                      style: TextStyle(
-                          color: Color(0xffe0dcd3),
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold)),
+                  child: const Text(
+                    'CREAR',
+                    style: TextStyle(
+                      color: Color(0xffe0dcd3),
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                   onPressed: () async {
                     if (name.trim().isNotEmpty) {
                       setState(() {
@@ -270,12 +309,15 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                 borderRadius: BorderRadius.circular(24),
                 side: const BorderSide(color: Color(0xff1b1b1b)),
               ),
-              title: const Text('EDITAR ENTORNO',
-                  style: TextStyle(
-                      fontFamily: 'Georgia',
-                      color: Color(0xffe0dcd3),
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold)),
+              title: const Text(
+                'EDITAR ENTORNO',
+                style: TextStyle(
+                  fontFamily: 'Georgia',
+                  color: Color(0xffe0dcd3),
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
               content: SizedBox(
                 width: 320,
                 child: SingleChildScrollView(
@@ -283,52 +325,67 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('NOMBRE DEL CANAL',
-                          style: TextStyle(
-                              fontFamily: 'Arial',
-                              fontSize: 9,
-                              color: Colors.white38,
-                              fontWeight: FontWeight.bold)),
+                      const Text(
+                        'NOMBRE DEL CANAL',
+                        style: TextStyle(
+                          fontFamily: 'Arial',
+                          fontSize: 9,
+                          color: Colors.white38,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                       const SizedBox(height: 6),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 12),
                         decoration: BoxDecoration(
-                            color: Colors.black,
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: const Color(0xff1b1b1b))),
+                          color: Colors.black,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: const Color(0xff1b1b1b)),
+                        ),
                         child: TextFormField(
                           initialValue: name,
                           style: const TextStyle(
-                              color: Colors.white, fontSize: 13),
-                          decoration:
-                              const InputDecoration(border: InputBorder.none),
+                            color: Colors.white,
+                            fontSize: 13,
+                          ),
+                          decoration: const InputDecoration(
+                            border: InputBorder.none,
+                          ),
                           onChanged: (val) => name = val,
                         ),
                       ),
                       const SizedBox(height: 16),
-                      const Text('ACOPLAR MOTOR',
-                          style: TextStyle(
-                              fontFamily: 'Arial',
-                              fontSize: 9,
-                              color: Colors.white38,
-                              fontWeight: FontWeight.bold)),
+                      const Text(
+                        'ACOPLAR MOTOR',
+                        style: TextStyle(
+                          fontFamily: 'Arial',
+                          fontSize: 9,
+                          color: Colors.white38,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                       const SizedBox(height: 6),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 12),
                         decoration: BoxDecoration(
-                            color: Colors.black,
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: const Color(0xff1b1b1b))),
+                          color: Colors.black,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: const Color(0xff1b1b1b)),
+                        ),
                         child: DropdownButtonHideUnderline(
                           child: DropdownButton<String>(
                             dropdownColor: const Color(0xff0d0d0d),
                             value: selectedEngineId,
                             isExpanded: true,
                             style: const TextStyle(
-                                color: Colors.white, fontSize: 13),
+                              color: Colors.white,
+                              fontSize: 13,
+                            ),
                             items: EngineController().getAllEngines().map((e) {
                               return DropdownMenuItem(
-                                  value: e.id, child: Text(e.name));
+                                value: e.id,
+                                child: Text(e.name),
+                              );
                             }).toList(),
                             onChanged: (val) {
                               setDialogState(() {
@@ -339,25 +396,38 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                         ),
                       ),
                       const SizedBox(height: 16),
-                      const Text('CARGAR PAQUETES ACTIVOS',
-                          style: TextStyle(
-                              fontFamily: 'Arial',
-                              fontSize: 9,
-                              color: Colors.white38,
-                              fontWeight: FontWeight.bold)),
+                      const Text(
+                        'CARGAR PAQUETES ACTIVOS',
+                        style: TextStyle(
+                          fontFamily: 'Arial',
+                          fontSize: 9,
+                          color: Colors.white38,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                       const SizedBox(height: 6),
                       Column(
-                        children:
-                            PackageController().getAllPackages().map((pack) {
-                          final isSelected =
-                              selectedPackageIds.contains(pack.id);
+                        children: PackageController().getAllPackages().map((
+                          pack,
+                        ) {
+                          final isSelected = selectedPackageIds.contains(
+                            pack.id,
+                          );
                           return CheckboxListTile(
-                            title: Text(pack.name,
-                                style: const TextStyle(
-                                    color: Colors.white, fontSize: 12)),
-                            subtitle: Text(pack.version,
-                                style: const TextStyle(
-                                    color: Colors.white24, fontSize: 10)),
+                            title: Text(
+                              pack.name,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                              ),
+                            ),
+                            subtitle: Text(
+                              pack.version,
+                              style: const TextStyle(
+                                color: Colors.white24,
+                                fontSize: 10,
+                              ),
+                            ),
                             value: isSelected,
                             activeColor: const Color(0xffe0dcd3),
                             checkColor: Colors.black,
@@ -381,19 +451,25 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
               ),
               actions: [
                 TextButton(
-                  child: const Text('CANCELAR',
-                      style: TextStyle(
-                          color: Colors.white38,
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold)),
+                  child: const Text(
+                    'CANCELAR',
+                    style: TextStyle(
+                      color: Colors.white38,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                   onPressed: () => Navigator.of(context).pop(),
                 ),
                 TextButton(
-                  child: const Text('GUARDAR',
-                      style: TextStyle(
-                          color: Color(0xffe0dcd3),
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold)),
+                  child: const Text(
+                    'GUARDAR',
+                    style: TextStyle(
+                      color: Color(0xffe0dcd3),
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                   onPressed: () async {
                     if (name.trim().isNotEmpty) {
                       setState(() {
@@ -425,18 +501,22 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
             borderRadius: BorderRadius.circular(24),
             side: const BorderSide(color: Color(0xff1b1b1b)),
           ),
-          title: const Text('RENOMBRAR',
-              style: TextStyle(
-                  fontFamily: 'Georgia',
-                  color: Color(0xffe0dcd3),
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold)),
+          title: const Text(
+            'RENOMBRAR',
+            style: TextStyle(
+              fontFamily: 'Georgia',
+              color: Color(0xffe0dcd3),
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
           content: Container(
             padding: const EdgeInsets.symmetric(horizontal: 12),
             decoration: BoxDecoration(
-                color: Colors.black,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0xff1b1b1b))),
+              color: Colors.black,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: const Color(0xff1b1b1b)),
+            ),
             child: TextFormField(
               initialValue: name,
               style: const TextStyle(color: Colors.white, fontSize: 13),
@@ -446,19 +526,25 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
           ),
           actions: [
             TextButton(
-              child: const Text('CANCELAR',
-                  style: TextStyle(
-                      color: Colors.white38,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold)),
+              child: const Text(
+                'CANCELAR',
+                style: TextStyle(
+                  color: Colors.white38,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
               onPressed: () => Navigator.of(context).pop(),
             ),
             TextButton(
-              child: const Text('ACEPTAR',
-                  style: TextStyle(
-                      color: Color(0xffe0dcd3),
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold)),
+              child: const Text(
+                'ACEPTAR',
+                style: TextStyle(
+                  color: Color(0xffe0dcd3),
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
               onPressed: () async {
                 if (name.trim().isNotEmpty) {
                   setState(() {
@@ -485,29 +571,40 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
             borderRadius: BorderRadius.circular(24),
             side: const BorderSide(color: Color(0xff1b1b1b)),
           ),
-          title: const Text('ELIMINAR ENTORNO',
-              style: TextStyle(
-                  fontFamily: 'Georgia',
-                  color: Colors.redAccent,
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold)),
-          content: Text('¿Seguro que deseas eliminar el entorno "${env.name}"?',
-              style: const TextStyle(color: Colors.white70, fontSize: 13)),
+          title: const Text(
+            'ELIMINAR ENTORNO',
+            style: TextStyle(
+              fontFamily: 'Georgia',
+              color: Colors.redAccent,
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          content: Text(
+            '¿Seguro que deseas eliminar el entorno "${env.name}"?',
+            style: const TextStyle(color: Colors.white70, fontSize: 13),
+          ),
           actions: [
             TextButton(
-              child: const Text('CANCELAR',
-                  style: TextStyle(
-                      color: Colors.white38,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold)),
+              child: const Text(
+                'CANCELAR',
+                style: TextStyle(
+                  color: Colors.white38,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
               onPressed: () => Navigator.of(context).pop(),
             ),
             TextButton(
-              child: const Text('ELIMINAR',
-                  style: TextStyle(
-                      color: Colors.redAccent,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold)),
+              child: const Text(
+                'ELIMINAR',
+                style: TextStyle(
+                  color: Colors.redAccent,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
               onPressed: () async {
                 setState(() {
                   _environments.removeWhere((e) => e.id == env.id);
@@ -535,30 +632,42 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               ListTile(
-                leading:
-                    const Icon(Icons.edit_outlined, color: Color(0xffe0dcd3)),
-                title: const Text('Editar Entorno',
-                    style: TextStyle(color: Colors.white)),
+                leading: const Icon(
+                  Icons.edit_outlined,
+                  color: Color(0xffe0dcd3),
+                ),
+                title: const Text(
+                  'Editar Entorno',
+                  style: TextStyle(color: Colors.white),
+                ),
                 onTap: () {
                   Navigator.of(context).pop();
                   _showEditEnvironmentDialog(env);
                 },
               ),
               ListTile(
-                leading: const Icon(Icons.text_fields_outlined,
-                    color: Color(0xffe0dcd3)),
-                title: const Text('Renombrar',
-                    style: TextStyle(color: Colors.white)),
+                leading: const Icon(
+                  Icons.text_fields_outlined,
+                  color: Color(0xffe0dcd3),
+                ),
+                title: const Text(
+                  'Renombrar',
+                  style: TextStyle(color: Colors.white),
+                ),
                 onTap: () {
                   Navigator.of(context).pop();
                   _showRenameDialog(env);
                 },
               ),
               ListTile(
-                leading:
-                    const Icon(Icons.delete_outline, color: Colors.redAccent),
-                title: const Text('Eliminar',
-                    style: TextStyle(color: Colors.redAccent)),
+                leading: const Icon(
+                  Icons.delete_outline,
+                  color: Colors.redAccent,
+                ),
+                title: const Text(
+                  'Eliminar',
+                  style: TextStyle(color: Colors.redAccent),
+                ),
                 onTap: () {
                   Navigator.of(context).pop();
                   _confirmDelete(env);
@@ -572,47 +681,63 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
   }
 
   void _navigateToWorkspace(MalphasEnvironment env) {
-    Navigator.of(context).push(MaterialPageRoute(
-      builder: (context) => WorkspaceScreen(environment: env),
-    ));
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => WorkspaceScreen(environment: env),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     // Strict ordering: pinned environments first
     final sortedEnvs = [..._environments];
-    sortedEnvs
-        .sort((a, b) => (b.isPinned ? 1 : 0).compareTo(a.isPinned ? 1 : 0));
+    sortedEnvs.sort(
+      (a, b) => (b.isPinned ? 1 : 0).compareTo(a.isPinned ? 1 : 0),
+    );
 
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
-        title: const Text('Malphas Chasis',
-            style: TextStyle(
-                fontFamily: 'Georgia', fontSize: 22, color: Color(0xffe0dcd3))),
+        title: const Text(
+          'Malphas Chasis',
+          style: TextStyle(
+            fontFamily: 'Georgia',
+            fontSize: 22,
+            color: Color(0xffe0dcd3),
+          ),
+        ),
         backgroundColor: Colors.black,
         elevation: 0,
         actions: [
           PopupMenuButton<bool>(
-            icon: const Icon(Icons.remove_red_eye_outlined,
-                color: Color(0xffe0dcd3)),
+            icon: const Icon(
+              Icons.remove_red_eye_outlined,
+              color: Color(0xffe0dcd3),
+            ),
             onSelected: (isGrid) => setState(() => _isGridView = isGrid),
             color: const Color(0xff0d0d0d),
             itemBuilder: (context) => [
               const PopupMenuItem(
-                  value: true,
-                  child: Text('Mosaico (Grid)',
-                      style: TextStyle(color: Colors.white))),
+                value: true,
+                child: Text(
+                  'Mosaico (Grid)',
+                  style: TextStyle(color: Colors.white),
+                ),
+              ),
               const PopupMenuItem(
-                  value: false,
-                  child: Text('Lista (List)',
-                      style: TextStyle(color: Colors.white))),
+                value: false,
+                child: Text(
+                  'Lista (List)',
+                  style: TextStyle(color: Colors.white),
+                ),
+              ),
             ],
           ),
           IconButton(
             icon: const Icon(Icons.add_box_outlined, color: Color(0xffe0dcd3)),
             onPressed: _showCreateEnvironmentDialog,
-          )
+          ),
         ],
       ),
       drawer: _buildGlobalDrawer(),
@@ -622,13 +747,16 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('OPERATIONAL ENVIRONMENTS',
-                  style: TextStyle(
-                      fontFamily: 'Arial',
-                      fontSize: 10,
-                      color: Colors.white24,
-                      letterSpacing: 1,
-                      fontWeight: FontWeight.bold)),
+              const Text(
+                'OPERATIONAL ENVIRONMENTS',
+                style: TextStyle(
+                  fontFamily: 'Arial',
+                  fontSize: 10,
+                  color: Colors.white24,
+                  letterSpacing: 1,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
               const SizedBox(height: 16),
               Expanded(
                 child: _isGridView
@@ -684,27 +812,29 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Container(
-                            width: 8,
-                            height: 8,
-                            decoration: BoxDecoration(
-                                color: env.accentColor,
-                                shape: BoxShape.circle)),
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: env.accentColor,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
                         IconButton(
                           padding: EdgeInsets.zero,
                           constraints: const BoxConstraints(),
                           icon: Icon(
-                              env.isPinned
-                                  ? Icons.push_pin
-                                  : Icons.push_pin_outlined,
-                              size: 14,
-                              color: env.isPinned
-                                  ? env.accentColor
-                                  : Colors.white24),
+                            env.isPinned
+                                ? Icons.push_pin
+                                : Icons.push_pin_outlined,
+                            size: 14,
+                            color:
+                                env.isPinned ? env.accentColor : Colors.white24,
+                          ),
                           onPressed: () async {
                             setState(() => env.isPinned = !env.isPinned);
                             _persistEnvironments();
                           },
-                        )
+                        ),
                       ],
                     ),
                     LongPressDraggable<int>(
@@ -714,26 +844,32 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                         child: Container(
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
-                              color: const Color(0xff161616),
-                              borderRadius: BorderRadius.circular(16),
-                              border:
-                                  Border.all(color: const Color(0xff222222))),
-                          child: Text(env.name,
-                              style: const TextStyle(
-                                  fontFamily: 'Georgia',
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.bold,
-                                  color: Color(0xffe0dcd3))),
+                            color: const Color(0xff161616),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: const Color(0xff222222)),
+                          ),
+                          child: Text(
+                            env.name,
+                            style: const TextStyle(
+                              fontFamily: 'Georgia',
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xffe0dcd3),
+                            ),
+                          ),
                         ),
                       ),
-                      child: Text(env.name,
-                          style: const TextStyle(
-                              fontFamily: 'Georgia',
-                              fontSize: 15,
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xffe0dcd3)),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis),
+                      child: Text(
+                        env.name,
+                        style: const TextStyle(
+                          fontFamily: 'Georgia',
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xffe0dcd3),
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   ],
                 ),
@@ -768,8 +904,10 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
               onLongPress: () => _showEnvironmentOptions(env),
               child: Container(
                 margin: const EdgeInsets.only(bottom: 12),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 18,
+                  vertical: 14,
+                ),
                 decoration: BoxDecoration(
                   color: const Color(0xff0d0d0d),
                   borderRadius: BorderRadius.circular(24),
@@ -778,10 +916,13 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                 child: Row(
                   children: [
                     Container(
-                        width: 8,
-                        height: 8,
-                        decoration: BoxDecoration(
-                            color: env.accentColor, shape: BoxShape.circle)),
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: env.accentColor,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
                     const SizedBox(width: 16),
                     Expanded(
                       child: LongPressDraggable<int>(
@@ -791,36 +932,42 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                           child: Container(
                             padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
-                                color: const Color(0xff161616),
-                                borderRadius: BorderRadius.circular(16),
-                                border:
-                                    Border.all(color: const Color(0xff222222))),
-                            child: Text(env.name,
-                                style: const TextStyle(
-                                    fontFamily: 'Georgia',
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.bold,
-                                    color: Color(0xffe0dcd3))),
+                              color: const Color(0xff161616),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: const Color(0xff222222),
+                              ),
+                            ),
+                            child: Text(
+                              env.name,
+                              style: const TextStyle(
+                                fontFamily: 'Georgia',
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xffe0dcd3),
+                              ),
+                            ),
                           ),
                         ),
-                        child: Text(env.name,
-                            style: const TextStyle(
-                                fontFamily: 'Georgia',
-                                fontSize: 15,
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xffe0dcd3))),
+                        child: Text(
+                          env.name,
+                          style: const TextStyle(
+                            fontFamily: 'Georgia',
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xffe0dcd3),
+                          ),
+                        ),
                       ),
                     ),
                     IconButton(
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
                       icon: Icon(
-                          env.isPinned
-                              ? Icons.push_pin
-                              : Icons.push_pin_outlined,
-                          size: 14,
-                          color:
-                              env.isPinned ? env.accentColor : Colors.white24),
+                        env.isPinned ? Icons.push_pin : Icons.push_pin_outlined,
+                        size: 14,
+                        color: env.isPinned ? env.accentColor : Colors.white24,
+                      ),
                       onPressed: () async {
                         setState(() => env.isPinned = !env.isPinned);
                         _persistEnvironments();
@@ -843,79 +990,111 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
         children: [
           const DrawerHeader(
             child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text('MALPHAS SYSTEM',
-                    style: TextStyle(
-                        fontFamily: 'Georgia',
-                        fontSize: 24,
-                        color: Color(0xffe0dcd3),
-                        fontWeight: FontWeight.bold))),
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'MALPHAS SYSTEM',
+                style: TextStyle(
+                  fontFamily: 'Georgia',
+                  fontSize: 24,
+                  color: Color(0xffe0dcd3),
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
           ),
           ListTile(
-            leading: const Icon(Icons.archive_outlined,
-                size: 20, color: Color(0xffe0dcd3)),
-            title: const Text('Global Package Hub',
-                style: TextStyle(fontFamily: 'Arial', fontSize: 14)),
+            leading: const Icon(
+              Icons.archive_outlined,
+              size: 20,
+              color: Color(0xffe0dcd3),
+            ),
+            title: const Text(
+              'Global Package Hub',
+              style: TextStyle(fontFamily: 'Arial', fontSize: 14),
+            ),
             onTap: () {
               Navigator.of(context).pop(); // Close drawer
-              Navigator.of(context).push(MaterialPageRoute(
-                builder: (context) => Scaffold(
-                  backgroundColor: Colors.black,
-                  appBar: AppBar(
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (context) => Scaffold(
                     backgroundColor: Colors.black,
-                    elevation: 0,
-                    leading: IconButton(
-                      icon: const Icon(Icons.arrow_back_ios,
-                          size: 16, color: Color(0xffe0dcd3)),
-                      onPressed: () => Navigator.of(context).pop(),
+                    appBar: AppBar(
+                      backgroundColor: Colors.black,
+                      elevation: 0,
+                      leading: IconButton(
+                        icon: const Icon(
+                          Icons.arrow_back_ios,
+                          size: 16,
+                          color: Color(0xffe0dcd3),
+                        ),
+                        onPressed: () => Navigator.of(context).pop(),
+                      ),
                     ),
+                    body: const PackageManagerPanel(),
                   ),
-                  body: const PackageManagerPanel(),
                 ),
-              ));
+              );
             },
           ),
           ListTile(
-            leading: const Icon(Icons.memory_outlined,
-                size: 20, color: Color(0xffe0dcd3)),
-            title: const Text('Global Engine Depot',
-                style: TextStyle(fontFamily: 'Arial', fontSize: 14)),
+            leading: const Icon(
+              Icons.memory_outlined,
+              size: 20,
+              color: Color(0xffe0dcd3),
+            ),
+            title: const Text(
+              'Global Engine Depot',
+              style: TextStyle(fontFamily: 'Arial', fontSize: 14),
+            ),
             onTap: () {
               Navigator.of(context).pop(); // Close drawer
-              Navigator.of(context).push(MaterialPageRoute(
-                builder: (context) => Scaffold(
-                  backgroundColor: Colors.black,
-                  appBar: AppBar(
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (context) => Scaffold(
                     backgroundColor: Colors.black,
-                    elevation: 0,
-                    leading: IconButton(
-                      icon: const Icon(Icons.arrow_back_ios,
-                          size: 16, color: Color(0xffe0dcd3)),
-                      onPressed: () => Navigator.of(context).pop(),
+                    appBar: AppBar(
+                      backgroundColor: Colors.black,
+                      elevation: 0,
+                      leading: IconButton(
+                        icon: const Icon(
+                          Icons.arrow_back_ios,
+                          size: 16,
+                          color: Color(0xffe0dcd3),
+                        ),
+                        onPressed: () => Navigator.of(context).pop(),
+                      ),
                     ),
+                    body: const EngineManagerPanel(),
                   ),
-                  body: const EngineManagerPanel(),
                 ),
-              ));
+              );
             },
           ),
           const Spacer(),
           const Divider(color: Color(0xff1b1b1b)),
           ListTile(
-            leading: const Icon(Icons.account_circle_outlined,
-                color: Color(0xffe0dcd3)),
-            title: const Text('Calin Rus',
-                style: TextStyle(
-                    fontFamily: 'Arial',
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white)),
-            subtitle: Text('Software Architect',
-                style: TextStyle(
-                    fontFamily: 'Arial',
-                    fontSize: 11,
-                    color: Colors.white.withValues(alpha: 0.3))),
+            leading: const Icon(
+              Icons.account_circle_outlined,
+              color: Color(0xffe0dcd3),
+            ),
+            title: const Text(
+              'Calin Rus',
+              style: TextStyle(
+                fontFamily: 'Arial',
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+            ),
+            subtitle: Text(
+              'Software Architect',
+              style: TextStyle(
+                fontFamily: 'Arial',
+                fontSize: 11,
+                color: Colors.white.withValues(alpha: 0.3),
+              ),
+            ),
           ),
-          const SizedBox(height: 12)
+          const SizedBox(height: 12),
         ],
       ),
     );

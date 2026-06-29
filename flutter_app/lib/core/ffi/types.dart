@@ -65,9 +65,9 @@ final class CoreCommandBuffer extends Struct {
 
 /// C-ABI mirror of the Rust `MalphasDoubleBufferBridge`.
 ///
-/// * 48 bytes, 16-byte aligned.
-/// * The two `_padding` fields mirror the 8 trailing alignment bytes that Rust
-///   reserves for `#[repr(C, align(16))]`. They must not be read or written.
+/// * 64 bytes, 64-byte aligned.
+/// * The _padding fields mirror the trailing alignment bytes that Rust
+///   reserves for `#[repr(C, align(64))]`. They must not be read or written.
 /// * Dart never performs pointer arithmetic on this struct; it uses the Rust
 ///   exported getter functions (`get_buffer_a_ptr`, `get_back_index`, etc.).
 final class MalphasDoubleBufferBridge extends Struct {
@@ -85,4 +85,16 @@ final class MalphasDoubleBufferBridge extends Struct {
 
   @Uint32()
   external int _padding1;
+
+  @Uint32()
+  external int _padding2;
+
+  @Uint32()
+  external int _padding3;
+
+  @Uint32()
+  external int _padding4;
+
+  @Uint32()
+  external int _padding5;
 }

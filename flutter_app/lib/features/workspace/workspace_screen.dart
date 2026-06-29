@@ -150,14 +150,22 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                     return GestureDetector(
                       onTapDown: (details) {
                         final localPos = details.localPosition;
-                        final double logicalX =
-                            (localPos.dx / constraints.maxWidth) * 1000.0;
-                        final double logicalY =
-                            (localPos.dy / constraints.maxHeight) * 1000.0;
+                        final double width = constraints.maxWidth;
+                        final double height = constraints.maxHeight;
+                        final double scale =
+                            (width < height ? width : height) / 1000.0;
+                        final double offsetX = (width - (1000.0 * scale)) / 2.0;
+                        final double offsetY =
+                            (height - (1000.0 * scale)) / 2.0;
+
+                        final double logicalX = (localPos.dx - offsetX) / scale;
+                        final double logicalY = (localPos.dy - offsetY) / scale;
                         bindings.processInputEvent(0, logicalX, logicalY);
                       },
                       child: PrimitiveCanvas(
-                          bindings: bindings, repaintNotifier: bindings),
+                        bindings: bindings,
+                        repaintNotifier: bindings,
+                      ),
                     );
                   },
                 ),
@@ -178,8 +186,11 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                 IconButton(
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(),
-                  icon: const Icon(Icons.arrow_back_ios,
-                      size: 16, color: Colors.white),
+                  icon: const Icon(
+                    Icons.arrow_back_ios,
+                    size: 16,
+                    color: Colors.white,
+                  ),
                   onPressed: () => Navigator.of(context).pop(),
                 ),
                 const SizedBox(width: 8),
@@ -198,7 +209,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                       ],
                     ),
                   ),
-                )
+                ),
               ],
             ),
           ),
@@ -211,15 +222,19 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
               child: Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.02),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.white10)),
-                child: const Text('CHASIS FFI: PASIVE SIMULATION CORE MODE',
-                    style: TextStyle(
-                        fontFamily: 'Courier',
-                        fontSize: 9,
-                        color: Color(0xffe0dcd3),
-                        fontWeight: FontWeight.bold)),
+                  color: Colors.white.withValues(alpha: 0.02),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.white10),
+                ),
+                child: const Text(
+                  'CHASIS FFI: PASIVE SIMULATION CORE MODE',
+                  style: TextStyle(
+                    fontFamily: 'Courier',
+                    fontSize: 9,
+                    color: Color(0xffe0dcd3),
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
               ),
             ),
 
@@ -231,9 +246,10 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
               child: Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                    color: const Color(0xff0d0d0d),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: const Color(0xff1b1b1b))),
+                  color: const Color(0xff0d0d0d),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xff1b1b1b)),
+                ),
                 child: Text(
                   'AUTO-LOAD ERROR: ${_autoLoadError!}',
                   style: const TextStyle(
@@ -256,16 +272,21 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
-            color: isSel ? const Color(0xffe0dcd3) : const Color(0xff0d0d0d),
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-                color: isSel ? Colors.transparent : const Color(0xff1b1b1b))),
-        child: Text(label,
-            style: TextStyle(
-                fontFamily: 'Arial',
-                fontSize: 10,
-                fontWeight: FontWeight.bold,
-                color: isSel ? Colors.black : const Color(0xffe0dcd3))),
+          color: isSel ? const Color(0xffe0dcd3) : const Color(0xff0d0d0d),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: isSel ? Colors.transparent : const Color(0xff1b1b1b),
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontFamily: 'Arial',
+            fontSize: 10,
+            fontWeight: FontWeight.bold,
+            color: isSel ? Colors.black : const Color(0xffe0dcd3),
+          ),
+        ),
       ),
     );
   }

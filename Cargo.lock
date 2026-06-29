@@ -471,7 +471,7 @@ checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
 
 [[package]]
 name = "malphas_cli"
-version = "2.5.1"
+version = "2.5.5"
 dependencies = [
  "clap",
  "ed25519-dalek",
@@ -485,7 +485,7 @@ dependencies = [
 
 [[package]]
 name = "malphas_core"
-version = "2.5.1"
+version = "2.5.5"
 dependencies = [
  "arc-swap",
  "ed25519-dalek",

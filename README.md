@@ -1,8 +1,8 @@
-# Malphas v2.5.1 — Multi-Architecture Android Deployment
+# Malphas v2.5.5 — Multi-Architecture Android Deployment
 
 A high-performance, terminal-inspired graphical engine with a modular Rust core and a passive Flutter frontend. The two sides communicate through a small, explicit C-ABI boundary and share memory directly instead of marshalling messages across an isolating bridge.
 
-> **v2.5.1** extends the decoupled onboarding loop to multi-architecture Android deployment: real `examples/bouncing_demo/` packages are compiled by `malphas-cli`, the Flutter front-end auto-loads packages when entering a workspace, discovers engines and packages from disk instead of using hard-coded mocks, CI runs native headless tests with the automated terminal binding, and the Android pipeline locks the NDK r26c path for consistent cross-compilation of `arm64-v8a`, `armeabi-v7a`, and `x86_64` engines.
+> **v2.5.5** extends the decoupled onboarding loop to multi-architecture Android deployment with extreme bare-metal performance: configuring workspace-wide Link-Time Optimization (LTO), single codegen units, panic abort code footprint, 64-byte cache line FFI alignment for false sharing mitigation, VM Jump Table native execution, unaligned memory safety guarantees for package loaders using `std::ptr::read_unaligned` to prevent ARM64 alignment crashes, and explicit field-by-field package serialization.
 
 ## Architecture at a glance
 
@@ -352,8 +352,8 @@ Tagged versions are built and published automatically by GitHub Actions. Pushing
 To publish a new version:
 
 ```bash
-git tag -a v2.5.1 -m "Release v2.5.1"
-git push origin v2.5.1
+git tag -a v2.5.5 -m "Release v2.5.5"
+git push origin v2.5.5
 ```
 
 > **Note:** The release workflow depends on the repository secret `TEST_SIGNING_KEY` to sign the native engine artifacts. Make sure the secret is configured before pushing the tag.

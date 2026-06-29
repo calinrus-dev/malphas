@@ -39,12 +39,18 @@ class MalphasPackageCompiler {
     // 3. Invoke the CLI with a defensive timeout and capture both stdout and
     // stderr so failures can be diagnosed without leaking temp directories.
     final result = await Process.run(
-      exePath,
-      ['compile', manifestFile.path],
-      runInShell: false,
-    ).timeout(const Duration(minutes: 2), onTimeout: () {
-      throw Exception('malphas-cli compile timed out after 2 minutes');
-    });
+            exePath,
+            [
+              'compile',
+              manifestFile.path,
+            ],
+            runInShell: false)
+        .timeout(
+      const Duration(minutes: 2),
+      onTimeout: () {
+        throw Exception('malphas-cli compile timed out after 2 minutes');
+      },
+    );
     if (result.exitCode != 0) {
       await _bestEffortDelete(tempDir);
       throw Exception(
@@ -157,8 +163,9 @@ class MalphasPackageCompiler {
     // Fallback: search upward from the current directory.
     var current = Directory.current;
     for (var i = 0; i < 8; i++) {
-      final candidate =
-          File(_join(current.path, 'assets', 'fonts', _fontFileName));
+      final candidate = File(
+        _join(current.path, 'assets', 'fonts', _fontFileName),
+      );
       if (candidate.existsSync()) return candidate;
       final parent = current.parent;
       if (parent.path == current.path) break;
@@ -174,8 +181,13 @@ class MalphasPackageCompiler {
   }
 
   /// Joins path segments using the platform separator.
-  String _join(String first, String second,
-      [String? third, String? fourth, String? fifth]) {
+  String _join(
+    String first,
+    String second, [
+    String? third,
+    String? fourth,
+    String? fifth,
+  ]) {
     var path = first;
     for (final part in [second, third, fourth, fifth]) {
       if (part == null) continue;

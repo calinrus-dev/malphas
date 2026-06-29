@@ -15,12 +15,18 @@ struct CoreCommandBuffer {
     commands: *mut malphas_core::pipeline::DartRenderCommand,
 }
 
-#[repr(C, align(16))]
+#[repr(C, align(64))]
 struct MalphasDoubleBufferBridge {
     buffer_a: CoreCommandBuffer,
     buffer_b: CoreCommandBuffer,
     atomic_back_index: std::sync::atomic::AtomicU8,
     commands_written: std::sync::atomic::AtomicU32,
+    _padding0: u32,
+    _padding1: u32,
+    _padding2: u32,
+    _padding3: u32,
+    _padding4: u32,
+    _padding5: u32,
 }
 
 fn build_msp_package(bytecode: &[u8]) -> Vec<u8> {
@@ -57,6 +63,12 @@ fn end_to_end_init_load_entities_pulse_shutdown() {
         },
         atomic_back_index: std::sync::atomic::AtomicU8::new(0),
         commands_written: std::sync::atomic::AtomicU32::new(0),
+        _padding0: 0,
+        _padding1: 0,
+        _padding2: 0,
+        _padding3: 0,
+        _padding4: 0,
+        _padding5: 0,
     };
 
     let mut arena = vec![0u8; 8 * 1024 * 1024];

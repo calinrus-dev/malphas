@@ -14,8 +14,9 @@ void main() {
 
   setUp(() {
     persistenceDir = Directory.systemTemp.createTempSync('malphas_ws_persist');
-    AppStatePersistenceService()
-        .setDocumentsDirectoryOverride(persistenceDir.path);
+    AppStatePersistenceService().setDocumentsDirectoryOverride(
+      persistenceDir.path,
+    );
     // Start each test with a clean package registry so the auto-load behavior
     // is deterministic.
     PackageController().reset();
@@ -28,8 +29,9 @@ void main() {
     } catch (_) {}
   });
 
-  testWidgets('WorkspaceScreen shows auto-load error for missing package',
-      (WidgetTester tester) async {
+  testWidgets('WorkspaceScreen shows auto-load error for missing package', (
+    WidgetTester tester,
+  ) async {
     final env = MalphasEnvironment(
       id: 'env_missing',
       name: 'Missing Pack',
@@ -37,8 +39,9 @@ void main() {
       packageIds: const ['does_not_exist'],
     );
 
-    await tester
-        .pumpWidget(MaterialApp(home: WorkspaceScreen(environment: env)));
+    await tester.pumpWidget(
+      MaterialApp(home: WorkspaceScreen(environment: env)),
+    );
     addTearDown(() async {
       await tester.pumpWidget(Container());
     });
@@ -51,8 +54,9 @@ void main() {
     expect(find.textContaining('AUTO-LOAD ERROR'), findsWidgets);
   });
 
-  testWidgets('WorkspaceScreen renders canvas tabs',
-      (WidgetTester tester) async {
+  testWidgets('WorkspaceScreen renders canvas tabs', (
+    WidgetTester tester,
+  ) async {
     final env = MalphasEnvironment(
       id: 'env_render',
       name: 'Render Test',
@@ -60,8 +64,9 @@ void main() {
       packageIds: const [],
     );
 
-    await tester
-        .pumpWidget(MaterialApp(home: WorkspaceScreen(environment: env)));
+    await tester.pumpWidget(
+      MaterialApp(home: WorkspaceScreen(environment: env)),
+    );
     addTearDown(() async {
       await tester.pumpWidget(Container());
     });
@@ -73,8 +78,9 @@ void main() {
     expect(find.text('ENGINES'), findsOneWidget);
   });
 
-  testWidgets('WorkspaceScreen auto-loads the default bouncing demo',
-      (WidgetTester tester) async {
+  testWidgets('WorkspaceScreen auto-loads the default bouncing demo', (
+    WidgetTester tester,
+  ) async {
     if (!bindings.isNativeAvailable) {
       markTestSkipped('Native motor is not available in this environment');
       return;
@@ -96,8 +102,9 @@ void main() {
       packageIds: const [],
     );
 
-    await tester
-        .pumpWidget(MaterialApp(home: WorkspaceScreen(environment: env)));
+    await tester.pumpWidget(
+      MaterialApp(home: WorkspaceScreen(environment: env)),
+    );
     addTearDown(() async {
       await tester.pumpWidget(Container());
     });

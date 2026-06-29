@@ -4,10 +4,7 @@ class MalphasTag {
 
   const MalphasTag({required this.name, required this.isPublic});
 
-  Map<String, dynamic> toJson() => {
-        'name': name,
-        'isPublic': isPublic,
-      };
+  Map<String, dynamic> toJson() => {'name': name, 'isPublic': isPublic};
 
   factory MalphasTag.fromJson(Map<String, dynamic> json) => MalphasTag(
         name: json['name'] as String,
@@ -64,7 +61,11 @@ class MalphasObject {
 
   MalphasSkin get currentSkin => skins.isEmpty
       ? const MalphasSkin(
-          id: 'none', name: 'None', assetPath: 'none', version: '1.0')
+          id: 'none',
+          name: 'None',
+          assetPath: 'none',
+          version: '1.0',
+        )
       : skins[activeSkinIndex];
 
   Map<String, dynamic> toJson() => {

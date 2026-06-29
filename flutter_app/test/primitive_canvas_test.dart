@@ -6,17 +6,15 @@ import 'package:malphas_app/core/ui_primitives/primitive_canvas.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('PrimitiveCanvas paints without throwing',
-      (WidgetTester tester) async {
+  testWidgets('PrimitiveCanvas paints without throwing', (
+    WidgetTester tester,
+  ) async {
     final bindings = MalphasBindings();
 
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: PrimitiveCanvas(
-            bindings: bindings,
-            repaintNotifier: bindings,
-          ),
+          body: PrimitiveCanvas(bindings: bindings, repaintNotifier: bindings),
         ),
       ),
     );
@@ -35,17 +33,15 @@ void main() {
     );
   });
 
-  testWidgets('PrimitiveCanvas rebuilds when repaintNotifier fires',
-      (WidgetTester tester) async {
+  testWidgets('PrimitiveCanvas rebuilds when repaintNotifier fires', (
+    WidgetTester tester,
+  ) async {
     final bindings = MalphasBindings();
 
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: PrimitiveCanvas(
-            bindings: bindings,
-            repaintNotifier: bindings,
-          ),
+          body: PrimitiveCanvas(bindings: bindings, repaintNotifier: bindings),
         ),
       ),
     );

@@ -183,8 +183,9 @@ class PackageController extends ChangeNotifier {
   /// but its `.mhp` artifact is missing. Guards against a missing CLI and never
   /// fails silently.
   Future<void> _ensureBouncingDemoCompiled(String workspace) async {
-    final manifestFile =
-        File('$workspace/examples/bouncing_demo/manifest.json');
+    final manifestFile = File(
+      '$workspace/examples/bouncing_demo/manifest.json',
+    );
     final mhpFile = File('$workspace/examples/bouncing_demo/bouncing_demo.mhp');
 
     if (!manifestFile.existsSync() || mhpFile.existsSync()) {
@@ -205,8 +206,9 @@ class PackageController extends ChangeNotifier {
     final packId = manifest['pack_id'] as String? ?? 'bouncing_demo';
     final mspFile = File('$workspace/examples/bouncing_demo/$packId.msp');
 
-    File('$workspace/examples/bouncing_demo/$packId.mhp')
-        .writeAsBytesSync(output.mhpBytes);
+    File(
+      '$workspace/examples/bouncing_demo/$packId.mhp',
+    ).writeAsBytesSync(output.mhpBytes);
     mspFile.writeAsBytesSync(output.mspBytes);
   }
 

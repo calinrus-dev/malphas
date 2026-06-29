@@ -1,15 +1,264 @@
 // Bytecode sandbox VM implementation for ResourcePackRuntime.
 use crate::pipeline::ResourcePackRuntime;
 
+type OpcodeFn = unsafe fn(
+    rt: &mut ResourcePackRuntime,
+    entity_offset: usize,
+    arg1: u8,
+    val_u16: u16,
+    regs: &mut [f32; 8],
+    pc: &mut usize,
+    bytecode: &[u8],
+);
+
+static JUMP_TABLE: [OpcodeFn; 16] = [
+    vm_halt,            // 0x00
+    vm_load_reg_const,  // 0x01
+    vm_add_reg,         // 0x02
+    vm_sub_reg,         // 0x03
+    vm_write_arena_f32, // 0x04
+    vm_read_arena_f32,  // 0x05
+    vm_write_arena_u8,  // 0x06
+    vm_read_arena_u8,   // 0x07
+    vm_jmp_lt,          // 0x08
+    vm_jmp,             // 0x09
+    vm_write_arena_u32, // 0x0A
+    vm_mul_reg,         // 0x0B
+    vm_div_reg,         // 0x0C
+    vm_halt,            // 0x0D
+    vm_halt,            // 0x0E
+    vm_halt,            // 0x0F
+];
+
+unsafe fn vm_halt(
+    _rt: &mut ResourcePackRuntime,
+    _entity_offset: usize,
+    _arg1: u8,
+    _val_u16: u16,
+    _regs: &mut [f32; 8],
+    pc: &mut usize,
+    _bytecode: &[u8],
+) {
+    *pc = usize::MAX - 4;
+}
+
+unsafe fn vm_load_reg_const(
+    _rt: &mut ResourcePackRuntime,
+    _entity_offset: usize,
+    arg1: u8,
+    val_u16: u16,
+    regs: &mut [f32; 8],
+    pc: &mut usize,
+    _bytecode: &[u8],
+) {
+    if arg1 < 8 {
+        regs[arg1 as usize] = val_u16 as f32;
+    }
+    *pc += 4;
+}
+
+unsafe fn vm_add_reg(
+    _rt: &mut ResourcePackRuntime,
+    _entity_offset: usize,
+    arg1: u8,
+    val_u16: u16,
+    regs: &mut [f32; 8],
+    pc: &mut usize,
+    _bytecode: &[u8],
+) {
+    if arg1 < 8 && (val_u16 as usize) < 8 {
+        regs[arg1 as usize] += regs[val_u16 as usize];
+    }
+    *pc += 4;
+}
+
+unsafe fn vm_sub_reg(
+    _rt: &mut ResourcePackRuntime,
+    _entity_offset: usize,
+    arg1: u8,
+    val_u16: u16,
+    regs: &mut [f32; 8],
+    pc: &mut usize,
+    _bytecode: &[u8],
+) {
+    if arg1 < 8 && (val_u16 as usize) < 8 {
+        regs[arg1 as usize] -= regs[val_u16 as usize];
+    }
+    *pc += 4;
+}
+
+unsafe fn vm_write_arena_f32(
+    rt: &mut ResourcePackRuntime,
+    entity_offset: usize,
+    arg1: u8,
+    val_u16: u16,
+    regs: &mut [f32; 8],
+    pc: &mut usize,
+    _bytecode: &[u8],
+) {
+    if arg1 < 8 {
+        let mask = rt.arena_size - 1;
+        let offset = (entity_offset + val_u16 as usize) & mask;
+        if (rt.arena_start_ptr as usize + offset) & 3 == 0 {
+            let target_ptr = rt.arena_start_ptr.add(offset) as *mut f32;
+            *target_ptr = regs[arg1 as usize];
+        }
+    }
+    *pc += 4;
+}
+
+unsafe fn vm_read_arena_f32(
+    rt: &mut ResourcePackRuntime,
+    entity_offset: usize,
+    arg1: u8,
+    val_u16: u16,
+    regs: &mut [f32; 8],
+    pc: &mut usize,
+    _bytecode: &[u8],
+) {
+    if arg1 < 8 {
+        let mask = rt.arena_size - 1;
+        let offset = (entity_offset + val_u16 as usize) & mask;
+        if (rt.arena_start_ptr as usize + offset) & 3 == 0 {
+            let src_ptr = rt.arena_start_ptr.add(offset) as *const f32;
+            regs[arg1 as usize] = *src_ptr;
+        }
+    }
+    *pc += 4;
+}
+
+unsafe fn vm_write_arena_u8(
+    rt: &mut ResourcePackRuntime,
+    entity_offset: usize,
+    arg1: u8,
+    val_u16: u16,
+    regs: &mut [f32; 8],
+    pc: &mut usize,
+    _bytecode: &[u8],
+) {
+    if arg1 < 8 {
+        let mask = rt.arena_size - 1;
+        let offset = (entity_offset + val_u16 as usize) & mask;
+        *rt.arena_start_ptr.add(offset) = regs[arg1 as usize] as u8;
+    }
+    *pc += 4;
+}
+
+unsafe fn vm_read_arena_u8(
+    rt: &mut ResourcePackRuntime,
+    entity_offset: usize,
+    arg1: u8,
+    val_u16: u16,
+    regs: &mut [f32; 8],
+    pc: &mut usize,
+    _bytecode: &[u8],
+) {
+    if arg1 < 8 {
+        let mask = rt.arena_size - 1;
+        let offset = (entity_offset + val_u16 as usize) & mask;
+        regs[arg1 as usize] = *rt.arena_start_ptr.add(offset) as f32;
+    }
+    *pc += 4;
+}
+
+unsafe fn vm_jmp_lt(
+    _rt: &mut ResourcePackRuntime,
+    _entity_offset: usize,
+    arg1: u8,
+    val_u16: u16,
+    regs: &mut [f32; 8],
+    pc: &mut usize,
+    bytecode: &[u8],
+) {
+    let reg2 = (val_u16 >> 8) as usize;
+    let target_pc = (val_u16 & 0xFF) as usize * 4;
+    if arg1 < 8 && reg2 < 8 && regs[arg1 as usize] < regs[reg2] {
+        if target_pc + 4 > bytecode.len() {
+            *pc = usize::MAX - 4;
+        } else {
+            *pc = target_pc;
+        }
+    } else {
+        *pc += 4;
+    }
+}
+
+unsafe fn vm_jmp(
+    _rt: &mut ResourcePackRuntime,
+    _entity_offset: usize,
+    arg1: u8,
+    _val_u16: u16,
+    _regs: &mut [f32; 8],
+    pc: &mut usize,
+    bytecode: &[u8],
+) {
+    let target_pc = arg1 as usize * 4;
+    if target_pc + 4 > bytecode.len() {
+        *pc = usize::MAX - 4;
+    } else {
+        *pc = target_pc;
+    }
+}
+
+unsafe fn vm_write_arena_u32(
+    rt: &mut ResourcePackRuntime,
+    entity_offset: usize,
+    arg1: u8,
+    val_u16: u16,
+    regs: &mut [f32; 8],
+    pc: &mut usize,
+    _bytecode: &[u8],
+) {
+    if arg1 < 8 {
+        let mask = rt.arena_size - 1;
+        let offset = (entity_offset + val_u16 as usize) & mask;
+        if (rt.arena_start_ptr as usize + offset) & 3 == 0 {
+            let target_ptr = rt.arena_start_ptr.add(offset) as *mut u32;
+            *target_ptr = regs[arg1 as usize] as u32;
+        }
+    }
+    *pc += 4;
+}
+
+unsafe fn vm_mul_reg(
+    _rt: &mut ResourcePackRuntime,
+    _entity_offset: usize,
+    arg1: u8,
+    val_u16: u16,
+    regs: &mut [f32; 8],
+    pc: &mut usize,
+    _bytecode: &[u8],
+) {
+    if arg1 < 8 && (val_u16 as usize) < 8 {
+        regs[arg1 as usize] *= regs[val_u16 as usize];
+    }
+    *pc += 4;
+}
+
+unsafe fn vm_div_reg(
+    _rt: &mut ResourcePackRuntime,
+    _entity_offset: usize,
+    arg1: u8,
+    val_u16: u16,
+    regs: &mut [f32; 8],
+    pc: &mut usize,
+    _bytecode: &[u8],
+) {
+    if arg1 < 8 && (val_u16 as usize) < 8 {
+        let div = regs[val_u16 as usize];
+        if div != 0.0 {
+            regs[arg1 as usize] /= div;
+        }
+    }
+    *pc += 4;
+}
+
 impl ResourcePackRuntime {
     pub fn execute_logic_tick(&mut self, entity_id: u16, bytecode_buffer: &[u8]) {
         if bytecode_buffer.is_empty() {
             return;
         }
 
-        // Defensive ceiling: malformed bytecodes must never be allowed to spin
-        // forever or consume unbounded CPU. Each entity gets its own budget,
-        // so a bad entity halts locally without affecting the engine clock.
         const MAX_INSTRUCTIONS: usize = 4096;
 
         let entity_offset = 32 + (entity_id as usize * 64);
@@ -17,26 +266,8 @@ impl ResourcePackRuntime {
         let mut regs = [0.0f32; 8];
         let mut instructions = 0usize;
 
-        // Arena access helper: verifies that the base offset does not overflow,
-        // that the whole access fits inside the Arena, and that multi-byte
-        // accesses are naturally aligned (preventing misaligned-pointer UB).
-        let arena_offset = |val: u16, access_size: usize| -> Option<usize> {
-            let offset = entity_offset.checked_add(val as usize)?;
-            let end = offset.checked_add(access_size)?;
-            if end > self.arena_size {
-                return None;
-            }
-            if access_size > 1
-                && (self.arena_start_ptr as usize).wrapping_add(offset) % access_size != 0
-            {
-                return None;
-            }
-            Some(offset)
-        };
-
         while pc + 4 <= bytecode_buffer.len() {
             if instructions >= MAX_INSTRUCTIONS {
-                // Entity-local HALT: budget exhausted.
                 break;
             }
             instructions += 1;
@@ -46,131 +277,20 @@ impl ResourcePackRuntime {
             let val_u16 =
                 ((bytecode_buffer[pc + 2] as u16) << 8) | (bytecode_buffer[pc + 3] as u16);
 
-            match opcode {
-                0x00 => {
-                    // HALT
-                    break;
+            if (opcode as usize) < JUMP_TABLE.len() {
+                unsafe {
+                    JUMP_TABLE[opcode as usize](
+                        self,
+                        entity_offset,
+                        arg1,
+                        val_u16,
+                        &mut regs,
+                        &mut pc,
+                        bytecode_buffer,
+                    );
                 }
-                0x01 => {
-                    // LOAD_REG_CONST
-                    if arg1 < 8 {
-                        regs[arg1 as usize] = val_u16 as f32;
-                    }
-                    pc += 4;
-                }
-                0x02 => {
-                    // ADD_REG
-                    if arg1 < 8 && (val_u16 as usize) < 8 {
-                        regs[arg1 as usize] += regs[val_u16 as usize];
-                    }
-                    pc += 4;
-                }
-                0x03 => {
-                    // SUB_REG
-                    if arg1 < 8 && (val_u16 as usize) < 8 {
-                        regs[arg1 as usize] -= regs[val_u16 as usize];
-                    }
-                    pc += 4;
-                }
-                0x04 => {
-                    // WRITE_ARENA_F32
-                    if arg1 < 8 {
-                        if let Some(offset) = arena_offset(val_u16, 4) {
-                            unsafe {
-                                let target_ptr = self.arena_start_ptr.add(offset) as *mut f32;
-                                *target_ptr = regs[arg1 as usize];
-                            }
-                        }
-                    }
-                    pc += 4;
-                }
-                0x05 => {
-                    // READ_ARENA_F32
-                    if arg1 < 8 {
-                        if let Some(offset) = arena_offset(val_u16, 4) {
-                            unsafe {
-                                let src_ptr = self.arena_start_ptr.add(offset) as *const f32;
-                                regs[arg1 as usize] = *src_ptr;
-                            }
-                        }
-                    }
-                    pc += 4;
-                }
-                0x06 => {
-                    // WRITE_ARENA_U8
-                    if arg1 < 8 {
-                        if let Some(offset) = arena_offset(val_u16, 1) {
-                            unsafe {
-                                *self.arena_start_ptr.add(offset) = regs[arg1 as usize] as u8;
-                            }
-                        }
-                    }
-                    pc += 4;
-                }
-                0x07 => {
-                    // READ_ARENA_U8
-                    if arg1 < 8 {
-                        if let Some(offset) = arena_offset(val_u16, 1) {
-                            unsafe {
-                                regs[arg1 as usize] = *self.arena_start_ptr.add(offset) as f32;
-                            }
-                        }
-                    }
-                    pc += 4;
-                }
-                0x08 => {
-                    // JMP_LT (reg1, reg2, target_instr_index_u8)
-                    let reg2 = (val_u16 >> 8) as usize;
-                    let target_pc = (val_u16 & 0xFF) as usize * 4;
-                    if arg1 < 8 && reg2 < 8 && regs[arg1 as usize] < regs[reg2] {
-                        if target_pc + 4 > bytecode_buffer.len() {
-                            // Out-of-bounds jump target -> entity-local HALT.
-                            break;
-                        }
-                        pc = target_pc;
-                        continue;
-                    }
-                    pc += 4;
-                }
-                0x09 => {
-                    // JMP
-                    let target_pc = arg1 as usize * 4;
-                    if target_pc + 4 > bytecode_buffer.len() {
-                        // Out-of-bounds jump target -> entity-local HALT.
-                        break;
-                    }
-                    pc = target_pc;
-                }
-                0x0A => {
-                    // WRITE_ARENA_U32
-                    if arg1 < 8 {
-                        if let Some(offset) = arena_offset(val_u16, 4) {
-                            unsafe {
-                                let target_ptr = self.arena_start_ptr.add(offset) as *mut u32;
-                                *target_ptr = regs[arg1 as usize] as u32;
-                            }
-                        }
-                    }
-                    pc += 4;
-                }
-                0x0B => {
-                    // MUL_REG
-                    if arg1 < 8 && (val_u16 as usize) < 8 {
-                        regs[arg1 as usize] *= regs[val_u16 as usize];
-                    }
-                    pc += 4;
-                }
-                0x0C => {
-                    // DIV_REG
-                    if arg1 < 8 && (val_u16 as usize) < 8 {
-                        let div = regs[val_u16 as usize];
-                        if div != 0.0 {
-                            regs[arg1 as usize] /= div;
-                        }
-                    }
-                    pc += 4;
-                }
-                _ => break,
+            } else {
+                break;
             }
         }
     }

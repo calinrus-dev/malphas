@@ -122,12 +122,18 @@ pub struct CoreCommandBuffer {
     pub commands: *mut DartRenderCommand,
 }
 
-#[repr(C, align(16))]
+#[repr(C, align(64))]
 pub struct MalphasDoubleBufferBridge {
     pub buffer_a: CoreCommandBuffer,
     pub buffer_b: CoreCommandBuffer,
     pub atomic_back_index: AtomicU8,
     pub commands_written: AtomicU32,
+    pub _padding0: u32,
+    pub _padding1: u32,
+    pub _padding2: u32,
+    pub _padding3: u32,
+    pub _padding4: u32,
+    pub _padding5: u32,
 }
 
 #[repr(C, align(16))]
@@ -461,7 +467,7 @@ pub(crate) fn load_mhp_package(buffer: &[u8]) -> i32 {
         return -5;
     }
 
-    let header = unsafe { &*(buffer.as_ptr() as *const MhpHeader) };
+    let header = unsafe { std::ptr::read_unaligned(buffer.as_ptr() as *const MhpHeader) };
 
     if header.total_size as usize != buffer.len() {
         return -6;
@@ -563,7 +569,7 @@ pub(crate) fn load_msp_package(buffer: &[u8]) -> i32 {
         return -20;
     }
 
-    let header = unsafe { &*(buffer.as_ptr() as *const MspHeader) };
+    let header = unsafe { std::ptr::read_unaligned(buffer.as_ptr() as *const MspHeader) };
 
     let payload_start = header_size;
     let payload_end = payload_start + header.bytecode_size as usize;
@@ -727,8 +733,8 @@ mod tests {
         assert_eq!(std::mem::size_of::<CoreCommandBuffer>(), 16);
         assert_eq!(std::mem::align_of::<CoreCommandBuffer>(), 16);
 
-        assert_eq!(std::mem::size_of::<MalphasDoubleBufferBridge>(), 48);
-        assert_eq!(std::mem::align_of::<MalphasDoubleBufferBridge>(), 16);
+        assert_eq!(std::mem::size_of::<MalphasDoubleBufferBridge>(), 64);
+        assert_eq!(std::mem::align_of::<MalphasDoubleBufferBridge>(), 64);
 
         assert_eq!(std::mem::size_of::<MhpHeader>(), 112);
         assert_eq!(std::mem::align_of::<MhpHeader>(), 16);

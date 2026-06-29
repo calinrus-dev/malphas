@@ -110,8 +110,11 @@ class EngineController extends ChangeNotifier {
     }
 
     final signatureHex = sigFile.readAsStringSync().trim();
-    final result =
-        _bindings.verifyEngine(targetPath, signatureHex, _enginePublicKeyHex);
+    final result = _bindings.verifyEngine(
+      targetPath,
+      signatureHex,
+      _enginePublicKeyHex,
+    );
 
     if (result == 0) {
       engines[index].status = EngineStatus.standby;
@@ -140,7 +143,8 @@ class EngineController extends ChangeNotifier {
 
     // 1. flutter_app/motors/malphas_core_*.{dll,so,dylib}
     final motorsDir = Directory(
-        '$root${Platform.pathSeparator}flutter_app${Platform.pathSeparator}motors');
+      '$root${Platform.pathSeparator}flutter_app${Platform.pathSeparator}motors',
+    );
     if (motorsDir.existsSync()) {
       for (final entity in motorsDir.listSync()) {
         if (entity is File) {
@@ -154,7 +158,8 @@ class EngineController extends ChangeNotifier {
 
     // 2. target/release/{malphas_core.dll,libmalphas_core.so,libmalphas_core.dylib}
     final releaseDir = Directory(
-        '$root${Platform.pathSeparator}target${Platform.pathSeparator}release');
+      '$root${Platform.pathSeparator}target${Platform.pathSeparator}release',
+    );
     if (releaseDir.existsSync()) {
       final releaseNames = Platform.isWindows
           ? ['malphas_core.dll']
@@ -162,8 +167,9 @@ class EngineController extends ChangeNotifier {
               ? ['libmalphas_core.dylib']
               : ['libmalphas_core.so'];
       for (final name in releaseNames) {
-        final candidate =
-            File('${releaseDir.path}${Platform.pathSeparator}$name');
+        final candidate = File(
+          '${releaseDir.path}${Platform.pathSeparator}$name',
+        );
         if (candidate.existsSync()) {
           addIfBinary(candidate);
         }

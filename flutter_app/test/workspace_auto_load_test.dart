@@ -12,8 +12,9 @@ void main() {
 
   setUp(() {
     persistenceDir = Directory.systemTemp.createTempSync('malphas_ws_persist');
-    AppStatePersistenceService()
-        .setDocumentsDirectoryOverride(persistenceDir.path);
+    AppStatePersistenceService().setDocumentsDirectoryOverride(
+      persistenceDir.path,
+    );
   });
 
   tearDown(() {
@@ -23,8 +24,9 @@ void main() {
     } catch (_) {}
   });
 
-  testWidgets('WorkspaceScreen auto-loads the bouncing demo package',
-      (WidgetTester tester) async {
+  testWidgets('WorkspaceScreen auto-loads the bouncing demo package', (
+    WidgetTester tester,
+  ) async {
     TestWidgetsFlutterBinding.ensureInitialized();
 
     final bindings = MalphasBindings();
@@ -50,8 +52,9 @@ void main() {
       packageIds: const ['bouncing_demo'],
     );
 
-    await tester
-        .pumpWidget(MaterialApp(home: WorkspaceScreen(environment: env)));
+    await tester.pumpWidget(
+      MaterialApp(home: WorkspaceScreen(environment: env)),
+    );
 
     // Dispose the widget at the end of the test so its Ticker is stopped and
     // the test runner can move on to the next test.
@@ -66,10 +69,16 @@ void main() {
 
     // The native engine should now be producing render commands.
     final buffer = bindings.commandBuffer;
-    expect(buffer, isNotNull,
-        reason: 'Command buffer should be allocated after auto-load');
+    expect(
+      buffer,
+      isNotNull,
+      reason: 'Command buffer should be allocated after auto-load',
+    );
     final count = bindings.getCommandCount(buffer!);
-    expect(count, greaterThan(0),
-        reason: 'Engine should have generated at least one render command');
+    expect(
+      count,
+      greaterThan(0),
+      reason: 'Engine should have generated at least one render command',
+    );
   });
 }
