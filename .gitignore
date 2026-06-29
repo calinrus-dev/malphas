@@ -33,6 +33,7 @@ flutter_app/libmalphas_core.so.sig
 flutter_app/libmalphas_core.dylib
 flutter_app/libmalphas_core.dylib.sig
 flutter_app/motors/
+**/jniLibs/
 
 # Temp zip and extraction files
 kanjivg.zip
