@@ -191,7 +191,14 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                     );
                   },
                 ),
-                const PackageManagerPanel(),
+                PackageManagerPanel(
+                  environment: widget.environment,
+                  onRunLive: () {
+                    setState(() {
+                      _currentViewIndex = 0;
+                    });
+                  },
+                ),
                 const EngineManagerPanel(),
               ],
             ),

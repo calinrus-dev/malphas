@@ -385,6 +385,53 @@ class PackageController extends ChangeNotifier {
       packagesDir.createSync(recursive: true);
     }
 
+    final spritesDir = Directory('${packagesDir.path}/$packId/sprites');
+    if (!spritesDir.existsSync()) {
+      spritesDir.createSync(recursive: true);
+    }
+
+    final List<MalphasObject> processedObjects = [];
+    for (final obj in objects) {
+      final List<MalphasSkin> processedSkins = [];
+      for (final skin in obj.skins) {
+        final srcPath = skin.assetPath;
+        if (srcPath.isNotEmpty && srcPath != 'none') {
+          try {
+            File srcFile = File(srcPath);
+            if (!srcFile.existsSync()) {
+              final ws = resolveWorkspaceRoot();
+              srcFile = File('$ws/$srcPath');
+            }
+            if (srcFile.existsSync()) {
+              final filename = srcFile.uri.pathSegments.last;
+              final destFile = File('${spritesDir.path}/$filename');
+              await srcFile.copy(destFile.path);
+              processedSkins.add(MalphasSkin(
+                id: skin.id,
+                name: skin.name,
+                assetPath: 'packages/$packId/sprites/$filename',
+                version: skin.version,
+              ));
+            } else {
+              processedSkins.add(skin);
+            }
+          } catch (_) {
+            processedSkins.add(skin);
+          }
+        } else {
+          processedSkins.add(skin);
+        }
+      }
+      processedObjects.add(MalphasObject(
+        id: obj.id,
+        name: obj.name,
+        category: obj.category,
+        properties: obj.properties,
+        tags: obj.tags,
+        skins: processedSkins,
+      ));
+    }
+
     // 1. Build the full rich manifest JSON map
     final richManifest = {
       'pack_id': packId,
@@ -394,7 +441,7 @@ class PackageController extends ChangeNotifier {
       'description': description,
       'canvas_width': canvasWidth,
       'canvas_height': canvasHeight,
-      'objects': objects
+      'objects': processedObjects
           .map((obj) => {
                 'object_id': int.tryParse(obj.id) ?? 1,
                 'name': obj.name,
@@ -413,7 +460,7 @@ class PackageController extends ChangeNotifier {
       'pack_id': packId,
       'canvas_width': canvasWidth,
       'canvas_height': canvasHeight,
-      'objects': objects
+      'objects': processedObjects
           .map((obj) => {
                 'object_id': int.tryParse(obj.id) ?? 1,
                 'properties': obj.properties,

@@ -3,13 +3,21 @@ import 'models.dart';
 import 'package_controller.dart';
 import 'package_config_screen.dart';
 import 'package_creator_screen.dart';
+import '../hub/environment_model.dart';
 
 enum HubViewMode { packageList, objectGrid }
 
 enum RenderViewMode { card, icon, showcase }
 
 class PackageManagerPanel extends StatefulWidget {
-  const PackageManagerPanel({super.key});
+  final MalphasEnvironment? environment;
+  final VoidCallback? onRunLive;
+
+  const PackageManagerPanel({
+    super.key,
+    this.environment,
+    this.onRunLive,
+  });
 
   @override
   State<PackageManagerPanel> createState() => _PackageManagerPanelState();
@@ -97,13 +105,18 @@ class _PackageManagerPanelState extends State<PackageManagerPanel> {
                 IconButton(
                   icon:
                       const Icon(Icons.add, color: Color(0xff00ffcc), size: 20),
-                  onPressed: () {
-                    Navigator.push(
+                  onPressed: () async {
+                    final result = await Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (context) => const PackageCreatorScreen(),
+                        builder: (context) => PackageCreatorScreen(
+                          activeEnvironment: widget.environment,
+                        ),
                       ),
                     );
+                    if (result == 'run_live' && widget.onRunLive != null) {
+                      widget.onRunLive!();
+                    }
                   },
                 ),
                 IconButton(

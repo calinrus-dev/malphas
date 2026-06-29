@@ -1,9 +1,14 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import '../../core/ffi/malphas_bindings.dart';
+import '../../core/services/entity_bootstrap_service.dart';
+import '../hub/environment_model.dart';
 import 'models.dart';
 import 'package_controller.dart';
 
 class PackageCreatorScreen extends StatefulWidget {
-  const PackageCreatorScreen({super.key});
+  final MalphasEnvironment? activeEnvironment;
+  const PackageCreatorScreen({super.key, this.activeEnvironment});
 
   @override
   State<PackageCreatorScreen> createState() => _PackageCreatorScreenState();
@@ -302,7 +307,7 @@ class _PackageCreatorScreenState extends State<PackageCreatorScreen> {
     );
   }
 
-  Future<void> _compilePackage() async {
+  Future<void> _compilePackage({required bool runLive}) async {
     if (!_formKey.currentState!.validate()) return;
     if (_objects.isEmpty) {
       _showErrorSnackBar('Add at least one object entity!');
@@ -316,9 +321,10 @@ class _PackageCreatorScreenState extends State<PackageCreatorScreen> {
     try {
       final width = int.tryParse(_widthController.text.trim()) ?? 1000;
       final height = int.tryParse(_heightController.text.trim()) ?? 1000;
+      final packId = _packIdController.text.trim();
 
       await _controller.createAndCompilePackage(
-        packId: _packIdController.text.trim(),
+        packId: packId,
         name: _nameController.text.trim(),
         version: _versionController.text.trim(),
         author: _authorController.text.trim(),
@@ -328,8 +334,43 @@ class _PackageCreatorScreenState extends State<PackageCreatorScreen> {
         objects: _objects,
       );
 
-      _showSuccessSnackBar('Package compiled and registered successfully!');
-      if (mounted) Navigator.pop(context);
+      final bindings = MalphasBindings();
+      if (runLive && bindings.isNativeAvailable) {
+        bindings.pauseEngine(true);
+        try {
+          final workspace = _controller.resolveWorkspaceRoot();
+          final mhpFile = File('$workspace/packages/$packId.mhp');
+          if (mhpFile.existsSync()) {
+            final loadResult = bindings.loadPack(mhpFile.path);
+            if (loadResult == 0) {
+              final pack = _controller
+                  .getAllPackages()
+                  .firstWhere((p) => p.id == packId);
+              final bootstrap = EntityBootstrapService(bindings);
+              bootstrap.configurePackageScene(pack);
+
+              _controller.setPackageLoaded(packId, loaded: true);
+              await _controller.preloadSkins(pack);
+            }
+          }
+        } finally {
+          bindings.pauseEngine(false);
+        }
+
+        if (widget.activeEnvironment != null) {
+          final env = widget.activeEnvironment!;
+          env.packageIds.remove(packId);
+          env.packageIds.insert(0, packId);
+        }
+      }
+
+      _showSuccessSnackBar(runLive
+          ? 'Package compiled and launched live!'
+          : 'Package compiled and registered successfully!');
+
+      if (mounted) {
+        Navigator.pop(context, runLive ? 'run_live' : null);
+      }
     } catch (e) {
       _showErrorSnackBar('Compilation error: $e');
     } finally {
@@ -581,35 +622,75 @@ class _PackageCreatorScreenState extends State<PackageCreatorScreen> {
                   ),
                 ),
                 const SizedBox(height: 16),
-                SizedBox(
-                  width: double.infinity,
-                  height: 48,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: _isCompiling
-                          ? const Color(0xff161616)
-                          : const Color(0xff00ffcc),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(24)),
-                    ),
-                    onPressed: _isCompiling ? null : _compilePackage,
-                    child: _isCompiling
-                        ? const SizedBox(
-                            height: 20,
-                            width: 20,
-                            child: CircularProgressIndicator(
-                                color: Colors.white38, strokeWidth: 2),
-                          )
-                        : const Text(
-                            'COMPILE & REGISTER PACKAGE',
-                            style: TextStyle(
-                              fontFamily: 'Courier',
-                              fontWeight: FontWeight.bold,
-                              fontSize: 12,
-                              color: Colors.black,
-                            ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: SizedBox(
+                        height: 48,
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xff0d0d0d),
+                            side: const BorderSide(color: Color(0xff1b1b1b)),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(24)),
                           ),
-                  ),
+                          onPressed: _isCompiling
+                              ? null
+                              : () => _compilePackage(runLive: false),
+                          child: _isCompiling
+                              ? const SizedBox(
+                                  height: 20,
+                                  width: 20,
+                                  child: CircularProgressIndicator(
+                                      color: Colors.white38, strokeWidth: 2),
+                                )
+                              : const Text(
+                                  'SAVE & COMPILE',
+                                  style: TextStyle(
+                                    fontFamily: 'Courier',
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 11,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: SizedBox(
+                        height: 48,
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: _isCompiling
+                                ? const Color(0xff161616)
+                                : const Color(0xff00ffcc),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(24)),
+                          ),
+                          onPressed: _isCompiling
+                              ? null
+                              : () => _compilePackage(runLive: true),
+                          child: _isCompiling
+                              ? const SizedBox(
+                                  height: 20,
+                                  width: 20,
+                                  child: CircularProgressIndicator(
+                                      color: Colors.black38, strokeWidth: 2),
+                                )
+                              : const Text(
+                                  'COMPILE & RUN LIVE',
+                                  style: TextStyle(
+                                    fontFamily: 'Courier',
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 11,
+                                    color: Colors.black,
+                                  ),
+                                ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
