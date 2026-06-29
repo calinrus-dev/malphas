@@ -1,7 +1,6 @@
 class MalphasTag {
   final String name;
-  final bool
-      isPublic; // true = Azul (pública, se muestra), false = Gris (interna, oculta)
+  final bool isPublic; // true = visible/public, false = hidden/internal
 
   const MalphasTag({required this.name, required this.isPublic});
 
@@ -111,7 +110,7 @@ class MalphasPackage {
     required this.description,
     this.coverImagePath,
     required this.objects,
-    this.isLoaded = true,
+    this.isLoaded = false,
   });
 
   Map<String, dynamic> toJson() => {
@@ -135,6 +134,6 @@ class MalphasPackage {
         objects: (json['objects'] as List)
             .map((o) => MalphasObject.fromJson(o as Map<String, dynamic>))
             .toList(),
-        isLoaded: json['isLoaded'] as bool? ?? true,
+        isLoaded: json['isLoaded'] as bool? ?? false,
       );
 }

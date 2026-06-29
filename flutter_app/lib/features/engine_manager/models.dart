@@ -9,7 +9,7 @@ class MalphasEngine {
   final NativeRuntime runtime;
   final String binaryName;
   String sha256;
-  final int allocatedMemoryBytes; // Simulación de la Arena
+  final int allocatedMemoryBytes; // Arena allocation size in bytes
   EngineStatus status;
 
   MalphasEngine({

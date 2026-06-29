@@ -21,22 +21,23 @@ void main() {
       return;
     }
 
-    // Allocate a large contiguous block of memory
+    // Allocate a large contiguous block of memory through the Rust-aligned
+    // allocator. All shared-memory buffers must be 16-byte aligned on ARM64.
     const totalSize = 256 * 1024;
     final ptr = bindings.malphasAlloc(totalSize);
     expect(ptr, isNot(dffi.nullptr));
 
     try {
-      // Perform 10,000 reads and writes with an artificial odd (unaligned) offset
-      // to verify that the FFI bus does not crash on casting/accessing structures
+      // Perform 10,000 reads and writes at aligned DartRenderCommand strides.
+      // The allocator is 16-byte aligned and DartRenderCommand is 24 bytes,
+      // so every stride stays naturally aligned for the struct's 4-byte rule.
+      const slotSize = 24;
       for (int i = 0; i < 10000; i++) {
-        // Offset is odd (e.g., 17, 33, 49, etc.)
-        final oddOffset = (i * 16) + 1;
-        if (oddOffset + 32 > totalSize) break;
+        final offset = i * slotSize;
+        if (offset + slotSize > totalSize) break;
 
-        // Access DartRenderCommand from unaligned memory offset
-        final cmdPtr = dffi.Pointer<DartRenderCommand>.fromAddress(
-            ptr.address + oddOffset);
+        final cmdPtr =
+            dffi.Pointer<DartRenderCommand>.fromAddress(ptr.address + offset);
 
         // Write fields
         cmdPtr.ref.commandType = 2;

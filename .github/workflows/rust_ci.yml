@@ -44,8 +44,9 @@ jobs:
           TEST_SIGNING_KEY: ${{ secrets.TEST_SIGNING_KEY }}
         run: |
           if [ -z "$TEST_SIGNING_KEY" ]; then
-            echo "Error: TEST_SIGNING_KEY secret is not set."
-            exit 1
+            echo "TEST_SIGNING_KEY secret is not set; skipping engine signing."
+            echo "Unsigned artifacts will still be uploaded."
+            exit 0
           fi
           if ! echo "$TEST_SIGNING_KEY" | grep -qxE '[0-9a-fA-F]{64}'; then
             echo "Error: TEST_SIGNING_KEY must be a 64-character hex string."

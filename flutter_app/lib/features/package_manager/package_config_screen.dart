@@ -30,15 +30,14 @@ class _PackageConfigScreenState extends State<PackageConfigScreen> {
 
     try {
       final compiler = MalphasPackageCompiler();
+      const packId = 'pack_custom_01';
       final manifest = {
-        "pack_id": "pack_custom_01",
-        "pack_name": "Malphas Demo Pack",
-        "version": "1.0.0",
-        "target_canvas": {"width": 1000, "height": 1000},
+        "pack_id": packId,
+        "canvas_width": 1000,
+        "canvas_height": 1000,
         "objects": [
           {
             "object_id": 42,
-            "name": "bouncing_cube",
             "properties": {
               "max_speed": "15.5",
               "collision_type": "bounding_box"
@@ -46,7 +45,6 @@ class _PackageConfigScreenState extends State<PackageConfigScreen> {
           },
           {
             "object_id": 43,
-            "name": "bouncing_text",
             "properties": {"font_size": "48.0", "color": "white"}
           }
         ]
@@ -60,11 +58,12 @@ class _PackageConfigScreenState extends State<PackageConfigScreen> {
         packagesDir.createSync(recursive: true);
       }
 
-      final outputPathMhp = '${packagesDir.path}/demo.mhp';
-      final outputPathMsp = '${packagesDir.path}/demo.msp';
+      // The CLI emits <pack_id>.mhp and <pack_id>.msp next to the manifest.
+      final outputPathMhp = '${packagesDir.path}/$packId.mhp';
+      final outputPathMsp = '${packagesDir.path}/$packId.msp';
 
-      await File(outputPathMhp).writeAsBytes(output.mhpBytes);
-      await File(outputPathMsp).writeAsBytes(output.mspBytes);
+      File(outputPathMhp).writeAsBytesSync(output.mhpBytes);
+      File(outputPathMsp).writeAsBytesSync(output.mspBytes);
 
       final bindings = MalphasBindings();
 

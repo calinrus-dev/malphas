@@ -18,14 +18,19 @@ class EngineController extends ChangeNotifier {
       'e9cb56c4ed5850d6c2f1f1f697feb1e0f9b0b6bd9130a871bcd2ef287b78e963';
   static String get publicKeyHex => _enginePublicKeyHex;
 
+  static String _defaultBinaryName() {
+    if (Platform.isWindows) return 'malphas_core.dll';
+    if (Platform.isMacOS) return 'libmalphas_core.dylib';
+    return 'libmalphas_core.so';
+  }
+
   final List<MalphasEngine> engines = [
     MalphasEngine(
       id: 'eng_liquid_01',
       name: 'LIQUID Core v1.0',
       version: 'v1.0.0',
       runtime: NativeRuntime.rust,
-      binaryName:
-          Platform.isWindows ? 'malphas_core.dll' : 'libmalphas_core.so',
+      binaryName: _defaultBinaryName(),
       sha256: '',
       allocatedMemoryBytes: 8388608,
       status: EngineStatus.unverified,
@@ -43,9 +48,7 @@ class EngineController extends ChangeNotifier {
                 name: 'Fallback Engine',
                 version: 'v0.0.0',
                 runtime: NativeRuntime.rust,
-                binaryName: Platform.isWindows
-                    ? 'malphas_core.dll'
-                    : 'libmalphas_core.so',
+                binaryName: _defaultBinaryName(),
                 sha256: '',
                 allocatedMemoryBytes: 8388608,
                 status: EngineStatus.corrupt,

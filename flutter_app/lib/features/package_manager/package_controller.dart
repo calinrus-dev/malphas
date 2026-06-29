@@ -170,10 +170,9 @@ class PackageController extends ChangeNotifier {
         name: 'MHP Pack ($packId)',
         version: 'v$version.0.0',
         author: 'Compiled Artifact',
-        description:
-            'Estructura binaria mapeada en zero-copy con cabeceras alineadas.',
+        description: 'Zero-copy binary structure with aligned headers.',
         objects: parsedObjects,
-      )..isLoaded = true;
+      );
     } catch (e) {
       // Silent skip for individual malformed files.
       return null;

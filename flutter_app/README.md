@@ -12,6 +12,7 @@ flutter_app/
 │   ├── main.dart                              # App entry point
 │   ├── core/
 │   │   ├── ffi/                               # Dart FFI bindings and C struct mirrors
+│   │   │   ├── arena_layout.dart
 │   │   │   ├── malphas_bindings.dart
 │   │   │   └── types.dart
 │   │   ├── compiler/                          # Thin wrapper around malphas-cli

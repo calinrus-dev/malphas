@@ -44,6 +44,10 @@ jobs:
           TEST_SIGNING_KEY: ${{ secrets.TEST_SIGNING_KEY }}
         run: |
           set -e
+          if [ -z "$TEST_SIGNING_KEY" ]; then
+            echo "TEST_SIGNING_KEY secret is not set; skipping Android library signing."
+            exit 0
+          fi
           CLI=./target/release/malphas-cli
           for abi in arm64-v8a armeabi-v7a x86_64; do
             lib="flutter_app/android/app/src/main/jniLibs/$abi/libmalphas_core.so"

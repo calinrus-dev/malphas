@@ -579,7 +579,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Clasificación estricta: Pinned arriba del todo
+    // Strict ordering: pinned environments first
     final sortedEnvs = [..._environments];
     sortedEnvs
         .sort((a, b) => (b.isPinned ? 1 : 0).compareTo(a.isPinned ? 1 : 0));

@@ -1,3 +1,5 @@
+// ignore_for_file: unused_field
+
 import 'dart:ffi';
 
 /// C-ABI mirror of the Rust `DartRenderCommand`.
@@ -64,6 +66,8 @@ final class CoreCommandBuffer extends Struct {
 /// C-ABI mirror of the Rust `MalphasDoubleBufferBridge`.
 ///
 /// * 48 bytes, 16-byte aligned.
+/// * The two `_padding` fields mirror the 8 trailing alignment bytes that Rust
+///   reserves for `#[repr(C, align(16))]`. They must not be read or written.
 /// * Dart never performs pointer arithmetic on this struct; it uses the Rust
 ///   exported getter functions (`get_buffer_a_ptr`, `get_back_index`, etc.).
 final class MalphasDoubleBufferBridge extends Struct {
@@ -75,4 +79,10 @@ final class MalphasDoubleBufferBridge extends Struct {
 
   @Uint32()
   external int commandsWritten;
+
+  @Uint32()
+  external int _padding0;
+
+  @Uint32()
+  external int _padding1;
 }

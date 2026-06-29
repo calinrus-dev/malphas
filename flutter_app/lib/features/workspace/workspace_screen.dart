@@ -34,7 +34,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     _ticker = createTicker((elapsed) {
       // Single-clock sync: one engine pulse per vsync from Flutter's Ticker.
       bindings.tick();
-      // Refresco visual repaint-driven sin re-layouts globales en alta frecuencia (Regla 5)
+      // Repaint-driven visual refresh without high-frequency global re-layouts (Rule 5).
     });
     _ticker.start();
 
@@ -167,7 +167,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
             ),
           ),
 
-          // BARRA SUPERIOR ANTIOVERFLOW (Scroll horizontal integrado si no caben las pesta�as)
+          // Top anti-overflow bar with horizontal scroll when tabs do not fit.
           Positioned(
             top: 40,
             left: 16,

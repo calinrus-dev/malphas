@@ -27,7 +27,7 @@ flutter:
       fonts:
         - asset: assets/fonts/JetBrainsMono-Regular.ttf
 
-  # Sección de recursos declarada para futura integración de assets del motor
+  # Asset section declared for future engine asset integration
   assets:
     - assets/fonts/
     - assets/sprites/
