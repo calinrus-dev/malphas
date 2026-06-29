@@ -1,20 +1,44 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'models.dart';
 import '../../core/compiler/package_compiler.dart';
+import '../../core/services/app_state_persistence_service.dart';
 
-class PackageController {
+class PackageController extends ChangeNotifier {
   static final PackageController _instance = PackageController._internal();
   factory PackageController() => _instance;
   PackageController._internal();
 
   final List<MalphasPackage> _registry = [];
+  final AppStatePersistenceService _persistence = AppStatePersistenceService();
+  bool _initialized = false;
+  String? _workspaceRootOverride;
+
+  /// Clears the in-memory registry and resets the initialization flag.
+  /// Intended for tests; do not call in production.
+  void reset() {
+    _registry.clear();
+    _initialized = false;
+    notifyListeners();
+  }
+
+  /// Overrides the workspace root used for package scanning. Intended for
+  /// tests; do not call in production.
+  void setWorkspaceRootOverride(String path) {
+    _workspaceRootOverride = path;
+  }
+
+  void clearWorkspaceRootOverride() {
+    _workspaceRootOverride = null;
+  }
 
   /// Resolves the repository root. If the current working directory is
   /// `flutter_app/`, walks up one level so that `examples/` and `packages/`
   /// are found consistently in tests and CI.
-  static String resolveWorkspaceRoot() {
+  String resolveWorkspaceRoot() {
+    if (_workspaceRootOverride != null) return _workspaceRootOverride!;
+
     final current = Directory.current.path;
     final separator = Platform.pathSeparator;
     final parts = current.split(separator);
@@ -33,40 +57,68 @@ class PackageController {
   }
 
   Future<void> init() async {
-    final workspace = resolveWorkspaceRoot();
-    final packagesDir = Directory('$workspace/packages');
-    if (!packagesDir.existsSync()) {
-      packagesDir.createSync(recursive: true);
-    }
+    if (_initialized) return;
 
-    // If the bouncing_demo manifest exists but the compiled package does not,
-    // compile it on demand using the native CLI.
-    await _ensureBouncingDemoCompiled(workspace);
+    try {
+      final workspace = resolveWorkspaceRoot();
+      final packagesDir = Directory('$workspace/packages');
+      if (!packagesDir.existsSync()) {
+        packagesDir.createSync(recursive: true);
+      }
 
-    // Scan examples/**/*.mhp
-    final examplesDir = Directory('$workspace/examples');
-    if (examplesDir.existsSync()) {
-      for (final entity in examplesDir.listSync(recursive: true)) {
-        if (entity is File && entity.path.toLowerCase().endsWith('.mhp')) {
-          final pack = _parseMhpPackage(entity);
+      // If the bouncing_demo manifest exists but the compiled package does not,
+      // compile it on demand using the native CLI.
+      await _ensureBouncingDemoCompiled(workspace);
+
+      // Restore previously loaded package ids so `isLoaded` state survives
+      // across app launches.
+      final persistedIds = _persistence.loadRegistryIds();
+
+      // Scan examples/**/*.mhp
+      final examplesDir = Directory('$workspace/examples');
+      if (examplesDir.existsSync()) {
+        for (final entity in examplesDir.listSync(recursive: true)) {
+          if (entity is File && entity.path.toLowerCase().endsWith('.mhp')) {
+            final pack = _parseMhpPackage(entity);
+            if (pack != null) {
+              _registry.removeWhere((p) => p.id == pack.id);
+              if (persistedIds.contains(pack.id)) {
+                pack.isLoaded = true;
+              }
+              _registry.add(pack);
+            }
+          }
+        }
+      }
+
+      // Scan packages/*.mhp
+      for (final file in packagesDir.listSync()) {
+        if (file is File && file.path.toLowerCase().endsWith('.mhp')) {
+          final pack = _parseMhpPackage(file);
           if (pack != null) {
             _registry.removeWhere((p) => p.id == pack.id);
+            if (persistedIds.contains(pack.id)) {
+              pack.isLoaded = true;
+            }
             _registry.add(pack);
           }
         }
       }
-    }
 
-    // Scan packages/*.mhp
-    for (final file in packagesDir.listSync()) {
-      if (file is File && file.path.toLowerCase().endsWith('.mhp')) {
-        final pack = _parseMhpPackage(file);
-        if (pack != null) {
-          _registry.removeWhere((p) => p.id == pack.id);
-          _registry.add(pack);
-        }
-      }
+      notifyListeners();
+      // Only mark initialized after all work completes so a failure leaves the
+      // controller in a retryable state.
+      _initialized = true;
+    } catch (e) {
+      _initialized = false;
+      rethrow;
     }
+  }
+
+  void _persistRegistry() {
+    _persistence.saveRegistryIds(
+      _registry.where((p) => p.isLoaded).map((p) => p.id).toList(),
+    );
   }
 
   /// Parses a valid MLPH binary and returns a [MalphasPackage] using the same
@@ -159,9 +211,27 @@ class PackageController {
     mspFile.writeAsBytesSync(output.mspBytes);
   }
 
-  List<MalphasPackage> getAllPackages() => _registry;
+  List<MalphasPackage> getAllPackages() => List.unmodifiable(_registry);
   List<MalphasPackage> getActivePackages() =>
-      _registry.where((p) => p.isLoaded).toList();
-  void injectPackage(MalphasPackage pack) => _registry.add(pack);
-  void deletePackage(String id) => _registry.removeWhere((p) => p.id == id);
+      List.unmodifiable(_registry.where((p) => p.isLoaded));
+
+  void setPackageLoaded(String id, {required bool loaded}) {
+    final index = _registry.indexWhere((p) => p.id == id);
+    if (index == -1) return;
+    _registry[index].isLoaded = loaded;
+    _persistRegistry();
+    notifyListeners();
+  }
+
+  void injectPackage(MalphasPackage pack) {
+    _registry.add(pack);
+    _persistRegistry();
+    notifyListeners();
+  }
+
+  void deletePackage(String id) {
+    _registry.removeWhere((p) => p.id == id);
+    _persistRegistry();
+    notifyListeners();
+  }
 }

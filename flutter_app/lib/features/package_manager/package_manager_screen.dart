@@ -25,17 +25,39 @@ class _PackageManagerPanelState extends State<PackageManagerPanel> {
   String _activeTag = 'ALL';
 
   @override
+  void initState() {
+    super.initState();
+    _controller.addListener(_onControllerChanged);
+  }
+
+  @override
+  void dispose() {
+    _controller.removeListener(_onControllerChanged);
+    super.dispose();
+  }
+
+  void _onControllerChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Padding(
-      padding: const EdgeInsets.only(top: 90, left: 16, right: 16, bottom: 95),
-      child: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 150),
-        child: _hubMode == HubViewMode.packageList
-            ? _buildPackageList(theme)
-            : _buildObjectExplorer(theme),
-      ),
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        return Padding(
+          padding:
+              const EdgeInsets.only(top: 90, left: 16, right: 16, bottom: 95),
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 150),
+            child: _hubMode == HubViewMode.packageList
+                ? _buildPackageList(theme)
+                : _buildObjectExplorer(theme),
+          ),
+        );
+      },
     );
   }
 

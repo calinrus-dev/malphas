@@ -6,7 +6,9 @@ import 'features/package_manager/package_controller.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Inicializar asíncronamente el gestor de paquetes persistentes en disco
+  // Initialize the package registry. It will scan compiled .mhp packs on disk
+  // and restore the previously loaded state from JSON persisted in the app
+  // documents directory.
   await PackageController().init();
 
   runApp(const MalphasConsole());

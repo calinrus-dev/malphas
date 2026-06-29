@@ -3,6 +3,7 @@
 // is not useful here.
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
 
+pub mod arena_layout;
 pub mod bridge;
 pub mod crypto;
 pub mod input;
@@ -16,7 +17,8 @@ use crate::bridge::{
     get_back_index as get_back_index_internal, get_buffer_a_ptr as get_buffer_a_ptr_internal,
     get_buffer_b_ptr as get_buffer_b_ptr_internal, get_command_count as get_command_count_internal,
     get_commands_pointer as get_commands_pointer_internal,
-    get_commands_written as get_commands_written_internal, init_engine_internal,
+    get_commands_written as get_commands_written_internal,
+    get_text_payload_pointer as get_text_payload_pointer_internal, init_engine_internal,
     malphas_alloc as malphas_alloc_internal, malphas_free as malphas_free_internal,
     pause_engine_internal, shutdown_engine_internal, trigger_engine_pulse_internal,
 };
@@ -33,7 +35,7 @@ use crate::pipeline::{
     load_resource_pack_raw as load_resource_pack_raw_internal, process_engine_tick_sync,
     set_entities_count as set_entities_count_internal, set_entity as set_entity_internal,
     write_arena_bytes as write_arena_bytes_internal, CoreCommandBuffer, DartRenderCommand,
-    MalphasDoubleBufferBridge,
+    MalphasDoubleBufferBridge, TextPayload,
 };
 
 // ---------------------------------------------------------------------------
@@ -107,6 +109,13 @@ pub extern "C" fn get_commands_pointer(buffer: *const CoreCommandBuffer) -> *mut
 #[no_mangle]
 pub extern "C" fn get_commands_written(bridge: *mut MalphasDoubleBufferBridge) -> u32 {
     get_commands_written_internal(bridge)
+}
+
+#[no_mangle]
+pub extern "C" fn get_text_payload_pointer(
+    command: *const DartRenderCommand,
+) -> *const TextPayload {
+    get_text_payload_pointer_internal(command)
 }
 
 // ---------------------------------------------------------------------------

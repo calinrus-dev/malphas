@@ -13,6 +13,11 @@ use std::time::Instant;
 
 use sha2::{Digest, Sha256};
 
+use crate::arena_layout::{
+    DEFAULT_STATIC_RESOURCES_OFFSET, ENTITIES_COUNT, ENTITIES_OFFSET, ENTITY_SLOT_SIZE,
+    ENTITY_STR_OFFSET, FONT_ATLAS_OFFSET, FONT_METRICS_OFFSET, OBJECTS_TABLE_OFFSET,
+    STATIC_RESOURCES_SIZE, TEXT_PAYLOAD_SIZE,
+};
 use crate::bridge::{
     get_buffer_a_ptr, get_buffer_b_ptr, malphas_alloc, malphas_free, pause_engine_internal,
 };
@@ -259,14 +264,15 @@ pub(crate) fn process_engine_tick_internal() {
     //    state (speed and colour).  The lock is held only for this short phase.
     if !events.is_empty() {
         let _write_guard = ARENA_LOCK.write();
-        let entities_offset = unsafe { *(arena_start.add(12) as *const u32) } as usize;
-        let entities_count = unsafe { *(arena_start.add(16) as *const u32) } as usize;
+        let entities_offset = unsafe { *(arena_start.add(ENTITIES_OFFSET) as *const u32) } as usize;
+        let entities_count = unsafe { *(arena_start.add(ENTITIES_COUNT) as *const u32) } as usize;
 
         for event in events {
             let x = event.x;
             let y = event.y;
             for entity_id in 0..entities_count {
-                let entity_ptr = unsafe { arena_start.add(entities_offset + entity_id * 64) };
+                let entity_ptr =
+                    unsafe { arena_start.add(entities_offset + entity_id * ENTITY_SLOT_SIZE) };
                 let cmd = unsafe { &mut *(entity_ptr as *mut DartRenderCommand) };
 
                 if cmd.command_type == 0 {
@@ -313,8 +319,8 @@ pub(crate) fn process_engine_tick_internal() {
     //    only writer during this phase.
     {
         let _read_guard = ARENA_LOCK.read();
-        let entities_offset = unsafe { *(arena_start.add(12) as *const u32) } as usize;
-        let entities_count = unsafe { *(arena_start.add(16) as *const u32) } as usize;
+        let entities_offset = unsafe { *(arena_start.add(ENTITIES_OFFSET) as *const u32) } as usize;
+        let entities_count = unsafe { *(arena_start.add(ENTITIES_COUNT) as *const u32) } as usize;
 
         // Run bytecode script inside the sandbox runtime.
         let vm_start_micros = telemetry_now_micros();
@@ -351,7 +357,8 @@ pub(crate) fn process_engine_tick_internal() {
 
         let mut write_idx = 0usize;
         for entity_id in 0..entities_count {
-            let entity_ptr = unsafe { arena_start.add(entities_offset + entity_id * 64) };
+            let entity_ptr =
+                unsafe { arena_start.add(entities_offset + entity_id * ENTITY_SLOT_SIZE) };
             let cmd = unsafe { &*(entity_ptr as *const DartRenderCommand) };
 
             if cmd.command_type == 0 {
@@ -365,8 +372,9 @@ pub(crate) fn process_engine_tick_internal() {
                 // x/y and a pointer to the Arena-resident TextPayload in width/height.
                 // This keeps the command array a homogeneous 24-byte stride.
                 if cmd.command_type == 2 {
-                    let str_offset = unsafe { *(entity_ptr.add(48) as *const u32) } as usize;
-                    let payload_size = std::mem::size_of::<TextPayload>();
+                    let str_offset =
+                        unsafe { *(entity_ptr.add(ENTITY_STR_OFFSET) as *const u32) } as usize;
+                    let payload_size = TEXT_PAYLOAD_SIZE;
 
                     if str_offset + payload_size <= arena_size {
                         let text_payload_ptr =
@@ -490,13 +498,20 @@ pub(crate) fn load_mhp_package(buffer: &[u8]) -> i32 {
         // completes they are read lock-free by both the engine tick and Dart.
         let _guard = ARENA_LOCK.write();
         unsafe {
-            *(arena_start.add(8) as *mut u32) = buffer.len() as u32;
-            *(arena_start.add(20) as *mut u32) = 1024 + header.font_metrics_offset;
-            *(arena_start.add(24) as *mut u32) = 1024 + header.font_atlas_offset;
-            *(arena_start.add(28) as *mut u32) = 1024 + header.objects_table_offset;
+            *(arena_start.add(STATIC_RESOURCES_SIZE) as *mut u32) = buffer.len() as u32;
+            *(arena_start.add(FONT_METRICS_OFFSET) as *mut u32) =
+                DEFAULT_STATIC_RESOURCES_OFFSET + header.font_metrics_offset;
+            *(arena_start.add(FONT_ATLAS_OFFSET) as *mut u32) =
+                DEFAULT_STATIC_RESOURCES_OFFSET + header.font_atlas_offset;
+            *(arena_start.add(OBJECTS_TABLE_OFFSET) as *mut u32) =
+                DEFAULT_STATIC_RESOURCES_OFFSET + header.objects_table_offset;
 
-            if arena_size >= buffer.len() + 1024 {
-                std::ptr::copy_nonoverlapping(buffer.as_ptr(), arena_start.add(1024), buffer.len());
+            if arena_size >= buffer.len() + DEFAULT_STATIC_RESOURCES_OFFSET as usize {
+                std::ptr::copy_nonoverlapping(
+                    buffer.as_ptr(),
+                    arena_start.add(DEFAULT_STATIC_RESOURCES_OFFSET as usize),
+                    buffer.len(),
+                );
             } else {
                 return -12;
             }
@@ -615,7 +630,7 @@ pub fn set_entities_count(count: u32) -> i32 {
     }
     let _guard = ARENA_LOCK.write();
     unsafe {
-        *((arena_addr as *mut u8).add(16) as *mut u32) = count;
+        *((arena_addr as *mut u8).add(ENTITIES_COUNT) as *mut u32) = count;
     }
     0
 }
@@ -667,9 +682,9 @@ pub fn set_entity(
 
     let _guard = ARENA_LOCK.write();
     let arena_start = arena_addr as *mut u8;
-    let entities_offset = unsafe { *(arena_start.add(12) as *const u32) } as usize;
-    let entity_offset = entities_offset + (entity_id as usize * 64);
-    if entity_offset + 64 > arena_size {
+    let entities_offset = unsafe { *(arena_start.add(ENTITIES_OFFSET) as *const u32) } as usize;
+    let entity_offset = entities_offset + (entity_id as usize * ENTITY_SLOT_SIZE);
+    if entity_offset + ENTITY_SLOT_SIZE > arena_size {
         return -2;
     }
 
@@ -688,7 +703,7 @@ pub fn set_entity(
         *((entity_ptr.add(36)) as *mut f32) = max_x;
         *((entity_ptr.add(40)) as *mut f32) = min_y;
         *((entity_ptr.add(44)) as *mut f32) = max_y;
-        *((entity_ptr.add(48)) as *mut u32) = str_offset;
+        *((entity_ptr.add(ENTITY_STR_OFFSET)) as *mut u32) = str_offset;
     }
     0
 }
@@ -775,5 +790,64 @@ mod tests {
             writer_acquired.load(Ordering::SeqCst),
             "writer should have acquired the lock after readers were released"
         );
+    }
+
+    #[test]
+    fn test_set_entities_count_and_entity_use_layout_constants() {
+        use crate::arena_layout::{
+            DEFAULT_ENTITIES_OFFSET, ENTITIES_COUNT, ENTITIES_OFFSET, ENTITY_SLOT_SIZE,
+        };
+
+        let mut arena = vec![0u8; 1024 * 1024];
+        let arena_start = arena.as_mut_ptr();
+
+        // Initialise the minimal header fields used by the helpers without
+        // spawning the background thread, so this test does not contend with the
+        // lifecycle test over global engine state.
+        ARENA_ADDRESS.store(arena_start as usize, Ordering::SeqCst);
+        ARENA_SIZE.store(arena.len(), Ordering::SeqCst);
+        unsafe {
+            *(arena_start.add(ENTITIES_OFFSET) as *mut u32) = DEFAULT_ENTITIES_OFFSET;
+            *(arena_start.add(ENTITIES_COUNT) as *mut u32) = 0;
+        }
+
+        // set_entities_count must write at the ENTITIES_COUNT offset.
+        assert_eq!(set_entities_count(3), 0);
+        unsafe {
+            assert_eq!(
+                *(arena.as_ptr().add(ENTITIES_COUNT) as *const u32),
+                3,
+                "ENTITIES_COUNT field mismatch"
+            );
+        }
+
+        // set_entity must read the entities offset from ENTITIES_OFFSET and use
+        // ENTITY_SLOT_SIZE for stride.
+        assert_eq!(
+            set_entity(
+                1, 2, 0, 10.0, 20.0, 30.0, 40.0, 0xFF00FFCC, 1.0, -1.0, 0.0, 100.0, 0.0, 100.0,
+                512,
+            ),
+            0
+        );
+
+        unsafe {
+            let entities_offset = *(arena.as_ptr().add(ENTITIES_OFFSET) as *const u32) as usize;
+            assert_eq!(entities_offset, DEFAULT_ENTITIES_OFFSET as usize);
+
+            let entity_ptr = arena.as_ptr().add(entities_offset + ENTITY_SLOT_SIZE);
+            assert_eq!(*entity_ptr, 2); // command_type
+            assert_eq!(*(entity_ptr.add(1)), 0); // layer
+            assert_eq!(*((entity_ptr.add(4)) as *const f32), 10.0); // x
+            assert_eq!(*((entity_ptr.add(8)) as *const f32), 20.0); // y
+            assert_eq!(*((entity_ptr.add(12)) as *const f32), 30.0); // width
+            assert_eq!(*((entity_ptr.add(16)) as *const f32), 40.0); // height
+            assert_eq!(*((entity_ptr.add(20)) as *const u32), 0xFF00FFCC); // color
+            assert_eq!(*((entity_ptr.add(24)) as *const f32), 1.0); // speed_x
+            assert_eq!(*((entity_ptr.add(28)) as *const f32), -1.0); // speed_y
+        }
+
+        ARENA_ADDRESS.store(0, Ordering::SeqCst);
+        ARENA_SIZE.store(0, Ordering::SeqCst);
     }
 }

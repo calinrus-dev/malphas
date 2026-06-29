@@ -1,27 +1,11 @@
 import 'package:flutter/material.dart';
+import '../../core/services/app_state_persistence_service.dart';
 import '../workspace/workspace_screen.dart';
 import '../package_manager/package_manager_screen.dart';
 import '../engine_manager/engine_manager_screen.dart';
 import '../package_manager/package_controller.dart';
 import '../engine_manager/engine_controller.dart';
-
-class MalphasEnvironment {
-  final String id;
-  String name;
-  Color accentColor;
-  bool isPinned;
-  String? engineId;
-  List<String> packageIds;
-
-  MalphasEnvironment({
-    required this.id,
-    required this.name,
-    required this.accentColor,
-    this.isPinned = false,
-    this.engineId,
-    this.packageIds = const [],
-  });
-}
+import 'environment_model.dart';
 
 class MalphasHubScreen extends StatefulWidget {
   const MalphasHubScreen({super.key});
@@ -32,25 +16,49 @@ class MalphasHubScreen extends StatefulWidget {
 
 class _MalphasHubScreenState extends State<MalphasHubScreen> {
   bool _isGridView = true;
-  late List<MalphasEnvironment> _environments;
+  List<MalphasEnvironment> _environments = [];
+  final PackageController _packageController = PackageController();
+  final EngineController _engineController = EngineController();
+  final AppStatePersistenceService _persistence = AppStatePersistenceService();
 
   @override
   void initState() {
     super.initState();
-    EngineController().scanAvailableEngines();
-    _initializePackagesAndBuild();
+    _packageController.addListener(_onControllersChanged);
+    _engineController.addListener(_onControllersChanged);
+    _initialize();
   }
 
-  Future<void> _initializePackagesAndBuild() async {
-    await PackageController().init();
-    if (mounted) {
-      setState(() => _buildEnvironments());
+  @override
+  void dispose() {
+    _packageController.removeListener(_onControllersChanged);
+    _engineController.removeListener(_onControllersChanged);
+    super.dispose();
+  }
+
+  void _onControllersChanged() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _initialize() async {
+    _engineController.scanAvailableEngines();
+    await _packageController.init();
+    final saved = _persistence.loadEnvironments();
+    if (saved.isNotEmpty) {
+      _environments = saved;
+    } else {
+      _buildEnvironments();
     }
+    if (mounted) setState(() {});
+  }
+
+  void _persistEnvironments() {
+    _persistence.saveEnvironments(_environments);
   }
 
   void _buildEnvironments() {
-    final packages = PackageController().getAllPackages();
-    final engines = EngineController().getAllEngines();
+    final packages = _packageController.getAllPackages();
+    final engines = _engineController.getAllEngines();
     final firstEngineId = engines.firstOrNull?.id;
 
     if (packages.isEmpty) {
@@ -60,7 +68,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
           name: 'Malphas Sandbox',
           accentColor: const Color(0xffe0dcd3),
           engineId: firstEngineId,
-          packageIds: [],
+          packageIds: const [],
         ),
       ];
     } else {
@@ -219,7 +227,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                           color: Color(0xffe0dcd3),
                           fontSize: 12,
                           fontWeight: FontWeight.bold)),
-                  onPressed: () {
+                  onPressed: () async {
                     if (name.trim().isNotEmpty) {
                       setState(() {
                         _environments.add(
@@ -232,7 +240,8 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                           ),
                         );
                       });
-                      Navigator.of(context).pop();
+                      _persistEnvironments();
+                      if (context.mounted) Navigator.of(context).pop();
                     }
                   },
                 ),
@@ -385,14 +394,15 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                           color: Color(0xffe0dcd3),
                           fontSize: 12,
                           fontWeight: FontWeight.bold)),
-                  onPressed: () {
+                  onPressed: () async {
                     if (name.trim().isNotEmpty) {
                       setState(() {
                         env.name = name.trim();
                         env.engineId = selectedEngineId;
                         env.packageIds = selectedPackageIds;
                       });
-                      Navigator.of(context).pop();
+                      _persistEnvironments();
+                      if (context.mounted) Navigator.of(context).pop();
                     }
                   },
                 ),
@@ -449,12 +459,13 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                       color: Color(0xffe0dcd3),
                       fontSize: 12,
                       fontWeight: FontWeight.bold)),
-              onPressed: () {
+              onPressed: () async {
                 if (name.trim().isNotEmpty) {
                   setState(() {
                     env.name = name.trim();
                   });
-                  Navigator.of(context).pop();
+                  _persistEnvironments();
+                  if (context.mounted) Navigator.of(context).pop();
                 }
               },
             ),
@@ -497,11 +508,12 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                       color: Colors.redAccent,
                       fontSize: 12,
                       fontWeight: FontWeight.bold)),
-              onPressed: () {
+              onPressed: () async {
                 setState(() {
                   _environments.removeWhere((e) => e.id == env.id);
                 });
-                Navigator.of(context).pop();
+                _persistEnvironments();
+                if (context.mounted) Navigator.of(context).pop();
               },
             ),
           ],
@@ -645,12 +657,13 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
         final originalIndex = _environments.indexOf(env);
 
         return DragTarget<int>(
-          onAcceptWithDetails: (details) {
+          onAcceptWithDetails: (details) async {
             final fromIndex = details.data;
             setState(() {
               final item = _environments.removeAt(fromIndex);
               _environments.insert(originalIndex, item);
             });
+            _persistEnvironments();
           },
           builder: (context, candidateData, rejectedData) {
             return GestureDetector(
@@ -687,8 +700,10 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                               color: env.isPinned
                                   ? env.accentColor
                                   : Colors.white24),
-                          onPressed: () =>
-                              setState(() => env.isPinned = !env.isPinned),
+                          onPressed: () async {
+                            setState(() => env.isPinned = !env.isPinned);
+                            _persistEnvironments();
+                          },
                         )
                       ],
                     ),
@@ -739,12 +754,13 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
         final originalIndex = _environments.indexOf(env);
 
         return DragTarget<int>(
-          onAcceptWithDetails: (details) {
+          onAcceptWithDetails: (details) async {
             final fromIndex = details.data;
             setState(() {
               final item = _environments.removeAt(fromIndex);
               _environments.insert(originalIndex, item);
             });
+            _persistEnvironments();
           },
           builder: (context, candidateData, rejectedData) {
             return GestureDetector(
@@ -805,8 +821,10 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                           size: 14,
                           color:
                               env.isPinned ? env.accentColor : Colors.white24),
-                      onPressed: () =>
-                          setState(() => env.isPinned = !env.isPinned),
+                      onPressed: () async {
+                        setState(() => env.isPinned = !env.isPinned);
+                        _persistEnvironments();
+                      },
                     ),
                   ],
                 ),

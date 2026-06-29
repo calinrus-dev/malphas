@@ -79,7 +79,9 @@ void main() {
     }
 
     final manifest = {
-      'pack_id': 'integration_test_pack',
+      'pack_id': 'integ_test_pack',
+      'canvas_width': 1000,
+      'canvas_height': 1000,
       'objects': [
         {
           'object_id': 1,

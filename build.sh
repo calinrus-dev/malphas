@@ -111,7 +111,7 @@ fi
 info "Copying non-timestamped motor to workspace root..."
 cp -f "$SRC_LIB" "$ROOT/$LIB_NAME"
 ok "Copied motor: $ROOT/$LIB_NAME"
-if [ -n "$SIG_SRC" ]; then
+if [ -n "$SIG_SRC" ] && [ "$SIG_SRC" != "$ROOT/$LIB_NAME.sig" ]; then
     cp -f "$SIG_SRC" "$ROOT/$LIB_NAME.sig"
     ok "Copied signature: $ROOT/$LIB_NAME.sig"
 fi
@@ -146,9 +146,6 @@ case "$PLATFORM" in
             "$ROOT/flutter_app/build/linux/x64/debug/bundle/lib"
             "$ROOT/flutter_app/build/linux/x64/release/bundle/lib"
         )
-        android_targets=(
-            "$ROOT/flutter_app/android/app/src/main/jniLibs/arm64-v8a"
-        )
         ;;
     macos)
         flutter_targets=(
@@ -156,9 +153,6 @@ case "$PLATFORM" in
             "$ROOT/flutter_app/build/macos/Build/Products/Release"
             "$ROOT/flutter_app/build/macos/Build/Products/Debug/Malphas.app/Contents/Frameworks"
             "$ROOT/flutter_app/build/macos/Build/Products/Release/Malphas.app/Contents/Frameworks"
-        )
-        android_targets=(
-            "$ROOT/flutter_app/android/app/src/main/jniLibs/arm64-v8a"
         )
         ;;
 esac
@@ -174,22 +168,32 @@ for target in "${flutter_targets[@]}"; do
     fi
 done
 
-# Deploy the native library into the Android jniLibs directory so it is bundled
-# into the APK/AAB automatically by the Android Gradle Plugin.
-for target in "${android_targets[@]}"; do
-    mkdir -p "$target"
-    cp -f "$SRC_LIB" "$target/$LIB_NAME"
-    ok "Copied Android library to: $target/$LIB_NAME"
-done
-
 # -----------------------------------------------------------------------------
+
 # Optional Android cross-compilation when the NDK is available.
 # -----------------------------------------------------------------------------
 build_android() {
-    local ndk="${ANDROID_NDK_HOME:-$ANDROID_NDK_ROOT}"
+    local ndk=""
+    if [ -n "${ANDROID_NDK_HOME:-}" ]; then
+        ndk="$ANDROID_NDK_HOME"
+    elif [ -n "${ANDROID_NDK_ROOT:-}" ]; then
+        ndk="$ANDROID_NDK_ROOT"
+    fi
     [ -n "$ndk" ] || return 0
 
-    local toolchain="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin"
+    # Pick the NDK prebuilt host tag that matches this machine.
+    # NDK r26c ships linux-x86_64, darwin-x86_64 (runs on Apple Silicon via Rosetta),
+    # and windows-x86_64 toolchains.
+    local host_tag
+    case "$(uname -s)" in
+        Linux*)     host_tag="linux-x86_64" ;;
+        Darwin*)    host_tag="darwin-x86_64" ;;
+        MINGW*|MSYS*|CYGWIN*|Windows_NT)
+                    host_tag="windows-x86_64" ;;
+        *)          host_tag="linux-x86_64" ;;
+    esac
+
+    local toolchain="$ndk/toolchains/llvm/prebuilt/$host_tag/bin"
     if [ ! -d "$toolchain" ]; then
         warn "Android NDK toolchain not found at $toolchain; skipping Android build."
         return 0
@@ -201,13 +205,22 @@ build_android() {
         "armeabi-v7a:armv7-linux-androideabi"
         "x86_64:x86_64-linux-android"
     )
+
+    # Remove any previously-deployed Android libraries so we never bundle a
+    # host-arch artifact inside an ABI directory (e.g. x86_64 desktop .so in
+    # arm64-v8a).
+    for entry in "${abis[@]}"; do
+        local abi="${entry%%:*}"
+        rm -rf "$ROOT/flutter_app/android/app/src/main/jniLibs/$abi"
+    done
+
     for entry in "${abis[@]}"; do
         local abi="${entry%%:*}"
         local target="${entry#*:}"
         info "Building $abi ($target)..."
         if ! cargo build --release --target "$target" --package malphas_core; then
-            warn "Failed to build $target; skipping."
-            continue
+            error "Failed to build $target; aborting Android build."
+            exit 1
         fi
         local out="$ROOT/flutter_app/android/app/src/main/jniLibs/$abi"
         mkdir -p "$out"

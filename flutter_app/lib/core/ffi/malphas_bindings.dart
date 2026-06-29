@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:ffi/ffi.dart' as ffi;
+import 'arena_layout.dart';
 import 'types.dart';
 
 /// Immutable snapshot of the native engine telemetry counters.
@@ -81,6 +82,8 @@ class MalphasBindings extends ChangeNotifier {
       dffi.Pointer<CoreCommandBuffer>) getCommandsPointer;
   late final int Function(dffi.Pointer<MalphasDoubleBufferBridge>)
       getCommandsWritten;
+  late final dffi.Pointer<TextPayload> Function(dffi.Pointer<DartRenderCommand>)
+      getTextPayloadPointer;
 
   // Telemetry getters for MALPHAS REINFORCED v2.2 Phase 5.
   late final int Function() getVmTickMicros;
@@ -324,6 +327,13 @@ class MalphasBindings extends ChangeNotifier {
                         dffi.Pointer<MalphasDoubleBufferBridge>)>>(
             'get_commands_written')
         .asFunction();
+    getTextPayloadPointer = _nativeLib
+        .lookup<
+                dffi.NativeFunction<
+                    dffi.Pointer<TextPayload> Function(
+                        dffi.Pointer<DartRenderCommand>)>>(
+            'get_text_payload_pointer')
+        .asFunction();
 
     getVmTickMicros = _nativeLib
         .lookup<dffi.NativeFunction<dffi.Uint64 Function()>>(
@@ -410,8 +420,15 @@ class MalphasBindings extends ChangeNotifier {
       throw Exception('Failed to allocate arena');
     }
 
-    initEngine(
+    final initResult = initEngine(
         _doubleBufferBridge!, _arena!, _arenaSize, maxCommandBufferCapacity);
+    _checkFfiResult(initResult, 'init_engine');
+  }
+
+  void _checkFfiResult(int result, String operation) {
+    if (result < 0) {
+      throw Exception('FFI operation "$operation" failed with code $result');
+    }
   }
 
   /// Hot-swaps the native library by path.  This shuts the engine down,
@@ -419,7 +436,7 @@ class MalphasBindings extends ChangeNotifier {
   /// the requested binary to a unique filename (bypassing the Dart/Windows DLL
   /// cache), rebinds every FFI function, and reinitialises shared memory.
   void reloadNativeLibrary(String sourcePath) {
-    shutdownEngine();
+    _checkFfiResult(shutdownEngine(), 'shutdown_engine');
     _freeSharedMemory();
     cleanupTempLibraries();
 
@@ -443,26 +460,40 @@ class MalphasBindings extends ChangeNotifier {
   }
 
   dffi.Pointer<dffi.Void> get arena => _arena ?? dffi.nullptr;
+  int get arenaSize => _arenaSize;
   SnapshotCommandBuffer? get simulatedBuffer => _simulatedBuffer;
 
   void checkAndLoadFontAtlas() {
     if (!isNativeAvailable || _arena == null || _arena == dffi.nullptr) return;
 
     final arenaUint32 = _arena!.cast<dffi.Uint32>();
-    final packSize = arenaUint32[2];
+    final packSize = arenaUint32[ArenaLayout.staticResourcesSize ~/ 4];
     if (packSize == 0) {
       fontAtlasImage = null;
       return;
     }
 
-    final atlasOffset = arenaUint32[6];
+    final atlasOffset = arenaUint32[ArenaLayout.fontAtlasOffset ~/ 4];
     const int atlasWidth = 512;
     const int atlasHeight = 512;
+    const int atlasBytes = atlasWidth * atlasHeight;
+
+    // Validate that the atlas region is fully inside the Arena before reading
+    // or passing it to the decoder.
+    if (atlasOffset < 0 ||
+        atlasOffset > _arenaSize - atlasBytes ||
+        packSize < 0 ||
+        packSize > _arenaSize) {
+      debugPrint('Font atlas region out of bounds: '
+          'offset=$atlasOffset, packSize=$packSize, arenaSize=$_arenaSize');
+      fontAtlasImage = null;
+      return;
+    }
 
     final rawA8 = _arena!.cast<dffi.Uint8>() + atlasOffset;
-    final Uint8List rgbaBytes = Uint8List(atlasWidth * atlasHeight * 4);
+    final Uint8List rgbaBytes = Uint8List(atlasBytes * 4);
 
-    for (int i = 0; i < atlasWidth * atlasHeight; i++) {
+    for (int i = 0; i < atlasBytes; i++) {
       final alpha = rawA8[i];
       rgbaBytes[i * 4] = 255;
       rgbaBytes[i * 4 + 1] = 255;
@@ -514,7 +545,7 @@ class MalphasBindings extends ChangeNotifier {
       // Single-clock sync: Flutter's Ticker is the only clock source.  Wake
       // the Rust simulation thread once per vsync; it will process the tick
       // asynchronously on its own core while we read the latest front buffer.
-      triggerEnginePulse();
+      _checkFfiResult(triggerEnginePulse(), 'trigger_engine_pulse');
       final backIndex = getBackIndex(_doubleBufferBridge!);
       final frontBuffer = (backIndex == 0) ? _bufferBPtr! : _bufferAPtr!;
       count = getCommandCount(frontBuffer);
@@ -537,9 +568,8 @@ class MalphasBindings extends ChangeNotifier {
     try {
       ptr.asTypedList(size).setAll(0, bytes);
       final res = loadResourcePackRaw(ptr, size);
-      if (res == 0) {
-        checkAndLoadFontAtlas();
-      }
+      _checkFfiResult(res, 'load_resource_pack_raw');
+      checkAndLoadFontAtlas();
       return res;
     } finally {
       malphasFree(ptr, size);
@@ -586,9 +616,17 @@ class MalphasBindings extends ChangeNotifier {
 
   int pauseEngine(bool paused) => _pauseEngine(paused ? 1 : 0);
 
+  void sendInputEvent(int eventType, double x, double y) {
+    _checkFfiResult(processInputEvent(eventType, x, y), 'process_input_event');
+  }
+
+  void setEntityCount(int count) {
+    _checkFfiResult(setEntitiesCount(count), 'set_entities_count');
+  }
+
   /// Safe entity initialisation.  Rust holds the Arena write lock for the
   /// duration of the call, so it cannot race the simulation tick.
-  int configureEntity({
+  void configureEntity({
     required int entityId,
     required int commandType,
     required int layer,
@@ -605,7 +643,7 @@ class MalphasBindings extends ChangeNotifier {
     required double maxY,
     int strOffset = 0,
   }) {
-    return setEntity(
+    final result = setEntity(
       entityId,
       commandType,
       layer,
@@ -622,16 +660,18 @@ class MalphasBindings extends ChangeNotifier {
       maxY,
       strOffset,
     );
+    _checkFfiResult(result, 'set_entity');
   }
 
   /// Safe Arena byte write.  The engine must be paused while performing
   /// multi-write setup to avoid torn state.
-  int writeArenaString(int offset, Uint8List bytes) {
-    if (!isNativeAvailable) return -1;
+  void writeArenaString(int offset, Uint8List bytes) {
+    if (!isNativeAvailable) return;
     final ptr = ffi.calloc<dffi.Uint8>(bytes.length);
     try {
       ptr.asTypedList(bytes.length).setAll(0, bytes);
-      return writeArenaBytes(offset, ptr, bytes.length);
+      _checkFfiResult(
+          writeArenaBytes(offset, ptr, bytes.length), 'write_arena_bytes');
     } finally {
       ffi.calloc.free(ptr);
     }
@@ -639,14 +679,14 @@ class MalphasBindings extends ChangeNotifier {
 
   /// Writes a [TextPayload] header followed by the string bytes into the Arena.
   /// The written offset is the pointer passed to `setEntity` as `strOffset`.
-  int writeArenaText(
+  void writeArenaText(
     int offset,
     double x,
     double y,
     double fontSize,
     Uint8List bytes,
   ) {
-    if (!isNativeAvailable) return -1;
+    if (!isNativeAvailable) return;
     final payloadSize = dffi.sizeOf<TextPayload>();
     final totalSize = payloadSize + bytes.length;
     final ptr = ffi.calloc<dffi.Uint8>(totalSize);
@@ -657,7 +697,8 @@ class MalphasBindings extends ChangeNotifier {
       payload.fontSize = fontSize;
       final stringPtr = ptr + payloadSize;
       stringPtr.asTypedList(bytes.length).setAll(0, bytes);
-      return writeArenaBytes(offset, ptr, totalSize);
+      _checkFfiResult(
+          writeArenaBytes(offset, ptr, totalSize), 'write_arena_bytes');
     } finally {
       ffi.calloc.free(ptr);
     }
@@ -702,12 +743,20 @@ class MalphasBindings extends ChangeNotifier {
   void dispose() {
     if (isNativeAvailable) {
       try {
-        shutdownEngine();
-        _freeSharedMemory();
+        final result = shutdownEngine();
+        if (result >= 0) {
+          _freeSharedMemory();
+        } else {
+          debugPrint(
+              'MalphasBindings.dispose: shutdown_engine failed with code $result; '
+              'shared memory not freed');
+        }
       } catch (e) {
         debugPrint('MalphasBindings.dispose error: $e');
       }
     }
+    _simulatedBuffer?.dispose();
+    _simulatedBuffer = null;
     fontAtlasImage?.dispose();
     fontAtlasImage = null;
     super.dispose();
@@ -722,6 +771,17 @@ class SnapshotCommandBuffer {
     buffer = ffi.calloc<CoreCommandBuffer>();
     buffer!.ref.commandCount = 0;
     buffer!.ref.commands = ffi.calloc<DartRenderCommand>(2);
+  }
+
+  void dispose() {
+    if (buffer != null) {
+      final commands = buffer!.ref.commands;
+      if (commands != dffi.nullptr) {
+        ffi.calloc.free(commands);
+      }
+      ffi.calloc.free(buffer!);
+      buffer = null;
+    }
   }
 
   void executeSimulation() {

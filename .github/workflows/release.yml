@@ -18,9 +18,14 @@ jobs:
     needs: rust-core
     uses: ./.github/workflows/flutter_windows_build.yml
 
+  android-release:
+    name: Build Android release artifacts
+    uses: ./.github/workflows/android_release.yml
+    secrets: inherit
+
   publish-release:
     name: Publish GitHub Release
-    needs: [rust-core, flutter-windows]
+    needs: [rust-core, flutter-windows, android-release]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -38,6 +43,18 @@ jobs:
           name: malphas-app-windows
           path: artifacts/malphas-app-windows
 
+      - name: Download Android AAB
+        uses: actions/download-artifact@v4
+        with:
+          name: malphas-app-android-aab
+          path: artifacts/malphas-app-android-aab
+
+      - name: Download Android APK
+        uses: actions/download-artifact@v4
+        with:
+          name: malphas-app-android-apk
+          path: artifacts/malphas-app-android-apk
+
       - name: Prepare release assets
         run: |
           mkdir -p release
@@ -51,6 +68,10 @@ jobs:
           # Windows app bundle
           cd artifacts/malphas-app-windows
           zip -r ../../release/malphas-app-windows.zip .
+          cd ../../artifacts/malphas-app-android-aab
+          cp app-release.aab ../../release/malphas-app-android.aab
+          cd ../../artifacts/malphas-app-android-apk
+          cp app-release.apk ../../release/malphas-app-android.apk
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

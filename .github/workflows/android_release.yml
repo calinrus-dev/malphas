@@ -1,0 +1,66 @@
+name: Android Release Build
+
+on:
+  workflow_call:
+
+jobs:
+  android-libraries:
+    name: Build signed Android native libraries
+    uses: ./.github/workflows/android_build.yml
+    secrets: inherit
+
+  build-android-release:
+    name: Build Android AAB and APK
+    needs: android-libraries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+        working-directory: flutter_app
+
+      - name: Download signed Android libraries
+        uses: actions/download-artifact@v4
+        with:
+          name: malphas-core-android
+          path: flutter_app/android/app/src/main/jniLibs/
+          merge-multiple: true
+
+      - name: Verify Android libraries and signatures
+        run: |
+          set -e
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            so="flutter_app/android/app/src/main/jniLibs/$abi/libmalphas_core.so"
+            sig="flutter_app/android/app/src/main/jniLibs/$abi/libmalphas_core.so.sig"
+            test -f "$so" || { echo "Missing $so"; exit 1; }
+            test -f "$sig" || { echo "Missing $sig"; exit 1; }
+          done
+
+      - name: Build Android App Bundle
+        run: flutter build appbundle --release
+        working-directory: flutter_app
+
+      - name: Build Android APK
+        run: flutter build apk --release
+        working-directory: flutter_app
+
+      - name: Upload Android AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: malphas-app-android-aab
+          path: flutter_app/build/app/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+
+      - name: Upload Android APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: malphas-app-android-apk
+          path: flutter_app/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error

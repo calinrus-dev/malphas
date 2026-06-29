@@ -1,9 +1,10 @@
 import 'dart:io';
 import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart';
 import 'models.dart';
 import '../../core/ffi/malphas_bindings.dart';
 
-class EngineController {
+class EngineController extends ChangeNotifier {
   static final EngineController _instance = EngineController._internal();
   factory EngineController() => _instance;
 
@@ -34,8 +35,23 @@ class EngineController {
   String activeEngineId = 'eng_liquid_01';
   final MalphasBindings _bindings = MalphasBindings();
 
-  MalphasEngine get activeEngine =>
-      engines.firstWhere((e) => e.id == activeEngineId);
+  MalphasEngine get activeEngine => engines.firstWhere(
+        (e) => e.id == activeEngineId,
+        orElse: () => engines.isEmpty
+            ? MalphasEngine(
+                id: 'eng_fallback',
+                name: 'Fallback Engine',
+                version: 'v0.0.0',
+                runtime: NativeRuntime.rust,
+                binaryName: Platform.isWindows
+                    ? 'malphas_core.dll'
+                    : 'libmalphas_core.so',
+                sha256: '',
+                allocatedMemoryBytes: 8388608,
+                status: EngineStatus.corrupt,
+              )
+            : engines.first,
+      );
   List<MalphasEngine> getAllEngines() => engines;
 
   /// Computes the SHA-256 hex digest of [file].
@@ -99,6 +115,7 @@ class EngineController {
     } else {
       engines[index].status = EngineStatus.corrupt;
     }
+    notifyListeners();
   }
 
   /// Scans the workspace for native Malphas engine binaries and populates
@@ -197,17 +214,70 @@ class EngineController {
     }
 
     activeEngineId = engines.first.id;
+    notifyListeners();
   }
 
+  /// Atomically swaps the active engine.
+  ///
+  /// The implementation is consistent: it reloads the native core from the
+  /// requested binary path, re-verifies its signature, and only marks the
+  /// engine as active when the signature check passes.
   bool hotSwapEngine(String id) {
-    final target = engines.firstWhere((e) => e.id == id);
-    if (target.status == EngineStatus.standby ||
-        target.status == EngineStatus.active) {
-      activeEngineId = id;
-      target.status = EngineStatus.active;
-      return true;
+    final targetIndex = engines.indexWhere((e) => e.id == id);
+    if (targetIndex == -1) return false;
+    final target = engines[targetIndex];
+
+    final sourcePath = _resolveSourcePath(target);
+    if (sourcePath == null || !File(sourcePath).existsSync()) {
+      engines[targetIndex].status = EngineStatus.corrupt;
+      notifyListeners();
+      return false;
     }
+
+    try {
+      _bindings.reloadNativeLibrary(sourcePath);
+      verifyEngineIntegrity(id);
+
+      if (engines[targetIndex].status == EngineStatus.standby) {
+        activeEngineId = id;
+        engines[targetIndex].status = EngineStatus.active;
+        notifyListeners();
+        return true;
+      }
+    } catch (e, stack) {
+      debugPrint('hotSwapEngine failed for "$id": $e');
+      debugPrint(stack.toString());
+      engines[targetIndex].status = EngineStatus.corrupt;
+      notifyListeners();
+      return false;
+    }
+
+    notifyListeners();
     return false;
+  }
+
+  /// Resolves the filesystem path of an engine binary for hot-swap reload.
+  String? _resolveSourcePath(MalphasEngine engine) {
+    // Already a discovered absolute path.
+    final idAsFile = File(engine.id);
+    if (idAsFile.existsSync()) return engine.id;
+
+    // Fallback synthetic engine: look next to the workspace root.
+    final workspace = Directory.current.path;
+    final binaryName = engine.binaryName;
+    final candidates = Platform.isWindows
+        ? [
+            '$workspace\\$binaryName',
+            '$workspace\\malphas_core\\target\\release\\$binaryName',
+          ]
+        : [
+            '$workspace/$binaryName',
+            '$workspace/malphas_core/target/release/$binaryName',
+          ];
+    for (final candidate in candidates) {
+      if (File(candidate).existsSync()) return candidate;
+    }
+    return null;
   }
 
   /// Reloads the native core from disk.  This tears down the current engine

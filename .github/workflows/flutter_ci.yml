@@ -7,6 +7,31 @@ on:
     branches: [main]
 
 jobs:
+  version-sync:
+    name: Verify version sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify versions match across Cargo.toml, pubspec.yaml, README.md and AGENTS.md
+        shell: bash
+        run: |
+          CARGO_VERSION=$(grep -E '^version\s*=' Cargo.toml | head -1 | sed -E 's/.*=\s*"([^"]+)".*/\1/')
+          PUBSPEC_VERSION=$(grep -E '^version:\s*' flutter_app/pubspec.yaml | sed -E 's/.*:\s*([^+]+).*/\1/')
+          README_VERSION=$(grep -E '^# Malphas v[0-9]+\.[0-9]+\.[0-9]+' README.md | sed -E 's/.*v([0-9]+\.[0-9]+\.[0-9]+).*/\1/')
+          AGENTS_VERSION=$(grep -E '^# Malphas Agent Instructions — v[0-9]+\.[0-9]+\.[0-9]+' .agents/AGENTS.md | sed -E 's/.*v([0-9]+\.[0-9]+\.[0-9]+).*/\1/')
+          echo "Cargo.toml:    $CARGO_VERSION"
+          echo "pubspec.yaml:  $PUBSPEC_VERSION"
+          echo "README.md:     $README_VERSION"
+          echo "AGENTS.md:     $AGENTS_VERSION"
+          if [ "$CARGO_VERSION" != "$PUBSPEC_VERSION" ] || \
+             [ "$CARGO_VERSION" != "$README_VERSION" ] || \
+             [ "$CARGO_VERSION" != "$AGENTS_VERSION" ]; then
+            echo "Version mismatch detected!"
+            exit 1
+          fi
+          echo "All versions are in sync: $CARGO_VERSION"
+
   rust-core:
     uses: ./.github/workflows/rust_ci.yml
 
@@ -81,6 +106,12 @@ jobs:
           cp native/target/release/malphas-cli motors/malphas-cli
           chmod +x motors/malphas-cli
 
+      - name: Compile bouncing_demo manifest with downloaded CLI
+        shell: bash
+        run: |
+          export LD_LIBRARY_PATH="${{ github.workspace }}/flutter_app/motors"
+          ./motors/malphas-cli compile ../examples/bouncing_demo/manifest.json
+
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -97,5 +128,5 @@ jobs:
         env:
           LD_LIBRARY_PATH: ${{ github.workspace }}/flutter_app/motors
         run: |
-          cd flutter_app
-          flutter test --binding-type=test
+          export LD_LIBRARY_PATH="${{ github.workspace }}/flutter_app/motors"
+          flutter test

@@ -43,6 +43,14 @@ jobs:
         env:
           TEST_SIGNING_KEY: ${{ secrets.TEST_SIGNING_KEY }}
         run: |
+          if [ -z "$TEST_SIGNING_KEY" ]; then
+            echo "Error: TEST_SIGNING_KEY secret is not set."
+            exit 1
+          fi
+          if ! echo "$TEST_SIGNING_KEY" | grep -qxE '[0-9a-fA-F]{64}'; then
+            echo "Error: TEST_SIGNING_KEY must be a 64-character hex string."
+            exit 1
+          fi
           CLI=./target/release/malphas-cli
           if [ -f "$CLI.exe" ]; then
             CLI="$CLI.exe"

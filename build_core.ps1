@@ -1,5 +1,9 @@
 # build_core.ps1 — Windows native core build script for Malphas.
-# Mirrors the Windows behavior of build.sh.
+# Mirrors the Windows desktop behavior of build.sh.
+#
+# NOTE: Android cross-compilation is not supported by this script. Android
+# libraries (arm64-v8a, armeabi-v7a, x86_64) must be built on Linux/macOS
+# via ./build.sh when ANDROID_NDK_HOME is set, or obtained from CI artifacts.
 #
 # Usage (from repo root):
 #   .\build_core.ps1
@@ -130,6 +134,11 @@ foreach ($target in $flutterTargets) {
             Write-Ok "Copied signature to: $targetLib.sig"
         }
     }
+}
+
+# Warn if the user expects Android cross-compilation from Windows.
+if ($env:ANDROID_NDK_HOME -or $env:ANDROID_NDK_ROOT) {
+    Write-Warn "ANDROID_NDK_HOME is set but this script does not cross-compile Android libraries. Use ./build.sh on Linux/macOS or CI artifacts instead."
 }
 
 Write-Ok "Build complete."

@@ -2,6 +2,7 @@ import 'dart:collection';
 import 'dart:ffi' as dffi;
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import '../ffi/arena_layout.dart';
 import '../ffi/malphas_bindings.dart';
 import '../ffi/types.dart';
 
@@ -78,6 +79,8 @@ class EnginePainter extends CustomPainter {
 
     int i = 0;
     while (i < count) {
+      // Count is validated above; use element pointer arithmetic (the
+      // non-deprecated spelling of Pointer.elementAt in this SDK version).
       final command = (commands + i).ref;
       final colorRgba = command.colorRgba;
 
@@ -93,10 +96,10 @@ class EnginePainter extends CustomPainter {
           break;
         case 2: // Union text command: metadata in x/y, pointer in width/height.
           final paint = _textPaints.getPaint(colorRgba);
-          final textPtr = _decodeTextPointer(commands + i);
-          if (textPtr != dffi.nullptr) {
+          final payloadPtr = bindings.getTextPayloadPointer(commands + i);
+          if (payloadPtr != dffi.nullptr) {
             _renderTextFromFonts(
-                canvas, command, textPtr, scaleX, scaleY, paint);
+                canvas, command, payloadPtr, scaleX, scaleY, paint);
           }
           i += 1;
           break;
@@ -140,38 +143,21 @@ class EnginePainter extends CustomPainter {
     canvas.drawParagraph(paragraph, const Offset(8, 8));
   }
 
-  /// Decodes the 64-bit pointer stored across the `width` (low 32 bits) and
-  /// `height` (high 32 bits) fields of a text command.  The fields are read as
-  /// raw integers to avoid any NaN canonicalisation that could happen when
-  /// round-tripping through Dart `double` values.
-  dffi.Pointer<dffi.Uint8> _decodeTextPointer(
-      dffi.Pointer<DartRenderCommand> cmdPtr) {
-    const widthOffset = 12; // offset of `width` inside DartRenderCommand
-    const heightOffset = 16; // offset of `height` inside DartRenderCommand
-    final lowPtr =
-        dffi.Pointer<dffi.Uint32>.fromAddress(cmdPtr.address + widthOffset);
-    final highPtr =
-        dffi.Pointer<dffi.Uint32>.fromAddress(cmdPtr.address + heightOffset);
-    final address = lowPtr.value | (highPtr.value << 32);
-    if (address == 0) return dffi.nullptr;
-    return dffi.Pointer<dffi.Uint8>.fromAddress(address);
-  }
-
   void _renderTextFromFonts(
     Canvas canvas,
     DartRenderCommand command,
-    dffi.Pointer<dffi.Uint8> textPtr,
+    dffi.Pointer<TextPayload> payloadPtr,
     double scaleX,
     double scaleY,
     Paint paint,
   ) {
     final atlasImage = bindings.fontAtlasImage;
-    if (atlasImage == null || textPtr == dffi.nullptr) return;
+    if (atlasImage == null || payloadPtr == dffi.nullptr) return;
 
     final arenaStart = bindings.arena;
     if (arenaStart == dffi.nullptr) return;
 
-    final payload = textPtr.cast<TextPayload>().ref;
+    final payload = payloadPtr.ref;
     final fontSize = payload.fontSize > 0 ? payload.fontSize : 32.0;
     final fontScale = fontSize / 32.0;
 
@@ -179,12 +165,17 @@ class EnginePainter extends CustomPainter {
     final double startY = payload.y * scaleY;
 
     final arenaUint32 = arenaStart.cast<dffi.Uint32>();
-    final metricsOffset = arenaUint32[5];
+    final metricsOffset = arenaUint32[ArenaLayout.fontMetricsOffset ~/ 4];
+
+    // Reject obviously invalid font metrics tables before indexing.
+    if (metricsOffset < 0 || metricsOffset >= bindings.arenaSize) return;
+    const int metricsEntrySize = 16;
 
     // The command's x field carries the text length; use it as a safety cap
     // and fall back to scanning for the null terminator.
     final maxChars = command.x > 0 ? command.x.toInt() : 0x7FFFFFFF;
-    final stringStart = textPtr + dffi.sizeOf<TextPayload>();
+    final stringStart =
+        payloadPtr.cast<dffi.Uint8>() + dffi.sizeOf<TextPayload>();
 
     int charIdx = 0;
     while (charIdx < maxChars) {
@@ -192,6 +183,11 @@ class EnginePainter extends CustomPainter {
       if (charCode == 0) break; // null-terminator
 
       final glyphOffset = metricsOffset + (charCode * 16);
+      // Bounds-check the 16-byte metrics entry before reading.
+      if (glyphOffset < 0 ||
+          glyphOffset + metricsEntrySize > bindings.arenaSize) {
+        break;
+      }
       final metricsData =
           (arenaStart.cast<dffi.Uint8>() + glyphOffset).cast<dffi.Uint16>();
 

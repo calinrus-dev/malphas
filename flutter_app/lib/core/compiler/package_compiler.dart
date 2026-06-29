@@ -19,29 +19,37 @@ class MalphasPackageCompiler {
     final packId = manifest['pack_id'] as String? ?? 'pack_custom_01';
 
     // 1. Create a temporary directory and write the manifest JSON next to it.
-    final tempDir = Directory.systemTemp.createTempSync('malphas_compile_');
+    final tempDir = await Directory.systemTemp.createTemp('malphas_compile_');
     final manifestFile = File('${tempDir.path}/manifest.json');
-    manifestFile.writeAsStringSync(jsonEncode(manifest));
+    await manifestFile.writeAsString(jsonEncode(manifest));
 
     // The CLI expects JetBrainsMono-Regular.ttf next to the manifest.
     final fontFile = _resolveFontFile();
     if (fontFile != null) {
-      fontFile.copySync('${tempDir.path}/$_fontFileName');
+      await fontFile.copy('${tempDir.path}/$_fontFileName');
     }
 
     // 2. Locate the native CLI executable.
     final exePath = await _resolveCliExecutable();
     if (exePath == null) {
-      _bestEffortDelete(tempDir);
+      await _bestEffortDelete(tempDir);
       throw Exception('malphas-cli executable not found');
     }
 
-    // 3. Invoke the CLI.
-    final result = await Process.run(exePath, ['compile', manifestFile.path]);
+    // 3. Invoke the CLI with a defensive timeout and capture both stdout and
+    // stderr so failures can be diagnosed without leaking temp directories.
+    final result = await Process.run(
+      exePath,
+      ['compile', manifestFile.path],
+      runInShell: false,
+    ).timeout(const Duration(minutes: 2), onTimeout: () {
+      throw Exception('malphas-cli compile timed out after 2 minutes');
+    });
     if (result.exitCode != 0) {
-      _bestEffortDelete(tempDir);
+      await _bestEffortDelete(tempDir);
       throw Exception(
-        'malphas-cli compile failed (exit ${result.exitCode}): ${result.stderr}',
+        'malphas-cli compile failed (exit ${result.exitCode}): '
+        'stderr=${result.stderr}, stdout=${result.stdout}',
       );
     }
 
@@ -49,20 +57,20 @@ class MalphasPackageCompiler {
     final mhpFile = File('${tempDir.path}/$packId.mhp');
     final mspFile = File('${tempDir.path}/$packId.msp');
 
-    if (!mhpFile.existsSync()) {
-      _bestEffortDelete(tempDir);
+    if (!await mhpFile.exists()) {
+      await _bestEffortDelete(tempDir);
       throw Exception('Expected compiled package not found: ${mhpFile.path}');
     }
-    if (!mspFile.existsSync()) {
-      _bestEffortDelete(tempDir);
+    if (!await mspFile.exists()) {
+      await _bestEffortDelete(tempDir);
       throw Exception('Expected compiled script not found: ${mspFile.path}');
     }
 
-    final mhpBytes = mhpFile.readAsBytesSync();
-    final mspBytes = mspFile.readAsBytesSync();
+    final mhpBytes = await mhpFile.readAsBytes();
+    final mspBytes = await mspFile.readAsBytes();
 
     // 5. Clean up the temporary manifest and generated binaries.
-    _bestEffortDelete(tempDir);
+    await _bestEffortDelete(tempDir);
 
     return CompileOutput(mhpBytes, mspBytes);
   }
@@ -89,13 +97,26 @@ class MalphasPackageCompiler {
     ];
 
     for (final candidate in candidates) {
-      if (File(candidate).existsSync()) {
+      if (await File(candidate).exists() && await _isExecutable(candidate)) {
         return candidate;
       }
     }
 
     // 4. Fall back to the system PATH.
     return _findInPath(exeName);
+  }
+
+  /// Returns `true` if [path] can be executed on this platform. On Windows
+  /// existence is sufficient; on Unix at least one execute bit must be set.
+  Future<bool> _isExecutable(String path) async {
+    if (Platform.isWindows) return true;
+    try {
+      final stat = await File(path).stat();
+      // S_IXUSR | S_IXGRP | S_IXOTH
+      return stat.mode & 0x49 != 0;
+    } catch (_) {
+      return false;
+    }
   }
 
   /// Walks up from the current working directory looking for a workspace
@@ -170,7 +191,9 @@ class MalphasPackageCompiler {
       final result = await Process.run(which, [name], runInShell: true);
       if (result.exitCode == 0) {
         final found = result.stdout.toString().split('\n').first.trim();
-        if (found.isNotEmpty && File(found).existsSync()) {
+        if (found.isNotEmpty &&
+            await File(found).exists() &&
+            await _isExecutable(found)) {
           return found;
         }
       }
@@ -180,13 +203,9 @@ class MalphasPackageCompiler {
     return null;
   }
 
-  void _bestEffortDelete(FileSystemEntity entity) {
+  Future<void> _bestEffortDelete(FileSystemEntity entity) async {
     try {
-      if (entity is Directory) {
-        entity.deleteSync(recursive: true);
-      } else {
-        entity.deleteSync();
-      }
+      await entity.delete(recursive: entity is Directory);
     } catch (_) {
       // Ignore cleanup failures.
     }

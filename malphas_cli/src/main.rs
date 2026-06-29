@@ -6,6 +6,7 @@
 
 use clap::{Parser, Subcommand};
 use ed25519_dalek::{Signer, SigningKey};
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::error::Error;
 use std::fs;
@@ -64,6 +65,26 @@ struct MspHeader {
     padding: [u8; 16],
 }
 
+/// Typed manifest.json schema for the compiler.
+///
+/// `deny_unknown_fields` rejects any key that the compiler does not understand,
+/// which catches typos early instead of silently ignoring them.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Manifest {
+    pack_id: String,
+    canvas_width: u16,
+    canvas_height: u16,
+    objects: Vec<ManifestObject>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ManifestObject {
+    object_id: u32,
+    properties: serde_json::Value,
+}
+
 #[derive(Parser)]
 #[command(
     name = "malphas-cli",
@@ -89,6 +110,28 @@ enum Commands {
         /// 32-byte Ed25519 private key as hex
         private_key_hex: String,
     },
+}
+
+/// Validate a pack identifier.
+///
+/// Allowed characters are ASCII letters, digits, underscore and hyphen; the
+/// length must be between 1 and 16 inclusive. This set intentionally excludes
+/// path separators and `.`, so it also rejects path-traversal attempts such as
+/// `..` or `../evil`.
+fn validate_pack_id(pack_id: &str) -> Result<(), Box<dyn Error>> {
+    if pack_id.is_empty() {
+        return Err("pack_id must not be empty".into());
+    }
+    if pack_id.len() > 16 {
+        return Err(format!("pack_id too long (max 16 characters): {pack_id}").into());
+    }
+    if !pack_id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        return Err(format!("pack_id contains invalid characters: {pack_id}").into());
+    }
+    Ok(())
 }
 
 fn main() {
@@ -359,7 +402,9 @@ fn build_mhp(
     let mut atlas_section = atlas.to_vec();
     pad16(&mut atlas_section);
 
-    // Objects table + skins data pool.
+    // Objects table + property data pool.
+    // Skins are reserved for a future skin format; in v2.5.x no skin payload is
+    // emitted, so every descriptor reports skins_size == 0 and skins_offset == 0.
     let mut objects_table: Vec<u8> = Vec::new();
     let mut data_pool: Vec<u8> = Vec::new();
 
@@ -370,17 +415,12 @@ fn build_mhp(
         let prop_offset = data_pool.len();
         data_pool.extend_from_slice(&prop_bytes);
 
-        let mut skin_bytes = vec![0u8; 256];
-        pad16(&mut skin_bytes);
-        let skin_offset = data_pool.len();
-        data_pool.extend_from_slice(&skin_bytes);
-
         let descriptor = MhpObjectDescriptor {
             object_id: obj.object_id,
             properties_offset: u32::try_from(prop_offset).unwrap(),
             properties_size: u32::try_from(prop_bytes.len()).unwrap(),
-            skins_offset: u32::try_from(skin_offset).unwrap(),
-            skins_size: u32::try_from(skin_bytes.len()).unwrap(),
+            skins_offset: 0,
+            skins_size: 0,
             padding: [0; 12],
         };
         objects_table.extend_from_slice(descriptor_as_bytes(&descriptor));
@@ -395,6 +435,9 @@ fn build_mhp(
     let embedded_msp_offset = skins_offset + data_pool.len();
     let embedded_msp_size = msp.len();
 
+    // In v2.5.x the data pool contains only object properties; the skin format
+    // is reserved for a future release.  The header's skins_offset/skins_size
+    // therefore describe the property data pool so existing loaders remain valid.
     let mut payload = Vec::new();
     payload.extend_from_slice(&metrics_section);
     payload.extend_from_slice(&atlas_section);
@@ -430,19 +473,38 @@ fn build_mhp(
     };
 
     let mut out = Vec::with_capacity(MHP_HEADER_SIZE + payload.len());
-    out.extend_from_slice(header_as_bytes(&header));
+    out.extend_from_slice(&header_as_bytes(&header));
     out.extend_from_slice(&payload);
     out
 }
 
-fn header_as_bytes(header: &MhpHeader) -> &[u8] {
-    // SAFETY: MhpHeader is repr(C, align(16)) and contains only plain data.
-    unsafe {
-        std::slice::from_raw_parts(
-            std::ptr::from_ref::<MhpHeader>(header) as *const u8,
-            std::mem::size_of::<MhpHeader>(),
-        )
-    }
+/// Serialize an `MhpHeader` into its exact 112-byte on-disk representation.
+///
+/// Fields are written explicitly so the function never reads compiler-inserted
+/// trailing padding bytes, which may be uninitialized when the struct is
+/// created on the stack.
+fn header_as_bytes(header: &MhpHeader) -> [u8; MHP_HEADER_SIZE] {
+    let mut buf = [0u8; MHP_HEADER_SIZE];
+    buf[0..4].copy_from_slice(&header.magic);
+    buf[4..8].copy_from_slice(&header.version.to_le_bytes());
+    buf[8..16].copy_from_slice(&header.total_size.to_le_bytes());
+    buf[16..48].copy_from_slice(&header.checksum);
+    buf[48..64].copy_from_slice(&header.pack_id);
+    buf[64..66].copy_from_slice(&header.canvas_width.to_le_bytes());
+    buf[66..68].copy_from_slice(&header.canvas_height.to_le_bytes());
+    buf[68..72].copy_from_slice(&header.font_metrics_offset.to_le_bytes());
+    buf[72..76].copy_from_slice(&header.font_atlas_offset.to_le_bytes());
+    buf[76..80].copy_from_slice(&header.objects_table_offset.to_le_bytes());
+    buf[80..84].copy_from_slice(&header.objects_table_count.to_le_bytes());
+    buf[84..88].copy_from_slice(&header.skins_offset.to_le_bytes());
+    buf[88..92].copy_from_slice(&header.skins_size.to_le_bytes());
+    buf[92..96].copy_from_slice(&header.has_embedded_msp.to_le_bytes());
+    buf[96..100].copy_from_slice(&header.embedded_msp_offset.to_le_bytes());
+    buf[100..104].copy_from_slice(&header.embedded_msp_size.to_le_bytes());
+    buf[104..108].copy_from_slice(&header.padding);
+    // Bytes 108..112 are the struct's trailing alignment padding and are left
+    // zero-initialized, matching the C-ABI layout on disk.
+    buf
 }
 
 fn descriptor_as_bytes(descriptor: &MhpObjectDescriptor) -> &[u8] {
@@ -476,43 +538,25 @@ fn compile_manifest(manifest_path: &Path) -> Result<(PathBuf, PathBuf), Box<dyn 
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
 
-    let manifest_text = fs::read_to_string(manifest_path)?;
-    let manifest: serde_json::Value = serde_json::from_str(&manifest_text)?;
+    let manifest_text = fs::read_to_string(manifest_path)
+        .map_err(|e| format!("failed to read manifest '{}': {e}", manifest_path.display()))?;
+    let manifest: Manifest = serde_json::from_str(&manifest_text)
+        .map_err(|e| format!("invalid manifest '{}': {e}", manifest_path.display()))?;
 
-    let pack_id = manifest
-        .get("pack_id")
-        .and_then(|v| v.as_str())
-        .unwrap_or("pack_custom_01");
+    validate_pack_id(&manifest.pack_id)?;
 
-    let canvas_width = manifest
-        .get("canvas_width")
-        .and_then(|v| v.as_u64())
-        .map(|v| v as u16)
-        .unwrap_or(1000);
-    let canvas_height = manifest
-        .get("canvas_height")
-        .and_then(|v| v.as_u64())
-        .map(|v| v as u16)
-        .unwrap_or(1000);
+    let pack_id = manifest.pack_id;
+    let canvas_width = manifest.canvas_width;
+    let canvas_height = manifest.canvas_height;
 
-    let objects_array = manifest
-        .get("objects")
-        .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or_default();
-    let mut objects: Vec<ObjectEntry> = Vec::with_capacity(objects_array.len());
-    for obj in objects_array {
-        let object_id = obj
-            .get("object_id")
-            .and_then(|v| v.as_u64())
-            .map(|v| v as u32)
-            .unwrap_or(0);
-        let properties = obj.get("properties").cloned().unwrap_or_default();
-        objects.push(ObjectEntry {
-            object_id,
-            properties,
-        });
-    }
+    let objects: Vec<ObjectEntry> = manifest
+        .objects
+        .into_iter()
+        .map(|obj| ObjectEntry {
+            object_id: obj.object_id,
+            properties: obj.properties,
+        })
+        .collect();
 
     let font_path = resolve_font_path(manifest_dir)
         .ok_or_else(|| "Could not locate JetBrainsMono-Regular.ttf".to_string())?;
@@ -521,7 +565,7 @@ fn compile_manifest(manifest_path: &Path) -> Result<(PathBuf, PathBuf), Box<dyn 
     let bytecode = assemble_bouncing_script();
     let msp = build_msp(&bytecode);
     let mhp = build_mhp(
-        pack_id,
+        &pack_id,
         canvas_width,
         canvas_height,
         &metrics,
@@ -543,7 +587,8 @@ fn compile_manifest(manifest_path: &Path) -> Result<(PathBuf, PathBuf), Box<dyn 
 }
 
 fn decode_hex_32(s: &str) -> Result<[u8; 32], Box<dyn Error>> {
-    let bytes = hex::decode(s.trim())?;
+    let cleaned = s.trim().trim_start_matches("0x").trim_start_matches("0X");
+    let bytes = hex::decode(cleaned)?;
     if bytes.len() != 32 {
         return Err("Invalid private key: expected 64 hex characters".into());
     }
@@ -554,11 +599,11 @@ fn decode_hex_32(s: &str) -> Result<[u8; 32], Box<dyn Error>> {
 
 fn sign_file(file_path: &Path, private_key_hex: &str) -> Result<(), Box<dyn Error>> {
     if private_key_hex.trim().is_empty() {
-        eprintln!(
-            "WARN: empty signing key for '{}'; skipping signature generation.",
+        return Err(format!(
+            "empty signing key for '{}'; use a valid 32-byte Ed25519 seed or pass --allow-empty-key",
             file_path.display()
-        );
-        return Ok(());
+        )
+        .into());
     }
 
     let seed = decode_hex_32(private_key_hex)?;
@@ -611,7 +656,7 @@ mod tests {
         let manifest_path = tmp_dir.join("manifest.json");
         let mut file = fs::File::create(&manifest_path).unwrap();
         file.write_all(
-            br#"{"pack_id":"round_trip_pack","objects":[{"object_id":1,"properties":{"x":10}}]}"#,
+            br#"{"pack_id":"round_trip_pack","canvas_width":1000,"canvas_height":1000,"objects":[{"object_id":1,"properties":{"x":10}}]}"#,
         )
         .unwrap();
         file.flush().unwrap();
@@ -643,5 +688,176 @@ mod tests {
         let _ = fs::remove_file(&msp_path);
         let _ = fs::remove_file(&manifest_path);
         let _ = fs::remove_dir(&tmp_dir);
+    }
+
+    #[test]
+    fn sign_command_writes_verifiable_signature() {
+        use ed25519_dalek::{Verifier, VerifyingKey};
+        use rand_core::OsRng;
+
+        let ws_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("malphas_cli should live inside a workspace");
+        let tmp_dir = ws_root.join("target").join("malphas_cli_test_tmp");
+        fs::create_dir_all(&tmp_dir).unwrap();
+
+        let data_path = tmp_dir.join("payload.bin");
+        fs::write(&data_path, b"MALPHAS CLI SIGN TEST").unwrap();
+
+        let signing_key = SigningKey::generate(&mut OsRng);
+        let private_key_hex = hex::encode(signing_key.to_bytes());
+
+        sign_file(&data_path, &private_key_hex).unwrap();
+
+        let sig_path = data_path.with_extension("bin.sig");
+        assert!(sig_path.exists());
+
+        let sig_hex = fs::read_to_string(&sig_path).unwrap();
+        let sig_bytes = hex::decode(sig_hex.trim()).unwrap();
+        let signature = ed25519_dalek::Signature::from_slice(&sig_bytes).unwrap();
+
+        let verifying_key =
+            VerifyingKey::from_bytes(&signing_key.verifying_key().to_bytes()).unwrap();
+        let data = fs::read(&data_path).unwrap();
+        assert!(verifying_key.verify(&data, &signature).is_ok());
+
+        // 0x prefix must also be accepted.
+        let data_path_0x = tmp_dir.join("payload_0x.bin");
+        fs::write(&data_path_0x, b"MALPHAS CLI SIGN TEST 0X").unwrap();
+        sign_file(&data_path_0x, &format!("0x{private_key_hex}")).unwrap();
+        let sig_path_0x = data_path_0x.with_extension("bin.sig");
+        assert!(sig_path_0x.exists());
+
+        // Empty key must be rejected.
+        let empty_result = sign_file(&data_path, "");
+        assert!(empty_result.is_err());
+
+        // Tidy up.
+        let _ = fs::remove_file(&data_path);
+        let _ = fs::remove_file(&sig_path);
+        let _ = fs::remove_file(&data_path_0x);
+        let _ = fs::remove_file(&sig_path_0x);
+        let _ = fs::remove_dir(&tmp_dir);
+    }
+
+    #[test]
+    fn compile_font_atlas_produces_a8_atlas_and_metrics() {
+        let ws_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("malphas_cli should live inside a workspace");
+        let font_path = ws_root
+            .join("flutter_app")
+            .join("assets")
+            .join("fonts")
+            .join("JetBrainsMono-Regular.ttf");
+
+        let (metrics, atlas) = compile_font_atlas(&font_path).unwrap();
+
+        assert_eq!(atlas.len(), FONT_ATLAS_SIZE);
+        assert_eq!(metrics.len(), FONT_METRICS_SIZE);
+
+        // The atlas is mostly zero (empty cells) but common glyphs should be
+        // non-zero somewhere inside their 32x32 cell.
+        let max_in_cell = |code: u16| {
+            let cx = (code as usize % 16) * CELL_SIZE;
+            let cy = (code as usize / 16) * CELL_SIZE;
+            let mut max = 0u8;
+            for y in cy..cy + CELL_SIZE {
+                for x in cx..cx + CELL_SIZE {
+                    max = max.max(atlas[y * FONT_ATLAS_WIDTH + x]);
+                }
+            }
+            max
+        };
+        assert!(
+            max_in_cell(0x41) > 0,
+            "glyph 'A' should render non-zero alpha"
+        );
+        assert!(
+            max_in_cell(0x30) > 0,
+            "glyph '0' should render non-zero alpha"
+        );
+    }
+
+    #[test]
+    fn compile_manifest_rejects_invalid_manifests() {
+        let ws_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("malphas_cli should live inside a workspace");
+        let tmp_dir = ws_root.join("target").join("malphas_cli_test_invalid");
+        fs::create_dir_all(&tmp_dir).unwrap();
+
+        let unknown_field = tmp_dir.join("unknown.json");
+        fs::write(
+            &unknown_field,
+            br#"{"pack_id":"x","canvas_width":1,"canvas_height":1,"objects":[],"extra":true}"#,
+        )
+        .unwrap();
+        let err = compile_manifest(&unknown_field).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("unknown field") || msg.contains("invalid manifest"),
+            "unexpected error: {msg}"
+        );
+
+        let missing_field = tmp_dir.join("missing.json");
+        fs::write(&missing_field, br#"{"pack_id":"x","canvas_width":1}"#).unwrap();
+        let err = compile_manifest(&missing_field).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("missing field") || msg.contains("invalid manifest"),
+            "unexpected error: {msg}"
+        );
+
+        // Tidy up.
+        let _ = fs::remove_file(&unknown_field);
+        let _ = fs::remove_file(&missing_field);
+        let _ = fs::remove_dir(&tmp_dir);
+    }
+
+    #[test]
+    fn validate_pack_id_accepts_valid_ids() {
+        assert!(validate_pack_id("bouncing_demo").is_ok());
+        assert!(validate_pack_id("A1_-").is_ok());
+        assert!(validate_pack_id("1234567890123456").is_ok());
+    }
+
+    #[test]
+    fn validate_pack_id_rejects_invalid_ids() {
+        assert!(validate_pack_id("").is_err());
+        assert!(validate_pack_id("12345678901234567").is_err());
+        assert!(validate_pack_id("../evil").is_err());
+        assert!(validate_pack_id("foo/bar").is_err());
+        assert!(validate_pack_id("foo\\bar").is_err());
+        assert!(validate_pack_id("foo.bar").is_err());
+        assert!(validate_pack_id("foo bar").is_err());
+    }
+
+    #[test]
+    fn mhp_header_serialization_is_exactly_112_bytes_and_zero_padded() {
+        let header = MhpHeader {
+            magic: *b"MLPH",
+            version: 0,
+            total_size: 0,
+            checksum: [0; 32],
+            pack_id: [0; 16],
+            canvas_width: 0,
+            canvas_height: 0,
+            font_metrics_offset: 0,
+            font_atlas_offset: 0,
+            objects_table_offset: 0,
+            objects_table_count: 0,
+            skins_offset: 0,
+            skins_size: 0,
+            has_embedded_msp: 0,
+            embedded_msp_offset: 0,
+            embedded_msp_size: 0,
+            padding: [0; 4],
+        };
+        let bytes = header_as_bytes(&header);
+        assert_eq!(bytes.len(), MHP_HEADER_SIZE);
+        assert_eq!(MHP_HEADER_SIZE, 112);
+        assert_eq!(&bytes[0..4], b"MLPH");
+        assert!(bytes[4..].iter().all(|&b| b == 0));
     }
 }

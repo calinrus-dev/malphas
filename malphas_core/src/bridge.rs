@@ -4,11 +4,15 @@ use std::ffi::c_void;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
+use crate::arena_layout::{
+    ARENA_HEADER_SIZE, ARENA_MAGIC, DEFAULT_ENTITIES_OFFSET, DEFAULT_STATIC_RESOURCES_OFFSET,
+    ENTITIES_COUNT, ENTITIES_OFFSET, STATIC_RESOURCES_OFFSET, STATIC_RESOURCES_SIZE,
+};
 use crate::input::INPUT_QUEUE;
 use crate::pipeline::{
     process_engine_tick_internal, telemetry_now_micros, CoreCommandBuffer, DartRenderCommand,
-    MalphasDoubleBufferBridge, ARENA_ADDRESS, ARENA_SIZE, BRIDGE_ADDRESS, ENGINE_PAUSED,
-    ENGINE_RUNNING, LAST_PULSE_MICROS, MAX_COMMANDS_CAPACITY, RUNTIME,
+    MalphasDoubleBufferBridge, TextPayload, ARENA_ADDRESS, ARENA_SIZE, BRIDGE_ADDRESS,
+    ENGINE_PAUSED, ENGINE_RUNNING, LAST_PULSE_MICROS, MAX_COMMANDS_CAPACITY, RUNTIME,
 };
 
 /// Serialises `init_engine` re-initialisation so two FFI callers cannot race
@@ -38,6 +42,11 @@ impl Drop for ActiveThreadGuard {
 // ---------------------------------------------------------------------------
 // Engine lifecycle.
 // ---------------------------------------------------------------------------
+/// Returns true if `ptr` is properly aligned for `T`.
+fn is_aligned<T>(ptr: *const T) -> bool {
+    (ptr as usize).is_multiple_of(std::mem::align_of::<T>())
+}
+
 pub(crate) fn init_engine_internal(
     bridge_ptr: *mut MalphasDoubleBufferBridge,
     arena_ptr: *mut c_void,
@@ -45,6 +54,11 @@ pub(crate) fn init_engine_internal(
     max_commands: u32,
 ) -> i32 {
     if bridge_ptr.is_null() || arena_ptr.is_null() {
+        return -1;
+    }
+    // Both shared buffers must satisfy the 16-byte alignment required by the
+    // ARM64 ABI and by our #[repr(C, align(16))] structs.
+    if !is_aligned(bridge_ptr) || !(arena_ptr as usize).is_multiple_of(16) {
         return -1;
     }
 
@@ -68,20 +82,19 @@ pub(crate) fn init_engine_internal(
     ARENA_SIZE.store(arena_size as usize, Ordering::SeqCst);
     MAX_COMMANDS_CAPACITY.store(max_commands, Ordering::SeqCst);
 
-    // 4. Initialise the Arena memory map (first 32 bytes).
+    // 4. Initialise the Arena memory map header.
     unsafe {
         let arena_start = arena_ptr as *mut u8;
-        std::ptr::write_bytes(arena_start, 0, 32);
+        std::ptr::write_bytes(arena_start, 0, ARENA_HEADER_SIZE);
 
-        *arena_start.add(0) = b'M';
-        *arena_start.add(1) = b'A';
-        *arena_start.add(2) = b'L';
-        *arena_start.add(3) = b'P';
+        for (i, &byte) in ARENA_MAGIC.iter().enumerate() {
+            *arena_start.add(i) = byte;
+        }
 
-        *(arena_start.add(4) as *mut u32) = 1024; // static_resources_offset
-        *(arena_start.add(8) as *mut u32) = 0; // static_resources_size
-        *(arena_start.add(12) as *mut u32) = 32; // entities_offset
-        *(arena_start.add(16) as *mut u32) = 0; // entities_count
+        *(arena_start.add(STATIC_RESOURCES_OFFSET) as *mut u32) = DEFAULT_STATIC_RESOURCES_OFFSET;
+        *(arena_start.add(STATIC_RESOURCES_SIZE) as *mut u32) = 0;
+        *(arena_start.add(ENTITIES_OFFSET) as *mut u32) = DEFAULT_ENTITIES_OFFSET;
+        *(arena_start.add(ENTITIES_COUNT) as *mut u32) = 0;
     }
 
     // 5. Create a fresh single-clock pulse channel for this session.
@@ -189,7 +202,7 @@ pub(crate) fn trigger_engine_pulse_internal() -> i32 {
 // on the bridge layout or copy nested structs by value.
 // ---------------------------------------------------------------------------
 pub(crate) fn get_buffer_a_ptr(bridge: *mut MalphasDoubleBufferBridge) -> *mut CoreCommandBuffer {
-    if bridge.is_null() {
+    if bridge.is_null() || !is_aligned(bridge) {
         return std::ptr::null_mut();
     }
     // `addr_of_mut!` avoids creating an intermediate &mut to a struct that is
@@ -198,38 +211,61 @@ pub(crate) fn get_buffer_a_ptr(bridge: *mut MalphasDoubleBufferBridge) -> *mut C
 }
 
 pub(crate) fn get_buffer_b_ptr(bridge: *mut MalphasDoubleBufferBridge) -> *mut CoreCommandBuffer {
-    if bridge.is_null() {
+    if bridge.is_null() || !is_aligned(bridge) {
         return std::ptr::null_mut();
     }
     unsafe { std::ptr::addr_of_mut!((*bridge).buffer_b) }
 }
 
 pub(crate) fn get_back_index(bridge: *mut MalphasDoubleBufferBridge) -> u8 {
-    if bridge.is_null() {
+    if bridge.is_null() || !is_aligned(bridge) {
         return 0;
     }
     unsafe { (*bridge).atomic_back_index.load(Ordering::Acquire) }
 }
 
 pub(crate) fn get_command_count(buffer: *const CoreCommandBuffer) -> u32 {
-    if buffer.is_null() {
+    if buffer.is_null() || !is_aligned(buffer) {
         return 0;
     }
     unsafe { (*buffer).command_count.load(Ordering::Acquire) }
 }
 
 pub(crate) fn get_commands_pointer(buffer: *const CoreCommandBuffer) -> *mut DartRenderCommand {
-    if buffer.is_null() {
+    if buffer.is_null() || !is_aligned(buffer) {
         return std::ptr::null_mut();
     }
     unsafe { (*buffer).commands }
 }
 
 pub(crate) fn get_commands_written(bridge: *mut MalphasDoubleBufferBridge) -> u32 {
-    if bridge.is_null() {
+    if bridge.is_null() || !is_aligned(bridge) {
         return 0;
     }
     unsafe { (*bridge).commands_written.load(Ordering::Acquire) }
+}
+
+/// Decodes the `TextPayload` pointer embedded in the `width`/`height` union
+/// fields of a text render command.  Dart must never perform this pointer
+/// arithmetic itself; it should call this helper instead.
+pub(crate) fn get_text_payload_pointer(command: *const DartRenderCommand) -> *const TextPayload {
+    if command.is_null() || !is_aligned(command) {
+        return std::ptr::null();
+    }
+    unsafe {
+        // Only text commands (command_type == 2) carry a valid payload pointer
+        // in the width/height fields; rectangle commands store geometry there.
+        if (*command).command_type != 2 {
+            return std::ptr::null();
+        }
+        let low = (*command).width.to_bits() as u64;
+        let high = (*command).height.to_bits() as u64;
+        let address = (high << 32) | low;
+        if address == 0 {
+            return std::ptr::null();
+        }
+        address as *const TextPayload
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -306,5 +342,71 @@ mod tests {
             );
             std::thread::yield_now();
         }
+    }
+
+    #[test]
+    fn test_init_engine_rejects_misaligned_pointers() {
+        let mut bridge =
+            unsafe { std::mem::zeroed::<crate::pipeline::MalphasDoubleBufferBridge>() };
+        let mut arena = vec![0u8; 1024 * 1024];
+        let bridge_ptr: *mut crate::pipeline::MalphasDoubleBufferBridge = &mut bridge;
+        let arena_ptr = arena.as_mut_ptr() as *mut c_void;
+
+        // Misaligned bridge pointer must be rejected.
+        assert_eq!(
+            unsafe {
+                crate::init_engine(bridge_ptr.byte_add(1), arena_ptr, arena.len() as u32, 2048)
+            },
+            -1
+        );
+        // Misaligned arena pointer must be rejected.
+        assert_eq!(
+            unsafe {
+                crate::init_engine(bridge_ptr, arena_ptr.byte_add(1), arena.len() as u32, 2048)
+            },
+            -1
+        );
+    }
+
+    #[test]
+    fn test_pointer_delegates_reject_misaligned_and_null() {
+        let mut bridge =
+            unsafe { std::mem::zeroed::<crate::pipeline::MalphasDoubleBufferBridge>() };
+        let bridge_ptr: *mut crate::pipeline::MalphasDoubleBufferBridge = &mut bridge;
+        let misaligned_bridge = unsafe { bridge_ptr.byte_add(1) };
+
+        assert!(get_buffer_a_ptr(std::ptr::null_mut()).is_null());
+        assert!(get_buffer_a_ptr(misaligned_bridge).is_null());
+        assert!(get_buffer_b_ptr(misaligned_bridge).is_null());
+        assert_eq!(get_back_index(misaligned_bridge), 0);
+        assert_eq!(get_commands_written(misaligned_bridge), 0);
+
+        let mut buffer = unsafe { std::mem::zeroed::<CoreCommandBuffer>() };
+        let buffer_ptr: *mut CoreCommandBuffer = &mut buffer;
+        let misaligned_buffer = unsafe { buffer_ptr.byte_add(1) };
+
+        assert_eq!(get_command_count(std::ptr::null()), 0);
+        assert_eq!(get_command_count(misaligned_buffer), 0);
+        assert!(get_commands_pointer(misaligned_buffer).is_null());
+    }
+
+    #[test]
+    fn test_get_text_payload_pointer_requires_text_command() {
+        let mut rect_cmd = unsafe { std::mem::zeroed::<crate::pipeline::DartRenderCommand>() };
+        rect_cmd.command_type = 1;
+        rect_cmd.width = f32::from_bits(0x12345678);
+        rect_cmd.height = f32::from_bits(0x9ABCDEF0);
+        assert!(get_text_payload_pointer(&rect_cmd).is_null());
+
+        let mut text_cmd = unsafe { std::mem::zeroed::<crate::pipeline::DartRenderCommand>() };
+        text_cmd.command_type = 2;
+        text_cmd.width = f32::from_bits(0x12345678);
+        text_cmd.height = f32::from_bits(0x9ABCDEF0);
+        let decoded = get_text_payload_pointer(&text_cmd);
+        assert!(!decoded.is_null());
+        assert_eq!(
+            decoded as usize,
+            ((0x9ABCDEF0u64 as usize) << 32) | 0x12345678
+        );
     }
 }

@@ -471,20 +471,21 @@ checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
 
 [[package]]
 name = "malphas_cli"
-version = "2.5.0"
+version = "2.5.1"
 dependencies = [
  "clap",
  "ed25519-dalek",
  "fontdue",
  "hex",
  "rand_core",
+ "serde",
  "serde_json",
  "sha2",
 ]
 
 [[package]]
 name = "malphas_core"
-version = "2.5.0"
+version = "2.5.1"
 dependencies = [
  "arc-swap",
  "ed25519-dalek",
@@ -640,6 +641,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e"
 dependencies = [
  "serde_core",
+ "serde_derive",
 ]
 
 [[package]]

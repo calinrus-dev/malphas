@@ -26,12 +26,24 @@ jobs:
           name: malphas_core-windows-latest
           path: native/
 
-      - name: Place native library where MalphasBindings expects it
+      - name: Download Windows engine signature
+        uses: actions/download-artifact@v4
+        with:
+          name: malphas_core-sig-windows-latest
+          path: native-sig/
+
+      - name: Place native library and signature where MalphasBindings expects them
         shell: powershell
         run: |
-          if (Test-Path native/malphas_core.dll) {
-            Copy-Item native/malphas_core.dll -Destination malphas_core.dll -Force
-            Copy-Item native/malphas_core.dll -Destination flutter_app/malphas_core.dll -Force
+          $dll = "native/target/release/malphas_core.dll"
+          if (Test-Path $dll) {
+            Copy-Item $dll -Destination malphas_core.dll -Force
+            Copy-Item $dll -Destination flutter_app/malphas_core.dll -Force
+          }
+          $sig = "native-sig/target/release/malphas_core.dll.sig"
+          if (Test-Path $sig) {
+            Copy-Item $sig -Destination malphas_core.dll.sig -Force
+            Copy-Item $sig -Destination flutter_app/malphas_core.dll.sig -Force
           }
 
       - name: Set up Flutter
