@@ -29,13 +29,23 @@ jobs:
       - name: Place native library where MalphasBindings expects it
         shell: bash
         run: |
-          if [ -f native/target/release/libmalphas_core.so ]; then
-            cp native/target/release/libmalphas_core.so ../libmalphas_core.so
+          if [ -f native/libmalphas_core.so ]; then
+            LIB=native/libmalphas_core.so
+          elif [ -f native/target/release/libmalphas_core.so ]; then
+            LIB=native/target/release/libmalphas_core.so
+          elif [ -f native/malphas_core.dll ]; then
+            LIB=native/malphas_core.dll
           elif [ -f native/target/release/malphas_core.dll ]; then
-            cp native/target/release/malphas_core.dll ../malphas_core.dll
+            LIB=native/target/release/malphas_core.dll
+          elif [ -f native/libmalphas_core.dylib ]; then
+            LIB=native/libmalphas_core.dylib
           elif [ -f native/target/release/libmalphas_core.dylib ]; then
-            cp native/target/release/libmalphas_core.dylib ../libmalphas_core.dylib
+            LIB=native/target/release/libmalphas_core.dylib
+          else
+            echo "Error: Native library not found"
+            exit 1
           fi
+          cp "$LIB" ../$(basename "$LIB")
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2

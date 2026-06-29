@@ -35,19 +35,31 @@ jobs:
       - name: Place native library and signature where MalphasBindings expects them
         shell: powershell
         run: |
-          $dll = "native/target/release/malphas_core.dll"
+          $dll = "native/malphas_core.dll"
+          if (-not (Test-Path $dll -PathType Leaf)) {
+            $dll = "native/target/release/malphas_core.dll"
+          }
           $runnerDir = "flutter_app/windows/runner"
           New-Item -ItemType Directory -Force -Path $runnerDir | Out-Null
-          if (Test-Path $dll) {
+          if (Test-Path $dll -PathType Leaf) {
             Copy-Item $dll -Destination malphas_core.dll -Force
             Copy-Item $dll -Destination flutter_app/malphas_core.dll -Force
             Copy-Item $dll -Destination "$runnerDir/malphas_core.dll" -Force
+          } else {
+            Write-Error "Error: Windows native library not found"
+            exit 1
           }
-          $sig = "native-sig/target/release/malphas_core.dll.sig"
-          if (Test-Path $sig) {
+          $sig = "native-sig/malphas_core.dll.sig"
+          if (-not (Test-Path $sig -PathType Leaf)) {
+            $sig = "native-sig/target/release/malphas_core.dll.sig"
+          }
+          if (Test-Path $sig -PathType Leaf) {
             Copy-Item $sig -Destination malphas_core.dll.sig -Force
             Copy-Item $sig -Destination flutter_app/malphas_core.dll.sig -Force
             Copy-Item $sig -Destination "$runnerDir/malphas_core.dll.sig" -Force
+          } else {
+            Write-Error "Error: Windows engine signature not found"
+            exit 1
           }
 
       - name: Set up Flutter

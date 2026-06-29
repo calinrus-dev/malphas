@@ -61,19 +61,26 @@ jobs:
         shell: bash
         run: |
           mkdir -p motors
-          if [ -f native/target/release/libmalphas_core.so ]; then
-            cp native/target/release/libmalphas_core.so ./libmalphas_core.so
-            cp native/target/release/libmalphas_core.so motors/libmalphas_core.so
-            cp native/target/release/libmalphas_core.so ../libmalphas_core.so
+          if [ -f native/libmalphas_core.so ]; then
+            LIB=native/libmalphas_core.so
+          elif [ -f native/target/release/libmalphas_core.so ]; then
+            LIB=native/target/release/libmalphas_core.so
+          elif [ -f native/malphas_core.dll ]; then
+            LIB=native/malphas_core.dll
           elif [ -f native/target/release/malphas_core.dll ]; then
-            cp native/target/release/malphas_core.dll ./malphas_core.dll
-            cp native/target/release/malphas_core.dll motors/malphas_core.dll
-            cp native/target/release/malphas_core.dll ../malphas_core.dll
+            LIB=native/target/release/malphas_core.dll
+          elif [ -f native/libmalphas_core.dylib ]; then
+            LIB=native/libmalphas_core.dylib
           elif [ -f native/target/release/libmalphas_core.dylib ]; then
-            cp native/target/release/libmalphas_core.dylib ./libmalphas_core.dylib
-            cp native/target/release/libmalphas_core.dylib motors/libmalphas_core.dylib
-            cp native/target/release/libmalphas_core.dylib ../libmalphas_core.dylib
+            LIB=native/target/release/libmalphas_core.dylib
+          else
+            echo "Error: Native library not found"
+            exit 1
           fi
+          base=$(basename "$LIB")
+          cp "$LIB" "./$base"
+          cp "$LIB" motors/"$base"
+          cp "$LIB" ../"$base"
 
       - name: Download engine signature
         uses: actions/download-artifact@v4
@@ -85,25 +92,44 @@ jobs:
         shell: bash
         run: |
           mkdir -p motors
-          if [ -f native-sig/target/release/libmalphas_core.so.sig ]; then
-            cp native-sig/target/release/libmalphas_core.so.sig ./libmalphas_core.so.sig
-            cp native-sig/target/release/libmalphas_core.so.sig motors/libmalphas_core.so.sig
-            cp native-sig/target/release/libmalphas_core.so.sig ../libmalphas_core.so.sig
+          if [ -f native-sig/libmalphas_core.so.sig ]; then
+            SIG=native-sig/libmalphas_core.so.sig
+          elif [ -f native-sig/target/release/libmalphas_core.so.sig ]; then
+            SIG=native-sig/target/release/libmalphas_core.so.sig
+          elif [ -f native-sig/malphas_core.dll.sig ]; then
+            SIG=native-sig/malphas_core.dll.sig
           elif [ -f native-sig/target/release/malphas_core.dll.sig ]; then
-            cp native-sig/target/release/malphas_core.dll.sig ./malphas_core.dll.sig
-            cp native-sig/target/release/malphas_core.dll.sig motors/malphas_core.dll.sig
-            cp native-sig/target/release/malphas_core.dll.sig ../malphas_core.dll.sig
+            SIG=native-sig/target/release/malphas_core.dll.sig
+          elif [ -f native-sig/libmalphas_core.dylib.sig ]; then
+            SIG=native-sig/libmalphas_core.dylib.sig
           elif [ -f native-sig/target/release/libmalphas_core.dylib.sig ]; then
-            cp native-sig/target/release/libmalphas_core.dylib.sig ./libmalphas_core.dylib.sig
-            cp native-sig/target/release/libmalphas_core.dylib.sig motors/libmalphas_core.dylib.sig
-            cp native-sig/target/release/libmalphas_core.dylib.sig ../libmalphas_core.dylib.sig
+            SIG=native-sig/target/release/libmalphas_core.dylib.sig
+          else
+            echo "Error: Engine signature not found"
+            exit 1
           fi
+          base=$(basename "$SIG")
+          cp "$SIG" "./$base"
+          cp "$SIG" motors/"$base"
+          cp "$SIG" ../"$base"
 
       - name: Place CLI binary where MalphasPackageCompiler finds it
         shell: bash
         run: |
           mkdir -p motors
-          cp native/target/release/malphas-cli motors/malphas-cli
+          if [ -f native/malphas-cli ]; then
+            CLI_BIN=native/malphas-cli
+          elif [ -f native/target/release/malphas-cli ]; then
+            CLI_BIN=native/target/release/malphas-cli
+          elif [ -f native/malphas-cli.exe ]; then
+            CLI_BIN=native/malphas-cli.exe
+          elif [ -f native/target/release/malphas-cli.exe ]; then
+            CLI_BIN=native/target/release/malphas-cli.exe
+          else
+            echo "Error: CLI executable not found"
+            exit 1
+          fi
+          cp "$CLI_BIN" motors/malphas-cli
           chmod +x motors/malphas-cli
 
       - name: Compile bouncing_demo manifest with downloaded CLI
