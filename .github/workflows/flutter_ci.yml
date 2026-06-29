@@ -124,9 +124,12 @@ jobs:
       - name: Analyze
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
+      - name: Install xvfb for headless Linux tests
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
       - name: Run Flutter Tests (Native Headless)
         env:
           LD_LIBRARY_PATH: ${{ github.workspace }}/flutter_app/motors
         run: |
           export LD_LIBRARY_PATH="${{ github.workspace }}/flutter_app/motors"
-          flutter test
+          xvfb-run -a flutter test

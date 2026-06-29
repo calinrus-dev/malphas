@@ -36,14 +36,18 @@ jobs:
         shell: powershell
         run: |
           $dll = "native/target/release/malphas_core.dll"
+          $runnerDir = "flutter_app/windows/runner"
+          New-Item -ItemType Directory -Force -Path $runnerDir | Out-Null
           if (Test-Path $dll) {
             Copy-Item $dll -Destination malphas_core.dll -Force
             Copy-Item $dll -Destination flutter_app/malphas_core.dll -Force
+            Copy-Item $dll -Destination "$runnerDir/malphas_core.dll" -Force
           }
           $sig = "native-sig/target/release/malphas_core.dll.sig"
           if (Test-Path $sig) {
             Copy-Item $sig -Destination malphas_core.dll.sig -Force
             Copy-Item $sig -Destination flutter_app/malphas_core.dll.sig -Force
+            Copy-Item $sig -Destination "$runnerDir/malphas_core.dll.sig" -Force
           }
 
       - name: Set up Flutter
