@@ -1,8 +1,8 @@
-# Malphas v2.5.5 — Multi-Architecture Android Deployment
+# Malphas v2.6.0 — Sprite Skins & No-Code Creator
 
 A high-performance, terminal-inspired graphical engine with a modular Rust core and a passive Flutter frontend. The two sides communicate through a small, explicit C-ABI boundary and share memory directly instead of marshalling messages across an isolating bridge.
 
-> **v2.5.5** extends the decoupled onboarding loop to multi-architecture Android deployment with extreme bare-metal performance: configuring workspace-wide Link-Time Optimization (LTO), single codegen units, panic abort code footprint, 64-byte cache line FFI alignment for false sharing mitigation, VM Jump Table native execution, unaligned memory safety guarantees for package loaders using `std::ptr::read_unaligned` to prevent ARM64 alignment crashes, and explicit field-by-field package serialization.
+> **v2.6.0** introduces custom sprite skins preloading and rendering, dynamic scene bootstrapping based on rich JSON manifest mapping, and a premium visual No-Code Package Creator UI. It also preserves v2.5.5 bare-metal optimizations including LTO, aligned 64-byte FFI double buffer boundary false-sharing mitigation, and unaligned safe memory operations.
 
 ## Architecture at a glance
 

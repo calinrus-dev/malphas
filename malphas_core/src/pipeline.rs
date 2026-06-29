@@ -698,6 +698,7 @@ pub fn set_entity(
         let entity_ptr = arena_start.add(entity_offset);
         *entity_ptr = command_type;
         *entity_ptr.add(1) = layer;
+        *((entity_ptr.add(2)) as *mut u16) = entity_id as u16;
         *((entity_ptr.add(4)) as *mut f32) = x;
         *((entity_ptr.add(8)) as *mut f32) = y;
         *((entity_ptr.add(12)) as *mut f32) = width;

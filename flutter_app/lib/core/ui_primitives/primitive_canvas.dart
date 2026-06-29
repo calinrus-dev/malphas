@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import '../ffi/arena_layout.dart';
 import '../ffi/malphas_bindings.dart';
 import '../ffi/types.dart';
+import '../../features/package_manager/package_controller.dart';
+import '../../features/package_manager/models.dart';
 
 /// A pure synchronous rasterizer backed by the native command buffer.
 ///
@@ -89,20 +91,53 @@ class EnginePainter extends CustomPainter {
     final uint32View = commands.cast<dffi.Uint32>().asTypedList(count * 6);
     final float32View = commands.cast<dffi.Float>().asTypedList(count * 6);
 
+    final activePack = PackageController().getAllPackages().firstWhere(
+          (p) => p.isLoaded,
+          orElse: () => MalphasPackage(
+              id: 'dummy',
+              name: 'dummy',
+              version: '1.0',
+              author: '',
+              description: '',
+              objects: []),
+        );
+
     int i = 0;
     while (i < count) {
       final offset = i * 6;
-      final commandType = uint32View[offset] & 0xFF;
+      final rawHeader = uint32View[offset];
+      final commandType = rawHeader & 0xFF;
       final colorRgba = uint32View[offset + 5];
 
       switch (commandType) {
-        case 1: // Solid Rectangle
-          final paint = _rectPaints.getPaint(colorRgba);
+        case 1: // Solid Rectangle or Custom Skin
           final x = float32View[offset + 1] * scale;
           final y = float32View[offset + 2] * scale;
           final w = float32View[offset + 3] * scale;
           final h = float32View[offset + 4] * scale;
-          canvas.drawRect(Rect.fromLTWH(x, y, w, h), paint);
+
+          final int entityId = (rawHeader >> 16) & 0xFFFF;
+          ui.Image? skinImage;
+          if (entityId < activePack.objects.length) {
+            final obj = activePack.objects[entityId];
+            if (obj.skins.isNotEmpty) {
+              final skin = obj.currentSkin;
+              skinImage = PackageController.skinImages[skin.assetPath];
+            }
+          }
+
+          if (skinImage != null) {
+            canvas.drawImageRect(
+              skinImage,
+              Rect.fromLTWH(0, 0, skinImage.width.toDouble(),
+                  skinImage.height.toDouble()),
+              Rect.fromLTWH(x, y, w, h),
+              Paint()..filterQuality = ui.FilterQuality.low,
+            );
+          } else {
+            final paint = _rectPaints.getPaint(colorRgba);
+            canvas.drawRect(Rect.fromLTWH(x, y, w, h), paint);
+          }
           i += 1;
           break;
         case 2: // Union text command

@@ -1,8 +1,8 @@
-# Malphas Agent Instructions — v2.5.5
+# Malphas Agent Instructions — v2.6.0
 
 These rules define the design language, build/test workflow, FFI safety constraints, and agent conventions of the Malphas project. All agents modifying code, documentation, or system mechanics must follow them.
 
-Version v2.5.5 — Multi-Architecture Android Deployment closes the loop with absolute bare-metal speed: utilizing workspace-wide Link-Time Optimization (LTO), single codegen units, panic abort behavior, 64-byte cache line alignment for FFI bridge false sharing mitigation, VM Jump Table native execution, unaligned memory safety guarantees for package loaders using `std::ptr::read_unaligned` to prevent ARM64 alignment crashes, and explicit field-by-field package serialization.
+Version v2.6.0 — Sprite Skins & No-Code Creator introduces dynamic scene configuration based on rich JSON manifests, custom sprite skins using preloaded ui.Image buffers with immediate color rectangle fallback, and visual package compilation. FFI entities map commands to objects using the 16-bit `pad` field of `DartRenderCommand` inside the Arena.
 
 ## 1. Terminal Aesthetic
 

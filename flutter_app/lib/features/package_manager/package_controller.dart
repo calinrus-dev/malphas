@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'models.dart';
 import '../../core/compiler/package_compiler.dart';
@@ -9,6 +10,8 @@ class PackageController extends ChangeNotifier {
   static final PackageController _instance = PackageController._internal();
   factory PackageController() => _instance;
   PackageController._internal();
+
+  static final Map<String, ui.Image> skinImages = {};
 
   final List<MalphasPackage> _registry = [];
   final AppStatePersistenceService _persistence = AppStatePersistenceService();
@@ -165,6 +168,93 @@ class PackageController extends ChangeNotifier {
         );
       }
 
+      final manifestCandidates = [
+        File('${file.parent.path}/$packId.manifest.json'),
+        File('${file.parent.path}/manifest.json'),
+      ];
+      File? manifestFile;
+      for (final candidate in manifestCandidates) {
+        if (candidate.existsSync()) {
+          manifestFile = candidate;
+          break;
+        }
+      }
+
+      if (manifestFile != null) {
+        try {
+          final manifestJson = jsonDecode(manifestFile.readAsStringSync())
+              as Map<String, dynamic>;
+          final name = manifestJson['name'] as String? ?? 'MHP Pack ($packId)';
+          final manifestVersion =
+              manifestJson['version'] as String? ?? 'v$version.0.0';
+          final author =
+              manifestJson['author'] as String? ?? 'Compiled Artifact';
+          final description = manifestJson['description'] as String? ??
+              'Zero-copy binary structure with aligned headers.';
+
+          final List<MalphasObject> richObjects = [];
+          if (manifestJson['objects'] is List) {
+            for (var objJson in manifestJson['objects']) {
+              final idVal = objJson['object_id'] ?? objJson['id'];
+              final nameVal = objJson['name'] as String? ?? 'Object $idVal';
+              final categoryVal =
+                  objJson['category'] as String? ?? 'Compiled Archetype';
+              final props = Map<String, dynamic>.from(
+                  objJson['properties'] as Map? ?? {});
+              final propsStr = props.map((k, v) => MapEntry(k, v.toString()));
+
+              final tagsList = <MalphasTag>[];
+              if (objJson['tags'] is List) {
+                for (var t in objJson['tags']) {
+                  if (t is String) {
+                    tagsList.add(MalphasTag(name: t, isPublic: true));
+                  } else if (t is Map) {
+                    tagsList.add(MalphasTag(
+                        name: t['name'] as String,
+                        isPublic: t['isPublic'] as bool? ?? true));
+                  }
+                }
+              } else {
+                tagsList
+                    .add(const MalphasTag(name: 'Zero-Copy', isPublic: true));
+              }
+
+              final skinsList = <MalphasSkin>[];
+              if (objJson['skins'] is List) {
+                for (var s in objJson['skins']) {
+                  skinsList.add(MalphasSkin(
+                    id: s['id'] as String? ?? 'none',
+                    name: s['name'] as String? ?? 'None',
+                    assetPath: s['assetPath'] as String? ?? 'none',
+                    version: s['version'] as String? ?? '1.0',
+                  ));
+                }
+              }
+
+              richObjects.add(MalphasObject(
+                id: idVal.toString(),
+                name: nameVal,
+                category: categoryVal,
+                properties: propsStr,
+                tags: tagsList,
+                skins: skinsList,
+              ));
+            }
+          }
+
+          return MalphasPackage(
+            id: packId,
+            name: name,
+            version: manifestVersion,
+            author: author,
+            description: description,
+            objects: richObjects.isNotEmpty ? richObjects : parsedObjects,
+          );
+        } catch (_) {
+          // Fallback if manifest is malformed
+        }
+      }
+
       return MalphasPackage(
         id: packId,
         name: 'MHP Pack ($packId)',
@@ -234,5 +324,118 @@ class PackageController extends ChangeNotifier {
     _registry.removeWhere((p) => p.id == id);
     _persistRegistry();
     notifyListeners();
+  }
+
+  /// Preloads skins/sprites for the active package into unmanaged C++ memory (ui.Image).
+  /// Safely disposes and clears any previously loaded skins first to prevent memory leaks.
+  Future<void> preloadSkins(MalphasPackage pack) async {
+    await disposeSkins();
+
+    for (final obj in pack.objects) {
+      for (final skin in obj.skins) {
+        final path = skin.assetPath;
+        if (path.isEmpty || path == 'none') continue;
+        if (skinImages.containsKey(path)) continue;
+
+        try {
+          File file = File(path);
+          if (!file.existsSync()) {
+            final ws = resolveWorkspaceRoot();
+            file = File('$ws/$path');
+          }
+          if (file.existsSync()) {
+            final bytes = await file.readAsBytes();
+            final codec = await ui.instantiateImageCodec(bytes);
+            final frame = await codec.getNextFrame();
+            skinImages[path] = frame.image;
+          }
+        } catch (_) {
+          // Skip individual failed loads
+        }
+      }
+    }
+  }
+
+  /// Explicitly disposes of all loaded ui.Image structures to free native RAM.
+  Future<void> disposeSkins() async {
+    for (final image in skinImages.values) {
+      try {
+        image.dispose();
+      } catch (_) {
+        // Safe check
+      }
+    }
+    skinImages.clear();
+  }
+
+  /// Compiles a custom package and registers it.
+  Future<void> createAndCompilePackage({
+    required String packId,
+    required String name,
+    required String version,
+    required String author,
+    required String description,
+    required int canvasWidth,
+    required int canvasHeight,
+    required List<MalphasObject> objects,
+  }) async {
+    final workspace = resolveWorkspaceRoot();
+    final packagesDir = Directory('$workspace/packages');
+    if (!packagesDir.existsSync()) {
+      packagesDir.createSync(recursive: true);
+    }
+
+    // 1. Build the full rich manifest JSON map
+    final richManifest = {
+      'pack_id': packId,
+      'name': name,
+      'version': version,
+      'author': author,
+      'description': description,
+      'canvas_width': canvasWidth,
+      'canvas_height': canvasHeight,
+      'objects': objects
+          .map((obj) => {
+                'object_id': int.tryParse(obj.id) ?? 1,
+                'name': obj.name,
+                'category': obj.category,
+                'tags': obj.tags
+                    .map((t) => {'name': t.name, 'isPublic': t.isPublic})
+                    .toList(),
+                'skins': obj.skins.map((s) => s.toJson()).toList(),
+                'properties': obj.properties,
+              })
+          .toList(),
+    };
+
+    // 2. Build the stripped minimal manifest for malphas-cli
+    final strippedManifest = {
+      'pack_id': packId,
+      'canvas_width': canvasWidth,
+      'canvas_height': canvasHeight,
+      'objects': objects
+          .map((obj) => {
+                'object_id': int.tryParse(obj.id) ?? 1,
+                'properties': obj.properties,
+              })
+          .toList(),
+    };
+
+    // 3. Compile using MalphasPackageCompiler
+    final compiler = MalphasPackageCompiler();
+    final output = await compiler.compilePackage(strippedManifest);
+
+    // 4. Save files to packages/
+    final mhpFile = File('${packagesDir.path}/$packId.mhp');
+    final mspFile = File('${packagesDir.path}/$packId.msp');
+    final manifestFile = File('${packagesDir.path}/$packId.manifest.json');
+
+    await mhpFile.writeAsBytes(output.mhpBytes);
+    await mspFile.writeAsBytes(output.mspBytes);
+    await manifestFile.writeAsString(jsonEncode(richManifest));
+
+    // 5. Reload registry
+    _initialized = false;
+    await init();
   }
 }

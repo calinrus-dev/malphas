@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'models.dart';
 import 'package_controller.dart';
 import 'package_config_screen.dart';
+import 'package_creator_screen.dart';
 
 enum HubViewMode { packageList, objectGrid }
 
@@ -91,16 +92,33 @@ class _PackageManagerPanelState extends State<PackageManagerPanel> {
                 ],
               ),
             ),
-            IconButton(
-              icon: Icon(Icons.settings, color: theme.primaryColor, size: 20),
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => const PackageConfigScreen(),
-                  ),
-                );
-              },
+            Row(
+              children: [
+                IconButton(
+                  icon:
+                      const Icon(Icons.add, color: Color(0xff00ffcc), size: 20),
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const PackageCreatorScreen(),
+                      ),
+                    );
+                  },
+                ),
+                IconButton(
+                  icon:
+                      Icon(Icons.settings, color: theme.primaryColor, size: 20),
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const PackageConfigScreen(),
+                      ),
+                    );
+                  },
+                ),
+              ],
             ),
           ],
         ),
