@@ -207,7 +207,7 @@ class _PackageManagerPanelState extends State<PackageManagerPanel> {
                       children: [
                         const SizedBox(height: 4),
                         Text(
-                          '${p.version} • By ${p.author}',
+                          '${p.version} | By ${p.author}',
                           style: const TextStyle(
                             fontFamily: 'Arial',
                             color: Colors.white38,
@@ -572,7 +572,7 @@ class _PackageManagerPanelState extends State<PackageManagerPanel> {
                 ),
               ),
               subtitle: Text(
-                'Type: ${kind.toUpperCase()} • Tags: ${entTags.map((t) => t.name).join(",")}',
+                'Type: ${kind.toUpperCase()} | Tags: ${entTags.map((t) => t.name).join(",")}',
                 style: const TextStyle(
                   fontFamily: 'Courier',
                   color: Colors.white24,

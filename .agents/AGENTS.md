@@ -1,8 +1,8 @@
-# Malphas Agent Instructions — v2.7.0
+# Malphas Agent Instructions -- v2.7.0
 
 These rules define the design language, build/test workflow, FFI safety constraints, and agent conventions of the Malphas project. All agents modifying code, documentation, or system mechanics must follow them.
 
-Version v2.7.0 — Data-Oriented Memory Router replaces the bytecode VM and the shared writable Arena with a flat memory router: MSP files are memory-mapped, MXC systems are native dynamic libraries, and Flutter only pulses the engine and reads raw render commands through FFI.
+Version v2.7.0 -- Data-Oriented Memory Router replaces the bytecode VM and the shared writable Arena with a flat memory router: MSP files are memory-mapped, MXC systems are native dynamic libraries, and Flutter only pulses the engine and reads raw render commands through FFI.
 
 ## 1. Terminal Aesthetic
 
@@ -30,7 +30,7 @@ Malphas functions and behaves like an immersive graphical terminal. It rejects s
 - Keep the rendering pipeline repaint-driven. Do not trigger global Flutter build/re-layouts on high-speed ticks.
 - Maintain the virtual coordinates matrix of `1000x1000` logical units and apply letterboxing to preserve aspect ratios on dynamic screens.
 - Flutter owns the only clock. The engine advances one tick per VSync via `trigger_engine_pulse()`. Do not add timers or sleeps in the Rust simulation thread.
-- The render command stream is a homogeneous array of 24-byte `DartRenderCommand` slots. Systems write these commands directly into the back buffer; Flutter reads the front buffer opuesto using `get_back_index()`.
+- The render command stream is a homogeneous array of 24-byte `DartRenderCommand` slots. Systems write these commands directly into the back buffer; Flutter reads the front buffer opposite using `get_back_index()`.
 - `malphas_core` is a Rust `cdylib` with decoupled modules: `pipeline`, `bridge`, `input`, `crypto`, `msp_loader`, and `system_host`. It exports a minimal C-ABI boundary; Flutter is a passive display server that only pulses and reads the front buffer.
 - `malphas-cli` is the canonical package compiler and signer. It consumes a v2.7.0 manifest and produces a `.msp` Silver Platter. `.mxc` system libraries are built separately by Cargo as `cdylib` crates.
 - The Flutter engine and package managers must discover resources from disk (`flutter_app/motors/`, `examples/`, `packages/`). Do not hard-code mock engines, mock packages, or placeholder SHA-256 hashes. Engine integrity checks must compute real SHA-256 sums of the motor files.
@@ -165,7 +165,7 @@ Malphas shares memory between Dart and Rust. Breaking these rules causes crashes
 - When in doubt, prefer explicit, commented, safe code over cleverness.
 - Do not break the C-ABI layouts or the single-clock VSync-driven pulse model.
 
-## 13. CI/CD Artifact Blindage
+## 13. CI/CD Artifact Protection
 
 - Native binaries (`malphas_core`, `malphas-cli`, `bouncing_demo`) must never be committed to git. They are produced by `./build.sh` / `.\build_core.ps1` locally or downloaded from CI artifacts in GitHub Actions.
 - `rust_ci.yml` must upload the motor, CLI, and `bouncing_demo` system artifacts per OS so downstream Flutter jobs can consume them.

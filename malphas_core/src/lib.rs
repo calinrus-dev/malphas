@@ -1,4 +1,4 @@
-// Malphas Core v2.7.0 — Data-Oriented Design memory router.
+// Malphas Core v2.7.0 - Data-Oriented Design memory router.
 //
 // This crate is a C-ABI boundary; pointer arguments are validated inside each
 // function before they are dereferenced, so the not_unsafe_ptr_arg_deref lint

@@ -102,7 +102,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                 side: const BorderSide(color: Color(0xff1b1b1b)),
               ),
               title: const Text(
-                'NUEVO ENTORNO',
+                'NEW ENVIRONMENT',
                 style: TextStyle(
                   fontFamily: 'Georgia',
                   color: Color(0xffe0dcd3),
@@ -118,7 +118,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text(
-                        'NOMBRE DEL CANAL',
+                        'CHANNEL NAME',
                         style: TextStyle(
                           fontFamily: 'Arial',
                           fontSize: 9,
@@ -140,7 +140,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                             fontSize: 13,
                           ),
                           decoration: const InputDecoration(
-                            hintText: 'Ej. Mecatron Core v2',
+                            hintText: 'E.g. Mecatron Core v2',
                             hintStyle: TextStyle(
                               color: Colors.white24,
                               fontSize: 12,
@@ -152,7 +152,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                       ),
                       const SizedBox(height: 16),
                       const Text(
-                        'ACOPLAR MOTOR',
+                        'ATTACH ENGINE',
                         style: TextStyle(
                           fontFamily: 'Arial',
                           fontSize: 9,
@@ -193,7 +193,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                       ),
                       const SizedBox(height: 16),
                       const Text(
-                        'CARGAR PAQUETES ACTIVOS',
+                        'LOAD ACTIVE PACKAGES',
                         style: TextStyle(
                           fontFamily: 'Arial',
                           fontSize: 9,
@@ -248,7 +248,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
               actions: [
                 TextButton(
                   child: const Text(
-                    'CANCELAR',
+                    'CANCEL',
                     style: TextStyle(
                       color: Colors.white38,
                       fontSize: 12,
@@ -259,7 +259,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                 ),
                 TextButton(
                   child: const Text(
-                    'CREAR',
+                    'CREATE',
                     style: TextStyle(
                       color: Color(0xffe0dcd3),
                       fontSize: 12,
@@ -310,7 +310,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                 side: const BorderSide(color: Color(0xff1b1b1b)),
               ),
               title: const Text(
-                'EDITAR ENTORNO',
+                'EDIT ENVIRONMENT',
                 style: TextStyle(
                   fontFamily: 'Georgia',
                   color: Color(0xffe0dcd3),
@@ -326,7 +326,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text(
-                        'NOMBRE DEL CANAL',
+                        'CHANNEL NAME',
                         style: TextStyle(
                           fontFamily: 'Arial',
                           fontSize: 9,
@@ -356,7 +356,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                       ),
                       const SizedBox(height: 16),
                       const Text(
-                        'ACOPLAR MOTOR',
+                        'ATTACH ENGINE',
                         style: TextStyle(
                           fontFamily: 'Arial',
                           fontSize: 9,
@@ -397,7 +397,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                       ),
                       const SizedBox(height: 16),
                       const Text(
-                        'CARGAR PAQUETES ACTIVOS',
+                        'LOAD ACTIVE PACKAGES',
                         style: TextStyle(
                           fontFamily: 'Arial',
                           fontSize: 9,
@@ -452,7 +452,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
               actions: [
                 TextButton(
                   child: const Text(
-                    'CANCELAR',
+                    'CANCEL',
                     style: TextStyle(
                       color: Colors.white38,
                       fontSize: 12,
@@ -463,7 +463,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                 ),
                 TextButton(
                   child: const Text(
-                    'GUARDAR',
+                    'SAVE',
                     style: TextStyle(
                       color: Color(0xffe0dcd3),
                       fontSize: 12,
@@ -502,7 +502,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
             side: const BorderSide(color: Color(0xff1b1b1b)),
           ),
           title: const Text(
-            'RENOMBRAR',
+            'RENAME',
             style: TextStyle(
               fontFamily: 'Georgia',
               color: Color(0xffe0dcd3),
@@ -527,7 +527,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
           actions: [
             TextButton(
               child: const Text(
-                'CANCELAR',
+                'CANCEL',
                 style: TextStyle(
                   color: Colors.white38,
                   fontSize: 12,
@@ -538,7 +538,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
             ),
             TextButton(
               child: const Text(
-                'ACEPTAR',
+                'CONFIRM',
                 style: TextStyle(
                   color: Color(0xffe0dcd3),
                   fontSize: 12,
@@ -572,7 +572,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
             side: const BorderSide(color: Color(0xff1b1b1b)),
           ),
           title: const Text(
-            'ELIMINAR ENTORNO',
+            'DELETE ENVIRONMENT',
             style: TextStyle(
               fontFamily: 'Georgia',
               color: Colors.redAccent,
@@ -581,13 +581,13 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
             ),
           ),
           content: Text(
-            '¿Seguro que deseas eliminar el entorno "${env.name}"?',
+            'Are you sure you want to delete the environment "${env.name}"?',
             style: const TextStyle(color: Colors.white70, fontSize: 13),
           ),
           actions: [
             TextButton(
               child: const Text(
-                'CANCELAR',
+                'CANCEL',
                 style: TextStyle(
                   color: Colors.white38,
                   fontSize: 12,
@@ -598,7 +598,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
             ),
             TextButton(
               child: const Text(
-                'ELIMINAR',
+                'DELETE',
                 style: TextStyle(
                   color: Colors.redAccent,
                   fontSize: 12,
@@ -637,7 +637,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                   color: Color(0xffe0dcd3),
                 ),
                 title: const Text(
-                  'Editar Entorno',
+                  'Edit Environment',
                   style: TextStyle(color: Colors.white),
                 ),
                 onTap: () {
@@ -651,7 +651,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                   color: Color(0xffe0dcd3),
                 ),
                 title: const Text(
-                  'Renombrar',
+                  'Rename',
                   style: TextStyle(color: Colors.white),
                 ),
                 onTap: () {
@@ -665,7 +665,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                   color: Colors.redAccent,
                 ),
                 title: const Text(
-                  'Eliminar',
+                  'Delete',
                   style: TextStyle(color: Colors.redAccent),
                 ),
                 onTap: () {
@@ -700,7 +700,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
       backgroundColor: Colors.black,
       appBar: AppBar(
         title: const Text(
-          'Malphas Chasis',
+          'Malphas Chassis',
           style: TextStyle(
             fontFamily: 'Georgia',
             fontSize: 22,
@@ -721,14 +721,14 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
               const PopupMenuItem(
                 value: true,
                 child: Text(
-                  'Mosaico (Grid)',
+                  'Grid',
                   style: TextStyle(color: Colors.white),
                 ),
               ),
               const PopupMenuItem(
                 value: false,
                 child: Text(
-                  'Lista (List)',
+                  'List',
                   style: TextStyle(color: Colors.white),
                 ),
               ),
@@ -1045,7 +1045,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                           Text(
                             env.packageIds.isEmpty
                                 ? '0 Packages Registered'
-                                : '${env.packageIds.length} Packages Configured • Active: ${env.engineId ?? "Default Core"}',
+                                : '${env.packageIds.length} Packages Configured - Active: ${env.engineId ?? "Default Core"}',
                             style: const TextStyle(
                               fontFamily: 'Courier',
                               fontSize: 10,

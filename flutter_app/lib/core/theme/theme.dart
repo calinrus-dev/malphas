@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 
 class MalphasTheme {
-  static const Color ink = Color(0xff000000); // Negro absoluto
-  static const Color slate = Color(0xff0d0d0d); // Antracita mate
-  static const Color bone = Color(0xffe0dcd3); // Hueso de alto contraste
-  static const Color borderAccent = Color(0xff1b1b1b); // Gris de contorno
-  static const Color mist = Color(0xff8a8a8a); // Datos secundarios
+  static const Color ink = Color(0xff000000); // Absolute black
+  static const Color slate = Color(0xff0d0d0d); // Matte anthracite
+  static const Color bone = Color(0xffe0dcd3); // High-contrast bone
+  static const Color borderAccent = Color(0xff1b1b1b); // Outline gray
+  static const Color mist = Color(0xff8a8a8a); // Secondary data
 
   static ThemeData get darkTheme {
     return ThemeData(

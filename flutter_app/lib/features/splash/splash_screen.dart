@@ -63,7 +63,7 @@ class _MalphasSplashScreenState extends State<MalphasSplashScreen>
                     children: List.generate(_letters.length, (index) {
                       final angle = (index * (2 * math.pi / _letters.length)) +
                           (value * 2 * math.pi);
-                      // Las letras orbitan radialmente y colapsan hacia el centro (radio tiende a 0)
+                      // Letters orbit radially and collapse toward the center (radius tends to zero)
                       final radius = (1.0 - value) * 120.0;
                       final x = math.cos(angle) * radius;
                       final y = math.sin(angle) * radius;

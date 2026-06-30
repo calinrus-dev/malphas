@@ -1,36 +1,36 @@
 # Malphas v2.7.0 — Data-Oriented Memory Router
 
-**Malphas no es un motor de objetos. Es un router de memoria plana.**
+**Malphas is not an object engine. It is a flat memory router.**
 
-Este proyecto es una declaración de guerra contra la orientación a objetos en el hot path del rendimiento. El núcleo está escrito en Rust, la interfaz en Flutter, y ambos se comunican a través de un puente C-ABI mínimo que no serializa, no copia y no permite que el Garbage Collector decida cuándo se ejecuta una línea de código crítica.
+This project is a declaration of war against object-oriented code in the hot path. The core is written in Rust, the interface in Flutter, and both communicate through a minimal C-ABI bridge that does not serialize, does not copy, and does not let the Garbage Collector decide when a critical line of code runs.
 
-> **v2.7.0 — The Data-Oriented Router** elimina por completo la VM de bytecode, el modelo de entidades con métodos y la Arena compartida de escritura. Ahora el flujo es simple: datos planos en disco (`MSP`) → memoria mapeada (`mmap`) → sistemas nativos (`MXC`) → comandos de renderizado crudos → pantalla. Punto.
-
----
-
-## 1. Filosofía DOD (Data-Oriented Design)
-
-Malphas escupe sobre la herencia, los métodos virtuales y los árboles de objetos.
-
-- **NO hay objetos en el hot path.** Una "entidad" no es una clase. Es un `u32`.
-- **NO hay Garbage Collector en el frame crítico.** Rust posee la memoria; Dart solo lee punteros.
-- **TODO está alineado a 64 bytes.** Cada header, descriptor y payload respeta el tamaño de una línea de caché L1. Si no cabe en una línea, no entra.
-- **Zero-copy por diseño.** Un `MSP` en disco es idéntico a un `MSP` en memoria. Se carga con `mmap`; no se deserializa.
-- **Stateless por contrato.** Los sistemas `.mxc` reciben una tabla de punteros de solo lectura (Silver Platter) y mantienen su propio estado plano en arrays contiguos (SoA). Nunca mutan el MSP.
-
-Si todavía piensas en `objeto.update()`, estás en el motor equivocado.
+> **v2.7.0 — The Data-Oriented Router** completely removes the bytecode VM, the entity model with methods, and the shared write Arena. The flow is now simple: flat data on disk (`MSP`) → memory-mapped (`mmap`) → native systems (`MXC`) → raw render commands → screen. Period.
 
 ---
 
-## 2. Arquitectura: MSP y MXC
+## 1. DOD Philosophy (Data-Oriented Design)
+
+Malphas spits on inheritance, virtual methods, and object trees.
+
+- **NO objects in the hot path.** An "entity" is not a class. It is a `u32`.
+- **NO Garbage Collector in the critical frame.** Rust owns the memory; Dart only reads pointers.
+- **EVERYTHING is aligned to 64 bytes.** Every header, descriptor, and payload respects the size of an L1 cache line. If it does not fit in one line, it does not get in.
+- **Zero-copy by design.** An `MSP` on disk is identical to an `MSP` in memory. It is loaded with `mmap`; it is not deserialized.
+- **Stateless by contract.** `.mxc` systems receive a read-only pointer table (Silver Platter) and keep their own flat state in contiguous arrays (SoA). They never mutate the MSP.
+
+If you are still thinking in `object.update()`, you are in the wrong engine.
+
+---
+
+## 2. Architecture: MSP and MXC
 
 ### 2.1 MSP — Malphas Source Pack
 
-El `MSP` es la unidad de datos plana de Malphas. Es un archivo binario rígido, alineado a 64 bytes, compuesto por:
+The `MSP` is Malphas' flat data unit. It is a rigid, 64-byte-aligned binary file composed of:
 
-1. **`MspHeader`** (64 bytes): magia `MLPS`, versión, offsets, checksum.
-2. **`MspEntityDescriptor[]`** (64 bytes cada uno): mapea `entity_id` → offset/size del payload.
-3. **Sección de payloads**: blobs de memoria cruda, cada uno alineado a 64 bytes. Los últimos 64 KB están reservados para *Error Payloads*: un fallback seguro para IDs inválidos.
+1. **`MspHeader`** (64 bytes): `MLPS` magic, version, offsets, checksum.
+2. **`MspEntityDescriptor[]`** (64 bytes each): maps `entity_id` → payload offset/size.
+3. **Payload section**: raw memory blobs, each aligned to 64 bytes. The last 64 KB are reserved for *Error Payloads*: a safe fallback for invalid IDs.
 
 ```rust
 #[repr(C, align(64))]
@@ -43,24 +43,24 @@ pub struct MspHeader {
     pub payload_section_size: u32,   // 4 bytes
     pub checksum: u64,               // 8 bytes
     pub _padding: [u8; 32],          // 32 bytes
-}                                   // = 64 bytes, 1 línea de caché
+}                                   // = 64 bytes, 1 cache line
 
 #[repr(C, align(64))]
 pub struct MspEntityDescriptor {
     pub entity_id: u32,              // 4 bytes
-    // 4 bytes de padding implícito para alinear tag_mask
+    // 4 bytes of implicit padding to align tag_mask
     pub tag_mask: u64,               // 8 bytes
     pub payload_offset: u32,         // 4 bytes
     pub payload_size: u32,           // 4 bytes
     pub _padding: [u8; 40],          // 40 bytes
-}                                   // = 64 bytes, 1 línea de caché
+}                                   // = 64 bytes, 1 cache line
 ```
 
-Al cargar, `malphas_core` construye la **Silver Platter**: un array plano de punteros `*const u8` indexado por `entity_id`. Los sistemas hacen `unsafe { *lookup_table.add(id) }` y ya tienen su payload. Sin hash maps. Sin métodos. Sin indirecciones.
+On load, `malphas_core` builds the **Silver Platter**: a flat array of `*const u8` pointers indexed by `entity_id`. Systems do `unsafe { *lookup_table.add(id) }` and they already have their payload. No hash maps. No methods. No indirections.
 
 ### 2.2 MXC — Malphas eXecutable Core
 
-Un `MXC` es una librería dinámica nativa (`dll`/`so`/`dylib`) que exporta exactamente dos símbolos:
+An `MXC` is a native dynamic library (`dll`/`so`/`dylib`) that exports exactly two symbols:
 
 ```rust
 #[no_mangle]
@@ -80,32 +80,32 @@ pub extern "C" fn malphas_tick(
 );
 ```
 
-- `init` se ejecuta una sola vez para reservar el estado SoA interno del sistema.
-- `tick` se ejecuta cada frame: lee la Silver Platter, muta sus propios arrays planos y escribe comandos de renderizado directamente en el back buffer del puente FFI.
-- El sistema **nunca** escribe en el MSP. El MSP es sagrado y de solo lectura.
+- `init` runs once to reserve the system's internal SoA state.
+- `tick` runs every frame: reads the Silver Platter, mutates its own flat arrays, and writes render commands directly into the FFI bridge back buffer.
+- The system **never** writes to the MSP. The MSP is sacred and read-only.
 
 ---
 
-## 3. Glosario Estricto
+## 3. Strict Glossary
 
-| Término | Definición | Lo que NO es |
+| Term | Definition | What it is NOT |
 |---|---|---|
-| **Entidad** | Un `u32` relacional (`entity_id`). Un índice en una tabla. | Una clase. No tiene métodos, estado ni comportamiento. |
-| **Payload** | Un bloque de bytes crudos, alineado a 64 bytes, apuntado por la Silver Platter. | Un objeto. No tiene interfaz. Es memoria plana interpretada por el sistema. |
-| **Silver Platter** | Array plano de `*const u8` construido al cargar el MSP. `lookup_table[entity_id]` devuelve el payload. | Un mapa, diccionario o estructura de búsqueda. |
-| **Sistema (.mxc)** | Librería dinámica nativa que consume payloads y escribe comandos. | Un script interpretado, una clase ni una máquina virtual. |
-| **Entorno** | Un MSP mapeado en memoria más uno o varios sistemas cargados. | Una escena con GameObjects. |
-| **Puente FFI** | `MalphasDoubleBufferBridge`: 64 bytes compartidos entre Rust y Dart. | Un bus de mensajes, JSON o canal de eventos. |
+| **Entity** | A relational `u32` (`entity_id`). An index into a table. | A class. It has no methods, state, or behavior. |
+| **Payload** | A raw byte block, aligned to 64 bytes, pointed to by the Silver Platter. | An object. It has no interface. It is flat memory interpreted by the system. |
+| **Silver Platter** | Flat array of `*const u8` built when loading the MSP. `lookup_table[entity_id]` returns the payload. | A map, dictionary, or lookup structure. |
+| **System (.mxc)** | Native dynamic library that consumes payloads and writes commands. | An interpreted script, a class, or a virtual machine. |
+| **Environment** | An MSP mapped into memory plus one or more loaded systems. | A scene with GameObjects. |
+| **FFI Bridge** | `MalphasDoubleBufferBridge`: 64 bytes shared between Rust and Dart. | A message bus, JSON, or event channel. |
 
-**Regla de oro:** si dices "objeto", "método" o "clase" dentro del núcleo, has perdido el juego.
+**Golden rule:** if you say "object", "method", or "class" inside the core, you have lost the game.
 
 ---
 
-## 4. El Puente Flutter FFI — El Pintor Ciego
+## 4. The Flutter FFI Bridge — The Blind Painter
 
-Flutter no es un motor. Es una terminal de renderizado.
+Flutter is not an engine. It is a rendering terminal.
 
-Dart no conoce entidades, payloads ni lógica de juego. Solo conoce un puntero a `MalphasDoubleBufferBridge` y la regla de oro del double-buffer:
+Dart knows nothing about entities, payloads, or game logic. It only knows a pointer to `MalphasDoubleBufferBridge` and the golden rule of the double-buffer:
 
 ```rust
 #[repr(C, align(64))]
@@ -128,20 +128,20 @@ pub struct MalphasDoubleBufferBridge {
 }                                          // = 64 bytes
 ```
 
-Cada frame Flutter hace:
+Every frame Flutter does:
 
-1. `trigger_engine_pulse()` → despierta el hilo de Rust.
-2. Rust ejecuta `tick` de los sistemas cargados en el **back buffer**.
-3. Rust flipea `atomic_back_index` con ordenamiento Release/Acquire.
-4. Dart lee el **front buffer** opuesto usando `get_back_index()`.
-5. `PrimitiveCanvas` itera los comandos crudos directamente desde el puntero nativo y los pinta.
+1. `trigger_engine_pulse()` → wakes up the Rust thread.
+2. Rust runs `tick` of the systems loaded into the **back buffer**.
+3. Rust flips `atomic_back_index` with Release/Acquire ordering.
+4. Dart reads the opposite **front buffer** using `get_back_index()`.
+5. `PrimitiveCanvas` iterates the raw commands directly from the native pointer and paints them.
 
 ```rust
 #[repr(C)]
 pub struct DartRenderCommand {
     pub command_type: u8,   // 1 = rect, 2 = text marker
-    pub layer: u8,          // orden de pintado
-    pub pad: u16,           // alineación
+    pub layer: u8,          // paint order
+    pub pad: u16,           // alignment
     pub x: f32,
     pub y: f32,
     pub width: f32,
@@ -150,55 +150,55 @@ pub struct DartRenderCommand {
 }                           // = 24 bytes
 ```
 
-No hay `List<DartRenderCommand>`. No hay `fromJson`. No hay `copyWith`. Hay un puntero, un conteo atómico y un `Canvas.drawRect`.
+No `List<DartRenderCommand>`. No `fromJson`. No `copyWith`. There is a pointer, an atomic count, and a `Canvas.drawRect`.
 
 ---
 
-## 5. Flujo de Datos en una Frame
+## 5. Data Flow in a Frame
 
 ```
-Disco
+Disk
  ├── bouncing_demo.msp   (MSP) ──mmap──► RAM: Silver Platter
- └── bouncing_demo.mxc   (MXC) ──dlopen► Rust: sistema cargado
+ └── bouncing_demo.mxc   (MXC) ──dlopen► Rust: loaded system
 
 Flutter VSync
  └── trigger_engine_pulse()
       └── Rust tick_systems(lookup_table, back_buffer)
-           └── MXC malphas_tick() escribe DartRenderCommand[]
+           └── MXC malphas_tick() writes DartRenderCommand[]
       └── flip atomic_back_index
 
 Flutter Paint
  └── PrimitiveCanvas
-      └── front_commands = buffer opuesto a back_index
+      └── front_commands = buffer opposite to back_index
       └── for i in 0..front_count: Canvas.drawRect(commands[i])
 ```
 
 ---
 
-## 6. Compilación y Ejecución
+## 6. Build and Run
 
 ### Rust
 
 ```bash
-# Motor, CLI y sistema de ejemplo
+# Engine, CLI, and example system
 cargo build --release --package malphas_core
 cargo build --release --package malphas_cli
 cargo build --release --package bouncing_demo
 
-# Verificación estricta
+# Strict verification
 cargo fmt -- --check
 cargo clippy --release -- -D warnings
 cargo test --release
 ```
 
-### MSP de ejemplo
+### Example MSP
 
 ```bash
-# Compila el MSP desde el manifest v2.7.0
+# Build the MSP from the v2.7.0 manifest
 cargo run --release -p malphas_cli -- compile examples/bouncing_demo/manifest.json
 ```
 
-Esto genera `examples/bouncing_demo/bouncing_demo.msp` y `examples/bouncing_demo/bindings.rs`.
+This generates `examples/bouncing_demo/bouncing_demo.msp` and `examples/bouncing_demo/bindings.rs`.
 
 ### Flutter
 
@@ -212,16 +212,16 @@ dart format .
 
 ---
 
-## 7. Comandos de Verificación Arquitectónica
+## 7. Architectural Verification Commands
 
 ```bash
-# Nada de alineaciones rotas
-git grep "align(16)" || echo "OK: no align(16) encontrado"
+# No broken alignments
+git grep "align(16)" || echo "OK: no align(16) found"
 
-# Nada de OOP en el núcleo
-git grep -i "class.*Object" malphas_core/ || echo "OK: no clases objeto en Rust"
+# No OOP in the core
+git grep -i "class.*Object" malphas_core/ || echo "OK: no object classes in Rust"
 
-# Las estructuras críticas miden 64 bytes
+# Critical structures are 64 bytes
 grep -n "size_of::<MspHeader>()" malphas_core/src/msp_loader.rs
 grep -n "size_of::<MspEntityDescriptor>()" malphas_core/src/msp_loader.rs
 grep -n "size_of::<MalphasDoubleBufferBridge>()" malphas_core/src/pipeline.rs
@@ -229,19 +229,19 @@ grep -n "size_of::<MalphasDoubleBufferBridge>()" malphas_core/src/pipeline.rs
 
 ---
 
-## 8. Contrato de Contribución
+## 8. Contribution Contract
 
-Si envías un PR:
+If you send a PR:
 
-1. Toda estructura compartida debe ser `#[repr(C)]` o `#[repr(C, align(64))]` y su tamaño debe ser múltiplo de 64.
-2. Ningún sistema `.mxc` puede mutar el MSP ni hacer FFI de vuelta al core durante `tick`.
-3. Dart solo lee punteros; nunca construye objetos por frame.
-4. `cargo fmt`, `cargo clippy --release -- -D warnings`, `cargo test --release`, `flutter analyze` y `flutter test` deben pasar.
+1. Every shared structure must be `#[repr(C)]` or `#[repr(C, align(64))]` and its size must be a multiple of 64.
+2. No `.mxc` system may mutate the MSP or make FFI calls back into the core during `tick`.
+3. Dart only reads pointers; it never builds objects per frame.
+4. `cargo fmt`, `cargo clippy --release -- -D warnings`, `cargo test --release`, `flutter analyze`, and `flutter test` must pass.
 
-Lee `CONTRIBUTING.md` para el proceso completo.
+Read `CONTRIBUTING.md` for the full process.
 
 ---
 
-## 9. Licencia
+## 9. License
 
-MIT — ver `LICENSE`.
+MIT — see `LICENSE`.

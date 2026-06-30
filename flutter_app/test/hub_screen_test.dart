@@ -45,7 +45,7 @@ void main() {
     await tester.pumpWidget(const MaterialApp(home: MalphasHubScreen()));
     await tester.pumpAndSettle();
 
-    expect(find.text('Malphas Chasis'), findsOneWidget);
+    expect(find.text('Malphas Chassis'), findsOneWidget);
     expect(find.text('Malphas Sandbox'), findsOneWidget);
   });
 
@@ -59,7 +59,7 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.enterText(find.byType(TextField).first, 'Test Channel');
-    await tester.tap(find.text('CREAR'));
+    await tester.tap(find.text('CREATE'));
     await tester.pumpAndSettle();
 
     expect(

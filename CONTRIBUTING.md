@@ -6,11 +6,11 @@ pull request must complete.
 
 ## Prerequisites
 
-- **Rust** — latest stable toolchain (`rustc`, `cargo`, `clippy`, `rustfmt`).
-- **Flutter** — stable channel, SDK `>=3.0.0 <4.0.0`.
-- **Git** — for cloning, branching, and signing commits if you choose to.
-- **Android NDK r26c** (optional) — only if you need to build Android engines locally.
-- **PowerShell** (Windows only) — for `build_core.ps1`.
+- **Rust** -- latest stable toolchain (`rustc`, `cargo`, `clippy`, `rustfmt`).
+- **Flutter** -- stable channel, SDK `>=3.0.0 <4.0.0`.
+- **Git** -- for cloning, branching, and signing commits if you choose to.
+- **Android NDK r26c** (optional) -- only if you need to build Android engines locally.
+- **PowerShell** (Windows only) -- for `build_core.ps1`.
 
 ### Optional but recommended
 
@@ -72,15 +72,15 @@ has copied `malphas_core.dll` into `flutter_app/motors/`.
 We use [Conventional Commits](https://www.conventionalcommits.org/) with the
 following types:
 
-- `feat:` — new feature or behavior
-- `fix:` — bug fix
-- `docs:` — documentation-only change
-- `style:` — formatting, missing semicolons, etc. (no logic change)
-- `refactor:` — code change that neither fixes a bug nor adds a feature
-- `perf:` — performance improvement
-- `test:` — adding or correcting tests
-- `chore:` — build, CI, tooling, or dependency changes
-- `ci:` — continuous integration configuration
+- `feat:` -- new feature or behavior
+- `fix:` -- bug fix
+- `docs:` -- documentation-only change
+- `style:` -- formatting, missing semicolons, etc. (no logic change)
+- `refactor:` -- code change that neither fixes a bug nor adds a feature
+- `perf:` -- performance improvement
+- `test:` -- adding or correcting tests
+- `chore:` -- build, CI, tooling, or dependency changes
+- `ci:` -- continuous integration configuration
 
 A scope is encouraged when the change touches a single area, for example:
 

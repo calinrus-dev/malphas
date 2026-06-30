@@ -24,7 +24,7 @@ class MalphasConsole extends StatelessWidget {
       theme: MalphasTheme.darkTheme,
       debugShowCheckedModeBanner: false,
       home:
-          const MalphasSplashScreen(), // Arranca directamente en el Splash interactivo
+          const MalphasSplashScreen(), // Boots straight into the interactive splash screen
     );
   }
 }
