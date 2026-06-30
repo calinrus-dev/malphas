@@ -49,6 +49,8 @@ examples/bouncing_demo/bindings.rs
 kanjivg.zip
 kanjivg_extracted/
 packages/
+flutter_app/assets/packages/*
+!flutter_app/assets/packages/.gitkeep
 *_logs/
 *_logs_*.zip
 runs.json

@@ -213,11 +213,10 @@ fn make_sandbox_workdir(label: &str) -> (std::path::PathBuf, std::path::PathBuf)
 }
 
 fn load_system_in_sandbox(rel_path: &std::path::Path, work_dir: &std::path::Path) -> i32 {
-    let original_dir = std::env::current_dir().unwrap();
-    std::env::set_current_dir(work_dir).unwrap();
-    let result = malphas_core::load_system(c_string(rel_path.to_str().unwrap()).as_ptr());
-    std::env::set_current_dir(original_dir).unwrap();
-    result
+    // Use an absolute path so tests stay thread-safe and do not race on the
+    // process current working directory.
+    let absolute = work_dir.join(rel_path);
+    malphas_core::load_system(c_string(absolute.to_str().unwrap()).as_ptr())
 }
 
 #[test]
