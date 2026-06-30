@@ -47,8 +47,8 @@ examples/bouncing_demo/bindings.rs
 
 # Temp zip and extraction files
 kanjivg.zip
-kanjivg_extracted/
-packages/
+/kanjivg_extracted/
+/packages/
 flutter_app/assets/packages/*
 !flutter_app/assets/packages/.gitkeep
 *_logs/
