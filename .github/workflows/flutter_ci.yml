@@ -92,10 +92,10 @@ jobs:
 
       - name: Download engine signature
         uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
           name: malphas_core-sig-ubuntu-latest
           path: flutter_app/native-sig/
-        if-no-files-found: ignore
 
       - name: Place engine signature
         shell: bash
@@ -118,17 +118,17 @@ jobs:
 
       - name: Download signed bouncing_demo system
         uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
           name: bouncing_demo-mxc-ubuntu-latest
           path: flutter_app/mxc/
-        if-no-files-found: ignore
 
       - name: Download bouncing_demo system library (unsigned fallback)
         uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
           name: bouncing_demo-ubuntu-latest
           path: flutter_app/native-sys/
-        if-no-files-found: ignore
 
       - name: Place bouncing_demo system where tests expect it
         shell: bash

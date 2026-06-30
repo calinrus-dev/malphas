@@ -29,10 +29,10 @@ jobs:
 
       - name: Download Windows engine signature
         uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
           name: malphas_core-sig-windows-latest
           path: native-sig/
-        if-no-files-found: ignore
 
       - name: Place native library and signature where MalphasBindings expects them
         shell: powershell
@@ -65,10 +65,10 @@ jobs:
 
       - name: Download signed bouncing_demo system
         uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
           name: bouncing_demo-mxc-windows-latest
           path: mxc/
-        if-no-files-found: ignore
 
       - name: Place bouncing_demo system for the example
         shell: powershell
