@@ -1,8 +1,12 @@
-# Malphas v2.7.0 — Zero-Copy, Cache-Aligned, Native Memory Router
+# Malphas v2.7.0
+## Zero-Copy, Cache-Aligned, Native Memory Router
 
-**Malphas is not a game engine. It is a memory router.**
+> **Malphas is not a game engine. It is not a framework. It is not a fantasy console.**
+> **It is a sovereign execution environment for data-oriented programs that refuse to die inside a managed runtime.**
 
-A high-performance Data-Oriented Design (DOD) runtime that bypasses managed-language bottlenecks by offloading all logic, state, and render production to native, memory-mapped code. Built for longevity in an ecosystem where garbage collectors, JIT restrictions, and framework churn erode performance sovereignty.
+Malphas is a high-performance Data-Oriented Design (DOD) engine that offloads all logic, state, and render production to native, memory-mapped code. It sits somewhere between a **fantasy console** — with its rigid creative constraints — and a **bare-metal execution environment** — with its demand for total memory sovereignty.
+
+The difference is that Malphas does not pretend. There is no toy runtime, no cozy sandbox, no garbage collector holding your hand while it pauses your frame. There is only flat memory, cache lines, and native systems that execute with deterministic performance.
 
 The core is Rust. The display terminal is Flutter. Between them stands a minimal C-ABI bridge that does not serialize, does not copy, and does not ask permission from a garbage collector.
 
@@ -21,6 +25,8 @@ Malphas treats memory as the primary interface. Data is not deserialized into ob
 
 This architecture is designed to survive increasingly restricted mobile environments. While managed runtimes trade performance for convenience, Malphas keeps the critical path in native memory that the host OS cannot reinterpret, relocate, or collect.
 
+If you are still thinking in `object.update()`, you are in the wrong execution environment.
+
 ---
 
 ## 2. The Architecture: The Triad
@@ -29,32 +35,31 @@ Malphas is composed of three inseparable layers. Each layer has exactly one resp
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                         MALPHAS v2.7.0                                  │
+│                    MALPHAS v2.7.0 — SOVEREIGN RUNTIME                   │
 │                                                                         │
-│   ┌─────────────┐     ┌─────────────┐     ┌─────────────────────────┐  │
-│   │     MSP     │────▶│  Rust Core  │────▶│          MXC            │  │
-│   │  (on disk)  │mmap │(Memory Router)│   │  (native system libs)   │  │
-│   └─────────────┘     └──────┬──────┘     └─────────────────────────┘  │
-│                              │                                          │
-│                              ▼                                          │
-│                    ┌─────────────────────┐                              │
-│                    │   Silver Platter    │                              │
-│                    │ (lookup table of    │                              │
-│                    │  payload pointers)  │                              │
-│                    └─────────────────────┘                              │
-│                              │                                          │
-│                              ▼                                          │
-│                    ┌─────────────────────┐                              │
-│                    │  MalphasDouble      │                              │
-│                    │  BufferBridge       │                              │
-│                    │  (FFI shared mem)   │                              │
-│                    └─────────────────────┘                              │
-│                              │                                          │
-│                              ▼                                          │
-│                    ┌─────────────────────┐                              │
-│                    │   Flutter Canvas    │                              │
-│                    │   (Blind Painter)   │                              │
-│                    └─────────────────────┘                              │
+│   ┌─────────────┐     ┌─────────────────┐     ┌─────────────────────┐  │
+│   │     MSP     │────▶│   Memory Router │────▶│        MXC          │ │
+│   │  (on disk)  │ mmap│   (Rust Core)   │     │  (native systems)   │ │
+│   └─────────────┘     └────────┬────────┘     └─────────────────────┘  │
+│                                │                                        │
+│                                ▼                                        │
+│                      ┌─────────────────────┐                            │
+│                      │   Silver Platter    │                            │
+│                      │  (flat pointer table)│                           │
+│                      └─────────────────────┘                            │
+│                                │                                        │
+│                                ▼                                        │
+│                      ┌─────────────────────┐                            │
+│                      │  MalphasDouble      │                            │
+│                      │  BufferBridge       │                            │
+│                      │  (FFI shared memory)│                            │
+│                      └─────────────────────┘                            │
+│                                │                                        │
+│                                ▼                                        │
+│                      ┌─────────────────────┐                            │
+│                      │   Flutter Canvas    │                            │
+│                      │    Blind Painter    │                            │
+│                      └─────────────────────┘                            │
 │                                                                         │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
@@ -63,20 +68,18 @@ Malphas is composed of three inseparable layers. Each layer has exactly one resp
 
 The MSP is the immutable data unit of Malphas. It is a rigid, 64-byte-aligned binary file that is **byte-identical on disk and in memory**.
 
-Layout:
-
 ```
 MSP File
-├── MspHeader                 64 bytes
-├── Entity Table              entity_count × 64 bytes
-│   ├── MspEntityDescriptor[0]
-│   ├── MspEntityDescriptor[1]
-│   └── ...
-└── Payload Section           aligned to 64 bytes
-    ├── Payload[0]
-    ├── Payload[1]
-    └── ...
-    └── Error Payload Reserve 64 KB (safe fallback for invalid IDs)
+├─ MspHeader                        64 bytes
+├─ Entity Table                     entity_count × 64 bytes
+│  ├─ MspEntityDescriptor[0]
+│  ├─ MspEntityDescriptor[1]
+│  └─ ...
+└─ Payload Section                  aligned to 64 bytes
+   ├─ Payload[0]
+   ├─ Payload[1]
+   ├─ ...
+   └─ Error Payload Reserve         64 KB (fallback for invalid IDs)
 ```
 
 ```rust
@@ -153,13 +156,14 @@ When an MSP is loaded:
 
 ```
 Silver Platter
-┌─────────────────────────────────────────────┐
-│ lookup_table[0] ──────▶ Payload[0]          │
-│ lookup_table[1] ──────▶ Payload[1]          │
-│ lookup_table[2] ──────▶ Payload[2]          │
-│ ...                                         │
-│ lookup_table[N] ──────▶ Error Payload       │
-└─────────────────────────────────────────────┘
+┌────────────────────────────────────────────────┐
+│ lookup_table[0]  ──────────────────▶ Payload[0] │
+│ lookup_table[1]  ──────────────────▶ Payload[1] │
+│ lookup_table[2]  ──────────────────▶ Payload[2] │
+│ ...                                            │
+│ lookup_table[N]  ──────────────────▶ Error     │
+│                                      Payload   │
+└────────────────────────────────────────────────┘
 ```
 
 A system performs a lookup with a single instruction:
@@ -240,7 +244,7 @@ Flutter VSync
 
 No `List<DartRenderCommand>`. No `jsonDecode`. No `copyWith`. No per-frame allocation. There is a pointer, an atomic count, and a `Canvas.drawRect`.
 
-This is the **Blind Painter** pattern: the UI renders what it is told to render, as fast as the memory bus allows, without understanding what it means.
+This is the **Blind Painter** pattern: the UI renders what it is told to render, as fast as the memory bus allows, without understanding what it means. The Dart side does not own the data; it borrows a view into native memory for the duration of one paint.
 
 ---
 
@@ -285,6 +289,7 @@ Managed runtimes are not getting faster relative to hardware constraints. They a
 - **Framework decoupling.** An MXC depends only on the C ABI. If Flutter disappears, the systems survive.
 - **Deterministic cache behavior.** Every hot-path structure is sized to a cache line. No hidden allocations, no surprise pauses.
 - **Signature verification.** Engine binaries and MSP files can be signed and verified before load, making the supply chain auditable.
+- **No JIT dependency.** Systems are native machine code. They are not subject to interpretation, warmup, or sandboxing beyond the OS loader.
 
 The UI is replaceable. The data format is stable. The systems are sovereign.
 
