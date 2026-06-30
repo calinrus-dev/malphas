@@ -1,8 +1,8 @@
-# Malphas Agent Instructions -- v2.7.5
+# Malphas Agent Instructions -- v2.8.0
 
 These rules define the design language, build/test workflow, FFI safety constraints, and agent conventions of the Malphas project. All agents modifying code, documentation, or system mechanics must follow them.
 
-Version v2.7.5 -- Fortress Hardening. The Data-Oriented Memory Router from v2.7.0 is now hardened: Rust owns the FFI bridge and command buffers, all native binaries require Ed25519 sidecar signatures, the input queue is lockless, and system panics are isolated with `catch_unwind`.
+Version v2.8.0 -- Fortress CI. The Data-Oriented Memory Router from v2.7.0 is hardened: Rust owns the FFI bridge and command buffers, all native binaries require Ed25519 sidecar signatures, the input queue is lockless, and system panics are isolated with `catch_unwind`. v2.8.0 adds a fully green cross-platform CI/CD pipeline.
 
 ## 1. Terminal Aesthetic
 

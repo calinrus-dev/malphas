@@ -1,7 +1,8 @@
-# Malphas v2.7.5 — Fortress
+# Malphas v2.8.0 — Fortress CI
 
 [![Rust CI](https://github.com/calinrus-dev/malphas/actions/workflows/rust_ci.yml/badge.svg)](https://github.com/calinrus-dev/malphas/actions/workflows/rust_ci.yml)
 [![Flutter CI](https://github.com/calinrus-dev/malphas/actions/workflows/flutter_ci.yml/badge.svg)](https://github.com/calinrus-dev/malphas/actions/workflows/flutter_ci.yml)
+[![Flutter Lint](https://github.com/calinrus-dev/malphas/actions/workflows/flutter_lint.yml/badge.svg)](https://github.com/calinrus-dev/malphas/actions/workflows/flutter_lint.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 > **Malphas is not a game engine, a framework, or a fantasy console.**
@@ -9,7 +10,15 @@
 
 Malphas is a high-performance **Data-Oriented Design (DOD)** runtime. All logic, state, and render production live in native, memory-mapped code. Flutter is treated as a passive display terminal; the Rust core owns every byte that matters.
 
-**v2.7.5 — Fortress** hardens the v2.7.0 Memory Router with:
+**v2.8.0 — Fortress CI** polishes the v2.7.5 hardening and makes the entire delivery pipeline green:
+
+- Cross-platform CI/CD parity: Rust, Flutter, Android, and Windows release builds are all verified on every push.
+- Reusable workflows inherit secrets correctly, and artifact downloads are robust across Linux, macOS, and Windows.
+- Android NDK r26c cross-compilation uses the correct versioned LLVM toolchains.
+- Flaky tests fixed: input-queue tests are serialized and security tests use absolute paths to avoid `chdir` races.
+- Asset packaging fixed: `flutter_app/assets/packages/.gitkeep` guarantees the directory exists on a clean checkout.
+
+The v2.7.5 runtime hardening remains in place:
 
 - Rust-owned FFI bridge and command buffers.
 - Ed25519 sidecar signatures for the engine, `.msp` packs, and `.mxc` systems.
@@ -56,7 +65,7 @@ If you are still thinking in `object.update()`, you are in the wrong execution e
 
 ```text
 ┌─────────────────────────────────────────────────────────────────────┐
-│                  MALPHAS v2.7.5 — SOVEREIGN RUNTIME                 │
+│                  MALPHAS v2.8.0 — SOVEREIGN RUNTIME                 │
 │                                                                     │
 │   ┌────────────┐   ┌───────────────┐   ┌─────────────────────────┐ │
 │   │    MSP     │──▶│ Memory Router │──▶│          MXC            │ │
@@ -262,7 +271,7 @@ No `List<DartRenderCommand>`. No `jsonDecode`. No per-frame allocation. There is
 
 ## Security Model
 
-v2.7.5 makes the supply chain auditable and the runtime fail-safe.
+v2.8.0 makes the supply chain auditable and the runtime fail-safe.
 
 | Asset | Protection |
 |-------|------------|
@@ -277,6 +286,23 @@ v2.7.5 makes the supply chain auditable and the runtime fail-safe.
 The default trust anchor in the repository is a **test-only keypair**. Production releases must call `setTrustAnchor` with their own Ed25519 public key.
 
 For local development you can set `MALPHAS_INSECURE_SKIP_VERIFY=1`. **Never use this in production.**
+
+---
+
+## Continuous Integration
+
+Every push to `main` is verified by:
+
+| Workflow | What it checks |
+|---|---|
+| **Rust CI** | `cargo fmt`, `cargo clippy --all-targets`, `cargo test --release --locked`, security tests, and native artifact signing. |
+| **Flutter CI** | Flutter analyze, unit/integration tests against the downloaded native motor, and manifest compilation. |
+| **Flutter Lint** | Dart format, `flutter analyze`, and headless Flutter tests. |
+| **Flutter Windows Release Build** | Full Windows release build and artifact packaging. |
+| **Android Build** | Cross-compilation for `arm64-v8a`, `armeabi-v7a`, and `x86_64` plus `.so` signing. |
+| **Native Core Release Build** | Production-ready native libraries for all desktop platforms. |
+
+All workflows now pass on Ubuntu, macOS, and Windows.
 
 ---
 

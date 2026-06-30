@@ -15,6 +15,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+## [2.8.0] - 2026-06-30
+
+### Added
+- New CI badge for Flutter Lint in `README.md`.
+- `flutter_app/assets/packages/.gitkeep` so the asset directory survives a clean checkout.
+- Cross-platform CI verification section in `README.md`.
+
+### Changed
+- Bumped workspace and Flutter app version from `2.7.5` to `2.8.0`.
+- Reusable workflows (`rust_ci.yml`, `flutter_ci.yml`, `flutter_lint.yml`, `flutter_windows_build.yml`) now inherit secrets with `secrets: inherit`.
+- `flutter_ci.yml` and `flutter_lint.yml` download artifacts into `flutter_app/native/` and `flutter_app/native-sig/` so the `flutter_app` working directory resolves them correctly.
+- `flutter_ci.yml` downloads the signed `bouncing_demo-mxc` artifact and falls back to the unsigned system library when signatures are unavailable.
+- `flutter_windows_build.yml` downloads the signed `bouncing_demo-mxc-windows-latest` artifact instead of re-signing locally.
+
+### Fixed
+- `rust_ci.yml` step *Sign bouncing_demo system as .mxc* now extracts and validates `MALPHAS_SIGNING_KEY` before use.
+- `android_build.yml` signing step now passes the private key to `malphas-cli sign`.
+- `build.sh` Android cross-compilation now sets `CC_*`, `CXX_*`, `AR_*`, and `CARGO_TARGET_*_LINKER` for NDK r26c versioned LLVM triples.
+- Fixed flaky `input::tests::test_capacity_drops_oldest_event` by serializing input-queue tests around the shared static queue.
+- Fixed macOS security test `reject_unsigned_system` by using absolute paths instead of `std::env::set_current_dir`, removing a race between parallel tests.
+- Fixed `.gitignore` so `packages/` only ignores the repository-root directory and `flutter_app/assets/packages/.gitkeep` is tracked.
+
 ## [2.7.5] - 2026-06-30
 
 ### Added

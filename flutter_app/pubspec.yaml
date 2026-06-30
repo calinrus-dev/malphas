@@ -1,7 +1,7 @@
 name: malphas_app
-description: "Malphas v2.7.5 — Fortress Hardening"
+description: "Malphas v2.8.0 — Fortress CI"
 publish_to: 'none'
-version: 2.7.5+1
+version: 2.8.0+1
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
