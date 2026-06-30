@@ -1,0 +1,23 @@
+﻿2026-06-30T17:28:30.9642703Z ##[group]Run NDK_URL="https://dl.google.com/android/repository/android-ndk-r26c-linux.zip"
+2026-06-30T17:28:30.9643413Z [36;1mNDK_URL="https://dl.google.com/android/repository/android-ndk-r26c-linux.zip"[0m
+2026-06-30T17:28:30.9643919Z [36;1mcurl --fail -L -o "$RUNNER_TEMP/ndk.zip" "$NDK_URL"[0m
+2026-06-30T17:28:30.9644332Z [36;1munzip -q "$RUNNER_TEMP/ndk.zip" -d "$RUNNER_TEMP/ndk"[0m
+2026-06-30T17:28:30.9644719Z [36;1mNDK_HOME="$RUNNER_TEMP/ndk/android-ndk-r26c"[0m
+2026-06-30T17:28:30.9645084Z [36;1mecho "ANDROID_NDK_HOME=$NDK_HOME" >> "$GITHUB_ENV"[0m
+2026-06-30T17:28:30.9645452Z [36;1mecho "ANDROID_NDK_ROOT=$NDK_HOME" >> "$GITHUB_ENV"[0m
+2026-06-30T17:28:30.9645901Z [36;1mecho "$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin" >> "$GITHUB_PATH"[0m
+2026-06-30T17:28:30.9677119Z shell: /usr/bin/bash -e {0}
+2026-06-30T17:28:30.9677376Z env:
+2026-06-30T17:28:30.9677576Z   CARGO_HOME: /home/runner/.cargo
+2026-06-30T17:28:30.9677847Z   CARGO_INCREMENTAL: 0
+2026-06-30T17:28:30.9678078Z   CARGO_TERM_COLOR: always
+2026-06-30T17:28:30.9678469Z   CACHE_ON_FAILURE: false
+2026-06-30T17:28:30.9678867Z ##[endgroup]
+2026-06-30T17:28:30.9827338Z   % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+2026-06-30T17:28:30.9828226Z                                  Dload  Upload   Total   Spent    Left  Speed
+2026-06-30T17:28:30.9828872Z 
+2026-06-30T17:28:31.1034950Z   0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+2026-06-30T17:28:32.1081419Z   0  637M    0  146k    0     0  1213k      0  0:08:58 --:--:--  0:08:58 1211k
+2026-06-30T17:28:33.1153720Z  42  637M   42  272M    0     0   242M      0  0:00:02  0:00:01  0:00:01  241M
+2026-06-30T17:28:33.2874309Z  91  637M   91  585M    0     0   274M      0  0:00:02  0:00:02 --:--:--  274M
+2026-06-30T17:28:33.2875113Z 100  637M  100  637M    0     0   276M      0  0:00:02  0:00:02 --:--:--  276M

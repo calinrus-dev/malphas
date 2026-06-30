@@ -1,0 +1,786 @@
+﻿2026-06-30T17:28:13.7142694Z Current runner version: '2.335.1'
+2026-06-30T17:28:13.7166850Z ##[group]Runner Image Provisioner
+2026-06-30T17:28:13.7167997Z Hosted Compute Agent
+2026-06-30T17:28:13.7168820Z Version: 20260611.554
+2026-06-30T17:28:13.7169525Z Commit: 5e0782fdc9014723d3be820dd114dd31555c2bd1
+2026-06-30T17:28:13.7170320Z Build Date: 2026-06-11T21:40:46Z
+2026-06-30T17:28:13.7171008Z Worker ID: {d63d8f67-316c-43b7-b3d6-0d2e0b5f9e60}
+2026-06-30T17:28:13.7171773Z Azure Region: westus
+2026-06-30T17:28:13.7172391Z ##[endgroup]
+2026-06-30T17:28:13.7173940Z ##[group]Operating System
+2026-06-30T17:28:13.7174644Z Ubuntu
+2026-06-30T17:28:13.7175170Z 24.04.4
+2026-06-30T17:28:13.7175726Z LTS
+2026-06-30T17:28:13.7176247Z ##[endgroup]
+2026-06-30T17:28:13.7176788Z ##[group]Runner Image
+2026-06-30T17:28:13.7177577Z Image: ubuntu-24.04
+2026-06-30T17:28:13.7178151Z Version: 20260622.220.1
+2026-06-30T17:28:13.7180417Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260622.220/images/ubuntu/Ubuntu2404-Readme.md
+2026-06-30T17:28:13.7182119Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260622.220
+2026-06-30T17:28:13.7183121Z ##[endgroup]
+2026-06-30T17:28:13.7184276Z ##[group]GITHUB_TOKEN Permissions
+2026-06-30T17:28:13.7186465Z Contents: read
+2026-06-30T17:28:13.7187104Z Metadata: read
+2026-06-30T17:28:13.7187842Z Packages: read
+2026-06-30T17:28:13.7188736Z ##[endgroup]
+2026-06-30T17:28:13.7190846Z Secret source: Actions
+2026-06-30T17:28:13.7191955Z Prepare workflow directory
+2026-06-30T17:28:13.7522427Z Prepare all required actions
+2026-06-30T17:28:13.7563517Z Getting action download info
+2026-06-30T17:28:14.1388202Z Download action repository 'actions/checkout@v4' (SHA:34e114876b0b11c390a56381ad16ebd13914f8d5)
+2026-06-30T17:28:14.2210309Z Download action repository 'dtolnay/rust-toolchain@stable' (SHA:4be7066ada62dd38de10e7b70166bc74ed198c30)
+2026-06-30T17:28:14.4575398Z Download action repository 'Swatinem/rust-cache@v2' (SHA:e18b497796c12c097a38f9edb9d0641fb99eee32)
+2026-06-30T17:28:15.0344810Z Download action repository 'actions/upload-artifact@v4' (SHA:ea165f8d65b6e75b540449e92b4886f43607fa02)
+2026-06-30T17:28:15.2893599Z Complete job name: Build Android native libraries
+2026-06-30T17:28:15.3694442Z Node 20 is being deprecated. This workflow is running with Node 24 by default. If you need to temporarily use Node 20, you can set the ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true environment variable. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+2026-06-30T17:28:15.3704027Z ##[group]Run actions/checkout@v4
+2026-06-30T17:28:15.3705167Z with:
+2026-06-30T17:28:15.3705755Z   repository: calinrus-dev/malphas
+2026-06-30T17:28:15.3710744Z   token: ***
+2026-06-30T17:28:15.3711234Z   ssh-strict: true
+2026-06-30T17:28:15.3711726Z   ssh-user: git
+2026-06-30T17:28:15.3712222Z   persist-credentials: true
+2026-06-30T17:28:15.3712774Z   clean: true
+2026-06-30T17:28:15.3713264Z   sparse-checkout-cone-mode: true
+2026-06-30T17:28:15.3713862Z   fetch-depth: 1
+2026-06-30T17:28:15.3714341Z   fetch-tags: false
+2026-06-30T17:28:15.3714849Z   show-progress: true
+2026-06-30T17:28:15.3715361Z   lfs: false
+2026-06-30T17:28:15.3715865Z   submodules: false
+2026-06-30T17:28:15.3716368Z   set-safe-directory: true
+2026-06-30T17:28:15.3717208Z ##[endgroup]
+2026-06-30T17:28:15.4704558Z Syncing repository: calinrus-dev/malphas
+2026-06-30T17:28:15.4706501Z ##[group]Getting Git version info
+2026-06-30T17:28:15.4707329Z Working directory is '/home/runner/work/malphas/malphas'
+2026-06-30T17:28:15.4708883Z [command]/usr/bin/git version
+2026-06-30T17:28:15.4789821Z git version 2.54.0
+2026-06-30T17:28:15.4843473Z ##[endgroup]
+2026-06-30T17:28:15.4857522Z Temporarily overriding HOME='/home/runner/work/_temp/d19a15e4-1dd7-4e7e-a209-6203b9929a0e' before making global git config changes
+2026-06-30T17:28:15.4859599Z Adding repository directory to the temporary git global config as a safe directory
+2026-06-30T17:28:15.4863530Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/malphas/malphas
+2026-06-30T17:28:15.4915430Z Deleting the contents of '/home/runner/work/malphas/malphas'
+2026-06-30T17:28:15.4919751Z ##[group]Initializing the repository
+2026-06-30T17:28:15.4924984Z [command]/usr/bin/git init /home/runner/work/malphas/malphas
+2026-06-30T17:28:15.5061680Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-06-30T17:28:15.5063176Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-06-30T17:28:15.5064536Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-06-30T17:28:15.5065580Z hint: call:
+2026-06-30T17:28:15.5066523Z hint:
+2026-06-30T17:28:15.5067911Z hint: 	git config --global init.defaultBranch <name>
+2026-06-30T17:28:15.5069636Z hint:
+2026-06-30T17:28:15.5071055Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-06-30T17:28:15.5073224Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-06-30T17:28:15.5075064Z hint:
+2026-06-30T17:28:15.5076102Z hint: 	git branch -m <name>
+2026-06-30T17:28:15.5077306Z hint:
+2026-06-30T17:28:15.5078986Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-06-30T17:28:15.5081264Z Initialized empty Git repository in /home/runner/work/malphas/malphas/.git/
+2026-06-30T17:28:15.5084489Z [command]/usr/bin/git remote add origin https://github.com/calinrus-dev/malphas
+2026-06-30T17:28:15.5129615Z ##[endgroup]
+2026-06-30T17:28:15.5131191Z ##[group]Disabling automatic garbage collection
+2026-06-30T17:28:15.5133486Z [command]/usr/bin/git config --local gc.auto 0
+2026-06-30T17:28:15.5164053Z ##[endgroup]
+2026-06-30T17:28:15.5166150Z ##[group]Setting up auth
+2026-06-30T17:28:15.5171280Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-06-30T17:28:15.5207728Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-06-30T17:28:15.5579738Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-06-30T17:28:15.5612607Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-06-30T17:28:15.5825863Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-06-30T17:28:15.5855973Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-06-30T17:28:15.6072209Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-06-30T17:28:15.6105101Z ##[endgroup]
+2026-06-30T17:28:15.6106002Z ##[group]Fetching the repository
+2026-06-30T17:28:15.6114075Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +988253fdbe213b1362efda914f58719502b37354:refs/remotes/origin/main
+2026-06-30T17:28:16.2318255Z From https://github.com/calinrus-dev/malphas
+2026-06-30T17:28:16.2320035Z  * [new ref]         988253fdbe213b1362efda914f58719502b37354 -> origin/main
+2026-06-30T17:28:16.2361126Z ##[endgroup]
+2026-06-30T17:28:16.2362328Z ##[group]Determining the checkout info
+2026-06-30T17:28:16.2363519Z ##[endgroup]
+2026-06-30T17:28:16.2372069Z [command]/usr/bin/git sparse-checkout disable
+2026-06-30T17:28:16.2427533Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-06-30T17:28:16.2460235Z ##[group]Checking out the ref
+2026-06-30T17:28:16.2568219Z [command]/usr/bin/git checkout --progress --force -B main refs/remotes/origin/main
+2026-06-30T17:28:16.2968263Z Switched to a new branch 'main'
+2026-06-30T17:28:16.2970281Z branch 'main' set up to track 'origin/main'.
+2026-06-30T17:28:16.2977159Z ##[endgroup]
+2026-06-30T17:28:16.3028051Z [command]/usr/bin/git log -1 --format=%H
+2026-06-30T17:28:16.3051913Z 988253fdbe213b1362efda914f58719502b37354
+2026-06-30T17:28:16.3431554Z ##[group]Run dtolnay/rust-toolchain@stable
+2026-06-30T17:28:16.3432210Z with:
+2026-06-30T17:28:16.3432865Z   targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+2026-06-30T17:28:16.3433644Z   toolchain: stable
+2026-06-30T17:28:16.3434084Z ##[endgroup]
+2026-06-30T17:28:16.3564404Z ##[group]Run : parse toolchain version
+2026-06-30T17:28:16.3565093Z [36;1m: parse toolchain version[0m
+2026-06-30T17:28:16.3565663Z [36;1mif [[ -z $toolchain ]]; then[0m
+2026-06-30T17:28:16.3566628Z [36;1m  # GitHub does not enforce `required: true` inputs itself. https://github.com/actions/runner/issues/1070[0m
+2026-06-30T17:28:16.3567648Z [36;1m  echo "'toolchain' is a required input" >&2[0m
+2026-06-30T17:28:16.3568245Z [36;1m  exit 1[0m
+2026-06-30T17:28:16.3569101Z [36;1melif [[ $toolchain =~ ^stable' '[0-9]+' '(year|month|week|day)s?' 'ago$ ]]; then[0m
+2026-06-30T17:28:16.3569894Z [36;1m  if [[ Linux == macOS ]]; then[0m
+2026-06-30T17:28:16.3570913Z [36;1m    echo "toolchain=1.$((($(date -v-$(sed 's/stable \([0-9]*\) \(.\).*/\1\2/' <<< $toolchain) +%s)/60/60/24-16569)/7/6))" >> $GITHUB_OUTPUT[0m
+2026-06-30T17:28:16.3571843Z [36;1m  else[0m
+2026-06-30T17:28:16.3572605Z [36;1m    echo "toolchain=1.$((($(date --date "${toolchain#stable }" +%s)/60/60/24-16569)/7/6))" >> $GITHUB_OUTPUT[0m
+2026-06-30T17:28:16.3573468Z [36;1m  fi[0m
+2026-06-30T17:28:16.3574055Z [36;1melif [[ $toolchain =~ ^stable' 'minus' '[0-9]+' 'releases?$ ]]; then[0m
+2026-06-30T17:28:16.3575090Z [36;1m  echo "toolchain=1.$((($(date +%s)/60/60/24-16569)/7/6-${toolchain//[^0-9]/}))" >> $GITHUB_OUTPUT[0m
+2026-06-30T17:28:16.3575952Z [36;1melif [[ $toolchain =~ ^1\.[0-9]+$ ]]; then[0m
+2026-06-30T17:28:16.3576917Z [36;1m  echo "toolchain=1.$((i=${toolchain#1.}, c=($(date +%s)/60/60/24-16569)/7/6, i+9*i*(10*i<=c)+90*i*(100*i<=c)))" >> $GITHUB_OUTPUT[0m
+2026-06-30T17:28:16.3577823Z [36;1melse[0m
+2026-06-30T17:28:16.3578319Z [36;1m  echo "toolchain=$toolchain" >> $GITHUB_OUTPUT[0m
+2026-06-30T17:28:16.3579124Z [36;1mfi[0m
+2026-06-30T17:28:16.3775061Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-30T17:28:16.3775759Z env:
+2026-06-30T17:28:16.3776158Z   toolchain: stable
+2026-06-30T17:28:16.3776601Z ##[endgroup]
+2026-06-30T17:28:16.3931651Z ##[group]Run : construct rustup command line
+2026-06-30T17:28:16.3932302Z [36;1m: construct rustup command line[0m
+2026-06-30T17:28:16.3933153Z [36;1mecho "targets=$(for t in ${targets//,/ }; do echo -n ' --target' $t; done)" >> $GITHUB_OUTPUT[0m
+2026-06-30T17:28:16.3934320Z [36;1mecho "components=$(for c in ${components//,/ }; do echo -n ' --component' $c; done)" >> $GITHUB_OUTPUT[0m
+2026-06-30T17:28:16.3935246Z [36;1mecho "downgrade=" >> $GITHUB_OUTPUT[0m
+2026-06-30T17:28:16.3966067Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-30T17:28:16.3966738Z env:
+2026-06-30T17:28:16.3967375Z   targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+2026-06-30T17:28:16.3968180Z   components: 
+2026-06-30T17:28:16.3968910Z ##[endgroup]
+2026-06-30T17:28:16.4061612Z ##[group]Run : set $CARGO_HOME
+2026-06-30T17:28:16.4062144Z [36;1m: set $CARGO_HOME[0m
+2026-06-30T17:28:16.4062774Z [36;1mecho CARGO_HOME=${CARGO_HOME:-"$HOME/.cargo"} >> $GITHUB_ENV[0m
+2026-06-30T17:28:16.4092229Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-30T17:28:16.4092878Z ##[endgroup]
+2026-06-30T17:28:16.4187160Z ##[group]Run : install rustup if needed
+2026-06-30T17:28:16.4187751Z [36;1m: install rustup if needed[0m
+2026-06-30T17:28:16.4188642Z [36;1mif ! command -v rustup &>/dev/null; then[0m
+2026-06-30T17:28:16.4189985Z [36;1m  curl --proto '=https' --tlsv1.2 --retry 10 --retry-connrefused --location --silent --show-error --fail https://sh.rustup.rs | sh -s -- --default-toolchain none -y[0m
+2026-06-30T17:28:16.4191287Z [36;1m  echo "$CARGO_HOME/bin" >> $GITHUB_PATH[0m
+2026-06-30T17:28:16.4191858Z [36;1mfi[0m
+2026-06-30T17:28:16.4221432Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-30T17:28:16.4222315Z env:
+2026-06-30T17:28:16.4222801Z   CARGO_HOME: /home/runner/.cargo
+2026-06-30T17:28:16.4223316Z ##[endgroup]
+2026-06-30T17:28:16.4317193Z ##[group]Run rustup toolchain install stable --target aarch64-linux-android --target armv7-linux-androideabi --target x86_64-linux-android --profile minimal --no-self-update
+2026-06-30T17:28:16.4319693Z [36;1mrustup toolchain install stable --target aarch64-linux-android --target armv7-linux-androideabi --target x86_64-linux-android --profile minimal --no-self-update[0m
+2026-06-30T17:28:16.4349403Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-30T17:28:16.4350053Z env:
+2026-06-30T17:28:16.4350473Z   CARGO_HOME: /home/runner/.cargo
+2026-06-30T17:28:16.4351002Z   RUSTUP_PERMIT_COPY_RENAME: 1
+2026-06-30T17:28:16.4351491Z ##[endgroup]
+2026-06-30T17:28:16.6468534Z info: syncing channel updates for stable-x86_64-unknown-linux-gnu
+2026-06-30T17:28:16.7484304Z info: latest update on 2026-06-30 for version 1.96.1 (31fca3adb 2026-06-26)
+2026-06-30T17:28:16.7621015Z info: removing previous version of component clippy
+2026-06-30T17:28:16.7643617Z info: removing previous version of component rustfmt
+2026-06-30T17:28:16.7657569Z info: removing previous version of component cargo
+2026-06-30T17:28:16.7716993Z info: removing previous version of component rust-std
+2026-06-30T17:28:16.7765657Z info: removing previous version of component rustc
+2026-06-30T17:28:16.7823072Z info: downloading 8 components
+2026-06-30T17:28:30.0693200Z 
+2026-06-30T17:28:30.0774891Z   stable-x86_64-unknown-linux-gnu updated - rustc 1.96.1 (31fca3adb 2026-06-26) (from rustc 1.96.0 (ac68faa20 2026-05-25))
+2026-06-30T17:28:30.0775665Z 
+2026-06-30T17:28:30.0861659Z ##[group]Run rustup default stable
+2026-06-30T17:28:30.0862022Z [36;1mrustup default stable[0m
+2026-06-30T17:28:30.0895287Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-30T17:28:30.0895687Z env:
+2026-06-30T17:28:30.0895957Z   CARGO_HOME: /home/runner/.cargo
+2026-06-30T17:28:30.0896272Z ##[endgroup]
+2026-06-30T17:28:30.1000398Z info: using existing install for stable-x86_64-unknown-linux-gnu
+2026-06-30T17:28:30.1007624Z info: default toolchain set to stable-x86_64-unknown-linux-gnu
+2026-06-30T17:28:30.1008204Z 
+2026-06-30T17:28:30.1073512Z   stable-x86_64-unknown-linux-gnu unchanged - rustc 1.96.1 (31fca3adb 2026-06-26)
+2026-06-30T17:28:30.1074344Z 
+2026-06-30T17:28:30.1111874Z ##[group]Run : create cachekey
+2026-06-30T17:28:30.1112241Z [36;1m: create cachekey[0m
+2026-06-30T17:28:30.1112800Z [36;1mDATE=$(rustc +stable --version --verbose | sed -ne 's/^commit-date: \(20[0-9][0-9]\)-\([01][0-9]\)-\([0-3][0-9]\)$/\1\2\3/p')[0m
+2026-06-30T17:28:30.1113504Z [36;1mHASH=$(rustc +stable --version --verbose | sed -ne 's/^commit-hash: //p')[0m
+2026-06-30T17:28:30.1114057Z [36;1mecho "cachekey=$(echo $DATE$HASH | head -c12)" >> $GITHUB_OUTPUT[0m
+2026-06-30T17:28:30.1145417Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-30T17:28:30.1145826Z env:
+2026-06-30T17:28:30.1146090Z   CARGO_HOME: /home/runner/.cargo
+2026-06-30T17:28:30.1146402Z ##[endgroup]
+2026-06-30T17:28:30.1516962Z ##[group]Run : disable incremental compilation
+2026-06-30T17:28:30.1517387Z [36;1m: disable incremental compilation[0m
+2026-06-30T17:28:30.1517766Z [36;1mif [ -z "${CARGO_INCREMENTAL+set}" ]; then[0m
+2026-06-30T17:28:30.1518171Z [36;1m  echo CARGO_INCREMENTAL=0 >> $GITHUB_ENV[0m
+2026-06-30T17:28:30.1518882Z [36;1mfi[0m
+2026-06-30T17:28:30.1551965Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-30T17:28:30.1552414Z env:
+2026-06-30T17:28:30.1552675Z   CARGO_HOME: /home/runner/.cargo
+2026-06-30T17:28:30.1552985Z ##[endgroup]
+2026-06-30T17:28:30.1632114Z ##[group]Run : enable colors in Cargo output
+2026-06-30T17:28:30.1632500Z [36;1m: enable colors in Cargo output[0m
+2026-06-30T17:28:30.1632902Z [36;1mif [ -z "${CARGO_TERM_COLOR+set}" ]; then[0m
+2026-06-30T17:28:30.1633290Z [36;1m  echo CARGO_TERM_COLOR=always >> $GITHUB_ENV[0m
+2026-06-30T17:28:30.1633841Z [36;1mfi[0m
+2026-06-30T17:28:30.1666870Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-30T17:28:30.1667279Z env:
+2026-06-30T17:28:30.1667526Z   CARGO_HOME: /home/runner/.cargo
+2026-06-30T17:28:30.1667832Z   CARGO_INCREMENTAL: 0
+2026-06-30T17:28:30.1668085Z ##[endgroup]
+2026-06-30T17:28:30.1745969Z ##[group]Run : enable Cargo sparse registry
+2026-06-30T17:28:30.1746349Z [36;1m: enable Cargo sparse registry[0m
+2026-06-30T17:28:30.1746763Z [36;1m# implemented in 1.66, stabilized in 1.68, made default in 1.70[0m
+2026-06-30T17:28:30.1747544Z [36;1mif [ -z "${CARGO_REGISTRIES_CRATES_IO_PROTOCOL+set}" -o -f "/home/runner/work/_temp"/.implicit_cargo_registries_crates_io_protocol ]; then[0m
+2026-06-30T17:28:30.1748565Z [36;1m  if rustc +stable --version --verbose | grep -q '^release: 1\.6[89]\.'; then[0m
+2026-06-30T17:28:30.1749277Z [36;1m    touch "/home/runner/work/_temp"/.implicit_cargo_registries_crates_io_protocol || true[0m
+2026-06-30T17:28:30.1749898Z [36;1m    echo CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse >> $GITHUB_ENV[0m
+2026-06-30T17:28:30.1750463Z [36;1m  elif rustc +stable --version --verbose | grep -q '^release: 1\.6[67]\.'; then[0m
+2026-06-30T17:28:30.1751097Z [36;1m    touch "/home/runner/work/_temp"/.implicit_cargo_registries_crates_io_protocol || true[0m
+2026-06-30T17:28:30.1751675Z [36;1m    echo CARGO_REGISTRIES_CRATES_IO_PROTOCOL=git >> $GITHUB_ENV[0m
+2026-06-30T17:28:30.1752080Z [36;1m  fi[0m
+2026-06-30T17:28:30.1752320Z [36;1mfi[0m
+2026-06-30T17:28:30.1783766Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-30T17:28:30.1784175Z env:
+2026-06-30T17:28:30.1784424Z   CARGO_HOME: /home/runner/.cargo
+2026-06-30T17:28:30.1784738Z   CARGO_INCREMENTAL: 0
+2026-06-30T17:28:30.1785006Z   CARGO_TERM_COLOR: always
+2026-06-30T17:28:30.1785283Z ##[endgroup]
+2026-06-30T17:28:30.2113351Z ##[group]Run : work around spurious network errors in curl 8.0
+2026-06-30T17:28:30.2113868Z [36;1m: work around spurious network errors in curl 8.0[0m
+2026-06-30T17:28:30.2114691Z [36;1m# https://rust-lang.zulipchat.com/#narrow/stream/246057-t-cargo/topic/timeout.20investigation[0m
+2026-06-30T17:28:30.2115374Z [36;1mif rustc +stable --version --verbose | grep -q '^release: 1\.7[01]\.'; then[0m
+2026-06-30T17:28:30.2115891Z [36;1m  echo CARGO_HTTP_MULTIPLEXING=false >> $GITHUB_ENV[0m
+2026-06-30T17:28:30.2116256Z [36;1mfi[0m
+2026-06-30T17:28:30.2151329Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-30T17:28:30.2151735Z env:
+2026-06-30T17:28:30.2151997Z   CARGO_HOME: /home/runner/.cargo
+2026-06-30T17:28:30.2152352Z   CARGO_INCREMENTAL: 0
+2026-06-30T17:28:30.2152706Z   CARGO_TERM_COLOR: always
+2026-06-30T17:28:30.2152991Z ##[endgroup]
+2026-06-30T17:28:30.2360863Z ##[group]Run rustc +stable --version --verbose
+2026-06-30T17:28:30.2361292Z [36;1mrustc +stable --version --verbose[0m
+2026-06-30T17:28:30.2395693Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-30T17:28:30.2396121Z env:
+2026-06-30T17:28:30.2396372Z   CARGO_HOME: /home/runner/.cargo
+2026-06-30T17:28:30.2396697Z   CARGO_INCREMENTAL: 0
+2026-06-30T17:28:30.2396969Z   CARGO_TERM_COLOR: always
+2026-06-30T17:28:30.2397241Z ##[endgroup]
+2026-06-30T17:28:30.2567694Z rustc 1.96.1 (31fca3adb 2026-06-26)
+2026-06-30T17:28:30.2568948Z binary: rustc
+2026-06-30T17:28:30.2569825Z commit-hash: 31fca3adb283cc9dfd56b49cdee9a96eb9c96ffd
+2026-06-30T17:28:30.2570355Z commit-date: 2026-06-26
+2026-06-30T17:28:30.2570717Z host: x86_64-unknown-linux-gnu
+2026-06-30T17:28:30.2571299Z release: 1.96.1
+2026-06-30T17:28:30.2571848Z LLVM version: 22.1.2
+2026-06-30T17:28:30.2717452Z ##[group]Run Swatinem/rust-cache@v2
+2026-06-30T17:28:30.2717825Z with:
+2026-06-30T17:28:30.2718077Z   workspaces: .
+2026-06-30T17:28:30.2718604Z   prefix-key: v0-rust
+2026-06-30T17:28:30.2718912Z   add-job-id-key: true
+2026-06-30T17:28:30.2719211Z   add-rust-environment-hash-key: true
+2026-06-30T17:28:30.2719537Z   cache-targets: true
+2026-06-30T17:28:30.2719806Z   cache-all-crates: false
+2026-06-30T17:28:30.2720310Z   cache-workspace-crates: false
+2026-06-30T17:28:30.2720606Z   save-if: true
+2026-06-30T17:28:30.2720868Z   cache-provider: github
+2026-06-30T17:28:30.2721139Z   cache-bin: true
+2026-06-30T17:28:30.2721396Z   lookup-only: false
+2026-06-30T17:28:30.2721656Z   cmd-format: {0}
+2026-06-30T17:28:30.2721903Z env:
+2026-06-30T17:28:30.2722151Z   CARGO_HOME: /home/runner/.cargo
+2026-06-30T17:28:30.2722456Z   CARGO_INCREMENTAL: 0
+2026-06-30T17:28:30.2722728Z   CARGO_TERM_COLOR: always
+2026-06-30T17:28:30.2723006Z ##[endgroup]
+2026-06-30T17:28:30.5540011Z (node:2420) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-06-30T17:28:30.5541607Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-06-30T17:28:30.6891421Z ##[group]Cache Configuration
+2026-06-30T17:28:30.6892033Z Cache Provider:
+2026-06-30T17:28:30.6892447Z     github
+2026-06-30T17:28:30.6892832Z Workspaces:
+2026-06-30T17:28:30.6893251Z     /home/runner/work/malphas/malphas
+2026-06-30T17:28:30.6893728Z Cache Paths:
+2026-06-30T17:28:30.6894126Z     /home/runner/.cargo/bin
+2026-06-30T17:28:30.6894550Z     /home/runner/.cargo/.crates.toml
+2026-06-30T17:28:30.6895032Z     /home/runner/.cargo/.crates2.json
+2026-06-30T17:28:30.6895308Z     /home/runner/.cargo/registry
+2026-06-30T17:28:30.6895582Z     /home/runner/.cargo/git
+2026-06-30T17:28:30.6896081Z     /home/runner/work/malphas/malphas/target
+2026-06-30T17:28:30.6896584Z Restore Key:
+2026-06-30T17:28:30.6896996Z     v0-rust-build-android-Linux-x64-32dd27e5
+2026-06-30T17:28:30.6897501Z Cache Key:
+2026-06-30T17:28:30.6897883Z     v0-rust-build-android-Linux-x64-32dd27e5-f7df7027
+2026-06-30T17:28:30.6898208Z .. Prefix:
+2026-06-30T17:28:30.6898731Z   - v0-rust-build-android-Linux-x64
+2026-06-30T17:28:30.6899161Z .. Environment considered:
+2026-06-30T17:28:30.6899491Z   - Rust Versions:
+2026-06-30T17:28:30.6899846Z     - 1.96.1 x86_64-unknown-linux-gnu 31fca3adb283cc9dfd56b49cdee9a96eb9c96ffd
+2026-06-30T17:28:30.6900372Z     - 1.96.1 x86_64-unknown-linux-gnu 31fca3adb283cc9dfd56b49cdee9a96eb9c96ffd
+2026-06-30T17:28:30.6900762Z   - CARGO_HOME
+2026-06-30T17:28:30.6900981Z   - CARGO_INCREMENTAL
+2026-06-30T17:28:30.6901209Z   - CARGO_TERM_COLOR
+2026-06-30T17:28:30.6901430Z .. Lockfiles considered:
+2026-06-30T17:28:30.6901718Z   - /home/runner/work/malphas/malphas/.cargo/config.toml
+2026-06-30T17:28:30.6902073Z   - /home/runner/work/malphas/malphas/Cargo.lock
+2026-06-30T17:28:30.6902437Z   - /home/runner/work/malphas/malphas/malphas_cli/Cargo.toml
+2026-06-30T17:28:30.6902837Z   - /home/runner/work/malphas/malphas/malphas_core/Cargo.toml
+2026-06-30T17:28:30.6903272Z   - /home/runner/work/malphas/malphas/systems/bouncing_demo/Cargo.toml
+2026-06-30T17:28:30.6903825Z ##[endgroup]
+2026-06-30T17:28:30.6903945Z 
+2026-06-30T17:28:30.6904035Z ... Restoring cache ...
+2026-06-30T17:28:30.9531672Z No cache found.
+2026-06-30T17:28:30.9642713Z ##[group]Run NDK_URL="https://dl.google.com/android/repository/android-ndk-r26c-linux.zip"
+2026-06-30T17:28:30.9643417Z [36;1mNDK_URL="https://dl.google.com/android/repository/android-ndk-r26c-linux.zip"[0m
+2026-06-30T17:28:30.9643923Z [36;1mcurl --fail -L -o "$RUNNER_TEMP/ndk.zip" "$NDK_URL"[0m
+2026-06-30T17:28:30.9644341Z [36;1munzip -q "$RUNNER_TEMP/ndk.zip" -d "$RUNNER_TEMP/ndk"[0m
+2026-06-30T17:28:30.9644722Z [36;1mNDK_HOME="$RUNNER_TEMP/ndk/android-ndk-r26c"[0m
+2026-06-30T17:28:30.9645086Z [36;1mecho "ANDROID_NDK_HOME=$NDK_HOME" >> "$GITHUB_ENV"[0m
+2026-06-30T17:28:30.9645454Z [36;1mecho "ANDROID_NDK_ROOT=$NDK_HOME" >> "$GITHUB_ENV"[0m
+2026-06-30T17:28:30.9645904Z [36;1mecho "$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin" >> "$GITHUB_PATH"[0m
+2026-06-30T17:28:30.9677125Z shell: /usr/bin/bash -e {0}
+2026-06-30T17:28:30.9677378Z env:
+2026-06-30T17:28:30.9677579Z   CARGO_HOME: /home/runner/.cargo
+2026-06-30T17:28:30.9677849Z   CARGO_INCREMENTAL: 0
+2026-06-30T17:28:30.9678109Z   CARGO_TERM_COLOR: always
+2026-06-30T17:28:30.9678473Z   CACHE_ON_FAILURE: false
+2026-06-30T17:28:30.9678870Z ##[endgroup]
+2026-06-30T17:28:30.9827355Z   % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+2026-06-30T17:28:30.9828236Z                                  Dload  Upload   Total   Spent    Left  Speed
+2026-06-30T17:28:30.9828878Z 
+2026-06-30T17:28:31.1034968Z   0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+2026-06-30T17:28:32.1081445Z   0  637M    0  146k    0     0  1213k      0  0:08:58 --:--:--  0:08:58 1211k
+2026-06-30T17:28:33.1153770Z  42  637M   42  272M    0     0   242M      0  0:00:02  0:00:01  0:00:01  241M
+2026-06-30T17:28:33.2874348Z  91  637M   91  585M    0     0   274M      0  0:00:02  0:00:02 --:--:--  274M
+2026-06-30T17:28:33.2875117Z 100  637M  100  637M    0     0   276M      0  0:00:02  0:00:02 --:--:--  276M
+2026-06-30T17:28:47.8570058Z ##[group]Run chmod +x ./build.sh
+2026-06-30T17:28:47.8570394Z [36;1mchmod +x ./build.sh[0m
+2026-06-30T17:28:47.8570637Z [36;1m./build.sh[0m
+2026-06-30T17:28:47.8605190Z shell: /usr/bin/bash -e {0}
+2026-06-30T17:28:47.8605433Z env:
+2026-06-30T17:28:47.8605632Z   CARGO_HOME: /home/runner/.cargo
+2026-06-30T17:28:47.8605898Z   CARGO_INCREMENTAL: 0
+2026-06-30T17:28:47.8606119Z   CARGO_TERM_COLOR: always
+2026-06-30T17:28:47.8606347Z   CACHE_ON_FAILURE: false
+2026-06-30T17:28:47.8606645Z   ANDROID_NDK_HOME: /home/runner/work/_temp/ndk/android-ndk-r26c
+2026-06-30T17:28:47.8607058Z   ANDROID_NDK_ROOT: /home/runner/work/_temp/ndk/android-ndk-r26c
+2026-06-30T17:28:47.8607379Z ##[endgroup]
+2026-06-30T17:28:47.8706575Z [0;36m[INFO][0m Detecting platform...
+2026-06-30T17:28:47.8718919Z [0;32m[OK][0m Platform: linux (libmalphas_core.so)
+2026-06-30T17:28:47.8731707Z [0;36m[INFO][0m Building Rust workspace in release mode...
+2026-06-30T17:28:47.9066024Z [1m[92m    Updating[0m crates.io index
+2026-06-30T17:28:48.0924828Z [1m[92m Downloading[0m crates ...
+2026-06-30T17:28:48.1629619Z [1m[92m  Downloaded[0m time-core v0.1.9
+2026-06-30T17:28:48.1651766Z [1m[92m  Downloaded[0m crc-catalog v2.5.0
+2026-06-30T17:28:48.1687058Z [1m[92m  Downloaded[0m aes v0.8.4
+2026-06-30T17:28:48.1725288Z [1m[92m  Downloaded[0m thiserror-impl v2.0.18
+2026-06-30T17:28:48.1749755Z [1m[92m  Downloaded[0m serde_core v1.0.228
+2026-06-30T17:28:48.1785721Z [1m[92m  Downloaded[0m shlex v2.0.1
+2026-06-30T17:28:48.1801462Z [1m[92m  Downloaded[0m signature v2.2.0
+2026-06-30T17:28:48.1819711Z [1m[92m  Downloaded[0m sha2 v0.10.8
+2026-06-30T17:28:48.1847043Z [1m[92m  Downloaded[0m const-oid v0.9.6
+2026-06-30T17:28:48.1868838Z [1m[92m  Downloaded[0m serde v1.0.228
+2026-06-30T17:28:48.1906674Z [1m[92m  Downloaded[0m zstd-safe v7.2.4
+2026-06-30T17:28:48.1923707Z [1m[92m  Downloaded[0m getrandom v0.2.17
+2026-06-30T17:28:48.1956454Z [1m[92m  Downloaded[0m zeroize v1.9.0
+2026-06-30T17:28:48.1975277Z [1m[92m  Downloaded[0m rustc_version v0.4.1
+2026-06-30T17:28:48.1991643Z [1m[92m  Downloaded[0m rand_core v0.6.4
+2026-06-30T17:28:48.2008879Z [1m[92m  Downloaded[0m crossbeam-queue v0.3.12
+2026-06-30T17:28:48.2024914Z [1m[92m  Downloaded[0m digest v0.10.7
+2026-06-30T17:28:48.2045910Z [1m[92m  Downloaded[0m spki v0.7.3
+2026-06-30T17:28:48.2067643Z [1m[92m  Downloaded[0m log v0.4.33
+2026-06-30T17:28:48.2094871Z [1m[92m  Downloaded[0m indexmap v2.14.0
+2026-06-30T17:28:48.2138812Z [1m[92m  Downloaded[0m bumpalo v3.20.3
+2026-06-30T17:28:48.2167581Z [1m[92m  Downloaded[0m subtle v2.6.1
+2026-06-30T17:28:48.2181272Z [1m[92m  Downloaded[0m powerfmt v0.2.0
+2026-06-30T17:28:48.2194579Z [1m[92m  Downloaded[0m crossbeam-utils v0.8.21
+2026-06-30T17:28:48.2224297Z [1m[92m  Downloaded[0m xz2 v0.1.7
+2026-06-30T17:28:48.2244113Z [1m[92m  Downloaded[0m zopfli v0.8.3
+2026-06-30T17:28:48.2269070Z [1m[92m  Downloaded[0m time v0.3.51
+2026-06-30T17:28:48.2410007Z [1m[92m  Downloaded[0m pbkdf2 v0.12.2
+2026-06-30T17:28:48.2427947Z [1m[92m  Downloaded[0m syn v2.0.118
+2026-06-30T17:28:48.2534156Z [1m[92m  Downloaded[0m bzip2 v0.5.2
+2026-06-30T17:28:48.2553320Z [1m[92m  Downloaded[0m der v0.7.10
+2026-06-30T17:28:48.2607596Z [1m[92m  Downloaded[0m getrandom v0.3.4
+2026-06-30T17:28:48.2643369Z [1m[92m  Downloaded[0m lzma-rs v0.3.0
+2026-06-30T17:28:48.2672203Z [1m[92m  Downloaded[0m block-buffer v0.10.4
+2026-06-30T17:28:48.2684452Z [1m[92m  Downloaded[0m equivalent v1.0.2
+2026-06-30T17:28:48.2696191Z [1m[92m  Downloaded[0m pkg-config v0.3.33
+2026-06-30T17:28:48.2717418Z [1m[92m  Downloaded[0m libloading v0.8.9
+2026-06-30T17:28:48.2743576Z [1m[92m  Downloaded[0m zeroize_derive v1.5.0
+2026-06-30T17:28:48.2753810Z [1m[92m  Downloaded[0m constant_time_eq v0.3.1
+2026-06-30T17:28:48.2768386Z [1m[92m  Downloaded[0m zstd v0.13.3
+2026-06-30T17:28:48.2800223Z [1m[92m  Downloaded[0m memmap2 v0.9.11
+2026-06-30T17:28:48.2818715Z [1m[92m  Downloaded[0m hashbrown v0.17.1
+2026-06-30T17:28:48.2872818Z [1m[92m  Downloaded[0m simd-adler32 v0.3.9
+2026-06-30T17:28:48.2893764Z [1m[92m  Downloaded[0m semver v1.0.28
+2026-06-30T17:28:48.2918484Z [1m[92m  Downloaded[0m miniz_oxide v0.8.9
+2026-06-30T17:28:48.2946701Z [1m[92m  Downloaded[0m byteorder v1.5.0
+2026-06-30T17:28:48.2964231Z [1m[92m  Downloaded[0m libc v0.2.186
+2026-06-30T17:28:48.3357258Z [1m[92m  Downloaded[0m hmac v0.12.1
+2026-06-30T17:28:48.3378885Z [1m[92m  Downloaded[0m version_check v0.9.5
+2026-06-30T17:28:48.3394651Z [1m[92m  Downloaded[0m zstd-sys v2.0.16+zstd.1.5.7
+2026-06-30T17:28:48.3559052Z [1m[92m  Downloaded[0m unicode-ident v1.0.24
+2026-06-30T17:28:48.3588024Z [1m[92m  Downloaded[0m quote v1.0.46
+2026-06-30T17:28:48.3616470Z [1m[92m  Downloaded[0m deflate64 v0.1.12
+2026-06-30T17:28:48.3633087Z [1m[92m  Downloaded[0m curve25519-dalek v4.1.3
+2026-06-30T17:28:48.3718573Z [1m[92m  Downloaded[0m cfg-if v1.0.4
+2026-06-30T17:28:48.3734820Z [1m[92m  Downloaded[0m proc-macro2 v1.0.106
+2026-06-30T17:28:48.3765159Z [1m[92m  Downloaded[0m zip v2.4.2
+2026-06-30T17:28:48.3806698Z [1m[92m  Downloaded[0m curve25519-dalek-derive v0.1.1
+2026-06-30T17:28:48.3817657Z [1m[92m  Downloaded[0m crc32fast v1.5.0
+2026-06-30T17:28:48.3836623Z [1m[92m  Downloaded[0m bzip2-sys v0.1.13+1.0.8
+2026-06-30T17:28:48.3943150Z [1m[92m  Downloaded[0m jobserver v0.1.34
+2026-06-30T17:28:48.3964213Z [1m[92m  Downloaded[0m lzma-sys v0.1.20
+2026-06-30T17:28:48.4289528Z [1m[92m  Downloaded[0m find-msvc-tools v0.1.9
+2026-06-30T17:28:48.4305505Z [1m[92m  Downloaded[0m crypto-common v0.1.7
+2026-06-30T17:28:48.4315166Z [1m[92m  Downloaded[0m typenum v1.20.1
+2026-06-30T17:28:48.4350051Z [1m[92m  Downloaded[0m rustversion v1.0.22
+2026-06-30T17:28:48.4380248Z [1m[92m  Downloaded[0m cipher v0.4.4
+2026-06-30T17:28:48.4395257Z [1m[92m  Downloaded[0m crc v3.4.0
+2026-06-30T17:28:48.4412392Z [1m[92m  Downloaded[0m memchr v2.8.2
+2026-06-30T17:28:48.4469290Z [1m[92m  Downloaded[0m thiserror v2.0.18
+2026-06-30T17:28:48.4535865Z [1m[92m  Downloaded[0m ed25519-dalek v2.1.1
+2026-06-30T17:28:48.4564809Z [1m[92m  Downloaded[0m cc v1.2.65
+2026-06-30T17:28:48.4603055Z [1m[92m  Downloaded[0m base64ct v1.8.3
+2026-06-30T17:28:48.4635768Z [1m[92m  Downloaded[0m generic-array v0.14.7
+2026-06-30T17:28:48.4651580Z [1m[92m  Downloaded[0m ed25519 v2.2.3
+2026-06-30T17:28:48.4669805Z [1m[92m  Downloaded[0m arc-swap v1.9.2
+2026-06-30T17:28:48.4711400Z [1m[92m  Downloaded[0m hex v0.4.3
+2026-06-30T17:28:48.4727341Z [1m[92m  Downloaded[0m flate2 v1.1.9
+2026-06-30T17:28:48.4777134Z [1m[92m  Downloaded[0m adler2 v2.0.1
+2026-06-30T17:28:48.4788979Z [1m[92m  Downloaded[0m pkcs8 v0.10.2
+2026-06-30T17:28:48.4819600Z [1m[92m  Downloaded[0m inout v0.1.4
+2026-06-30T17:28:48.4830121Z [1m[92m  Downloaded[0m cpufeatures v0.2.17
+2026-06-30T17:28:48.4843479Z [1m[92m  Downloaded[0m num-conv v0.2.2
+2026-06-30T17:28:48.4851870Z [1m[92m  Downloaded[0m sha1 v0.10.6
+2026-06-30T17:28:48.4867311Z [1m[92m  Downloaded[0m displaydoc v0.2.6
+2026-06-30T17:28:48.4887693Z [1m[92m  Downloaded[0m deranged v0.5.8
+2026-06-30T17:28:49.5605260Z [1m[92m   Compiling[0m libc v0.2.186
+2026-06-30T17:28:49.5606385Z [1m[92m   Compiling[0m shlex v2.0.1
+2026-06-30T17:28:49.5607357Z [1m[92m   Compiling[0m version_check v0.9.5
+2026-06-30T17:28:49.5608290Z [1m[92m   Compiling[0m find-msvc-tools v0.1.9
+2026-06-30T17:28:49.6678098Z [1m[92m   Compiling[0m pkg-config v0.3.33
+2026-06-30T17:28:49.7319964Z [1m[92m   Compiling[0m typenum v1.20.1
+2026-06-30T17:28:49.7583794Z [1m[92m   Compiling[0m generic-array v0.14.7
+2026-06-30T17:28:49.9952895Z [1m[92m   Compiling[0m cfg-if v1.0.4
+2026-06-30T17:28:50.0121018Z [1m[92m   Compiling[0m proc-macro2 v1.0.106
+2026-06-30T17:28:50.1160077Z [1m[92m   Compiling[0m quote v1.0.46
+2026-06-30T17:28:50.2239882Z [1m[92m   Compiling[0m unicode-ident v1.0.24
+2026-06-30T17:28:50.9060121Z [1m[92m   Compiling[0m crypto-common v0.1.7
+2026-06-30T17:28:50.9690095Z [1m[92m   Compiling[0m block-buffer v0.10.4
+2026-06-30T17:28:51.0152623Z [1m[92m   Compiling[0m jobserver v0.1.34
+2026-06-30T17:28:51.0458577Z [1m[92m   Compiling[0m syn v2.0.118
+2026-06-30T17:28:51.0509942Z [1m[92m   Compiling[0m subtle v2.6.1
+2026-06-30T17:28:51.1499822Z [1m[92m   Compiling[0m digest v0.10.7
+2026-06-30T17:28:51.2066989Z [1m[92m   Compiling[0m cc v1.2.65
+2026-06-30T17:28:51.2969784Z [1m[92m   Compiling[0m cpufeatures v0.2.17
+2026-06-30T17:28:51.3160033Z [1m[92m   Compiling[0m semver v1.0.28
+2026-06-30T17:28:51.3219826Z [1m[92m   Compiling[0m crc32fast v1.5.0
+2026-06-30T17:28:51.4559752Z [1m[92m   Compiling[0m simd-adler32 v0.3.9
+2026-06-30T17:28:51.5469935Z [1m[92m   Compiling[0m rustc_version v0.4.1
+2026-06-30T17:28:51.7459761Z [1m[92m   Compiling[0m zstd-safe v7.2.4
+2026-06-30T17:28:51.8259921Z [1m[92m   Compiling[0m curve25519-dalek v4.1.3
+2026-06-30T17:28:51.9587792Z [1m[92m   Compiling[0m inout v0.1.4
+2026-06-30T17:28:52.0279714Z [1m[92m   Compiling[0m adler2 v2.0.1
+2026-06-30T17:28:52.0941347Z [1m[92m   Compiling[0m thiserror v2.0.18
+2026-06-30T17:28:52.1150660Z [1m[92m   Compiling[0m crc-catalog v2.5.0
+2026-06-30T17:28:52.1749943Z [1m[92m   Compiling[0m rustversion v1.0.22
+2026-06-30T17:28:52.2640008Z [1m[92m   Compiling[0m crossbeam-utils v0.8.21
+2026-06-30T17:28:52.3710026Z [1m[92m   Compiling[0m getrandom v0.3.4
+2026-06-30T17:28:52.4599913Z [1m[92m   Compiling[0m crc v3.4.0
+2026-06-30T17:28:52.5464225Z [1m[92m   Compiling[0m miniz_oxide v0.8.9
+2026-06-30T17:28:52.6021024Z [1m[92m   Compiling[0m cipher v0.4.4
+2026-06-30T17:28:52.7380556Z [1m[92m   Compiling[0m zstd-sys v2.0.16+zstd.1.5.7
+2026-06-30T17:28:52.7890940Z [1m[92m   Compiling[0m lzma-sys v0.1.20
+2026-06-30T17:28:52.9546025Z [1m[92m   Compiling[0m bzip2-sys v0.1.13+1.0.8
+2026-06-30T17:28:55.2126389Z [1m[92m   Compiling[0m zeroize_derive v1.5.0
+2026-06-30T17:28:55.5579893Z [1m[92m   Compiling[0m zeroize v1.9.0
+2026-06-30T17:28:55.6677289Z [1m[92m   Compiling[0m curve25519-dalek-derive v0.1.1
+2026-06-30T17:28:56.0405643Z [1m[92m   Compiling[0m thiserror-impl v2.0.18
+2026-06-30T17:28:56.8968950Z [1m[92m   Compiling[0m hmac v0.12.1
+2026-06-30T17:28:56.9605468Z [1m[92m   Compiling[0m getrandom v0.2.17
+2026-06-30T17:28:57.0754930Z [1m[92m   Compiling[0m zip v2.4.2
+2026-06-30T17:28:57.1229302Z [1m[92m   Compiling[0m bumpalo v3.20.3
+2026-06-30T17:28:57.2859806Z [1m[92m   Compiling[0m log v0.4.33
+2026-06-30T17:28:57.4070936Z [1m[92m   Compiling[0m signature v2.2.0
+2026-06-30T17:28:57.4650242Z [1m[92m   Compiling[0m deranged v0.5.8
+2026-06-30T17:28:58.3788305Z [1m[92m   Compiling[0m time-core v0.1.9
+2026-06-30T17:28:58.4812105Z [1m[92m   Compiling[0m equivalent v1.0.2
+2026-06-30T17:28:58.5070075Z [1m[92m   Compiling[0m byteorder v1.5.0
+2026-06-30T17:28:58.6701474Z [1m[92m   Compiling[0m num-conv v0.2.2
+2026-06-30T17:28:58.7365220Z [1m[92m   Compiling[0m hashbrown v0.17.1
+2026-06-30T17:28:59.2379948Z [1m[92m   Compiling[0m powerfmt v0.2.0
+2026-06-30T17:28:59.2676911Z [1m[92m   Compiling[0m bzip2 v0.5.2
+2026-06-30T17:28:59.3920136Z [1m[92m   Compiling[0m time v0.3.51
+2026-06-30T17:28:59.4118038Z [1m[92m   Compiling[0m indexmap v2.14.0
+2026-06-30T17:28:59.9547207Z [1m[92m   Compiling[0m lzma-rs v0.3.0
+2026-06-30T17:29:00.0777182Z [1m[92m   Compiling[0m ed25519 v2.2.3
+2026-06-30T17:29:00.2050066Z [1m[92m   Compiling[0m zopfli v0.8.3
+2026-06-30T17:29:00.5806218Z [1m[92m   Compiling[0m rand_core v0.6.4
+2026-06-30T17:29:00.6559612Z [1m[92m   Compiling[0m pbkdf2 v0.12.2
+2026-06-30T17:29:01.4561538Z [1m[92m   Compiling[0m displaydoc v0.2.6
+2026-06-30T17:29:01.9741444Z [1m[92m   Compiling[0m flate2 v1.1.9
+2026-06-30T17:29:02.4449950Z [1m[92m   Compiling[0m aes v0.8.4
+2026-06-30T17:29:03.8349904Z [1m[92m   Compiling[0m sha2 v0.10.8
+2026-06-30T17:29:04.0803204Z [1m[92m   Compiling[0m sha1 v0.10.6
+2026-06-30T17:29:04.4752784Z [1m[92m   Compiling[0m memchr v2.8.2
+2026-06-30T17:29:05.2700054Z [1m[92m   Compiling[0m deflate64 v0.1.12
+2026-06-30T17:29:05.3071869Z [1m[92m   Compiling[0m constant_time_eq v0.3.1
+2026-06-30T17:29:05.3600887Z [1m[92m   Compiling[0m ed25519-dalek v2.1.1
+2026-06-30T17:29:05.6349768Z [1m[92m   Compiling[0m crossbeam-queue v0.3.12
+2026-06-30T17:29:05.7346990Z [1m[92m   Compiling[0m arc-swap v1.9.2
+2026-06-30T17:29:05.7371200Z [1m[92m   Compiling[0m memmap2 v0.9.11
+2026-06-30T17:29:05.9113863Z [1m[92m   Compiling[0m libloading v0.8.9
+2026-06-30T17:29:05.9498063Z [1m[92m   Compiling[0m hex v0.4.3
+2026-06-30T17:29:06.7810170Z [1m[92m   Compiling[0m xz2 v0.1.7
+2026-06-30T17:29:14.8850247Z [1m[92m   Compiling[0m zstd v0.13.3
+2026-06-30T17:29:17.1313550Z [1m[92m   Compiling[0m malphas_core v2.7.5 (/home/runner/work/malphas/malphas/malphas_core)
+2026-06-30T17:29:18.8233967Z [1m[92m    Finished[0m `release` profile [optimized] target(s) in 30.94s
+2026-06-30T17:29:18.8809874Z [1m[92m Downloading[0m crates ...
+2026-06-30T17:29:18.9090776Z [1m[92m  Downloaded[0m anstyle v1.0.14
+2026-06-30T17:29:18.9120591Z [1m[92m  Downloaded[0m is_terminal_polyfill v1.70.2
+2026-06-30T17:29:18.9179122Z [1m[92m  Downloaded[0m strsim v0.11.1
+2026-06-30T17:29:18.9194740Z [1m[92m  Downloaded[0m colorchoice v1.0.5
+2026-06-30T17:29:18.9216988Z [1m[92m  Downloaded[0m once_cell v1.21.4
+2026-06-30T17:29:18.9244465Z [1m[92m  Downloaded[0m itoa v1.0.18
+2026-06-30T17:29:18.9261244Z [1m[92m  Downloaded[0m heck v0.5.0
+2026-06-30T17:29:18.9277311Z [1m[92m  Downloaded[0m ahash v0.8.12
+2026-06-30T17:29:18.9303286Z [1m[92m  Downloaded[0m anstyle-query v1.1.5
+2026-06-30T17:29:18.9316502Z [1m[92m  Downloaded[0m anstyle-parse v0.2.7
+2026-06-30T17:29:18.9334948Z [1m[92m  Downloaded[0m clap_derive v4.5.28
+2026-06-30T17:29:18.9358622Z [1m[92m  Downloaded[0m utf8parse v0.2.2
+2026-06-30T17:29:18.9372452Z [1m[92m  Downloaded[0m ryu v1.0.23
+2026-06-30T17:29:18.9405785Z [1m[92m  Downloaded[0m clap v4.5.28
+2026-06-30T17:29:18.9494603Z [1m[92m  Downloaded[0m zerocopy v0.8.52
+2026-06-30T17:29:18.9710711Z [1m[92m  Downloaded[0m serde_derive v1.0.228
+2026-06-30T17:29:18.9742503Z [1m[92m  Downloaded[0m ttf-parser v0.21.1
+2026-06-30T17:29:18.9835489Z [1m[92m  Downloaded[0m serde_json v1.0.134
+2026-06-30T17:29:18.9908429Z [1m[92m  Downloaded[0m hashbrown v0.14.5
+2026-06-30T17:29:18.9956386Z [1m[92m  Downloaded[0m anstream v0.6.21
+2026-06-30T17:29:18.9977137Z [1m[92m  Downloaded[0m allocator-api2 v0.2.21
+2026-06-30T17:29:19.0003952Z [1m[92m  Downloaded[0m clap_builder v4.5.27
+2026-06-30T17:29:19.0065879Z [1m[92m  Downloaded[0m fontdue v0.9.2
+2026-06-30T17:29:19.0106624Z [1m[92m  Downloaded[0m clap_lex v0.7.7
+2026-06-30T17:29:19.0274389Z [1m[92m   Compiling[0m cfg-if v1.0.4
+2026-06-30T17:29:19.0275017Z [1m[92m   Compiling[0m typenum v1.20.1
+2026-06-30T17:29:19.0276188Z [1m[92m   Compiling[0m syn v2.0.118
+2026-06-30T17:29:19.0278841Z [1m[92m   Compiling[0m libc v0.2.186
+2026-06-30T17:29:19.0570485Z [1m[92m   Compiling[0m zerocopy v0.8.52
+2026-06-30T17:29:19.2512636Z [1m[92m   Compiling[0m ahash v0.8.12
+2026-06-30T17:29:19.2690602Z [1m[92m   Compiling[0m serde_core v1.0.228
+2026-06-30T17:29:19.3371488Z [1m[92m   Compiling[0m utf8parse v0.2.2
+2026-06-30T17:29:19.3720126Z [1m[92m   Compiling[0m anstyle-parse v0.2.7
+2026-06-30T17:29:19.7717419Z [1m[92m   Compiling[0m generic-array v0.14.7
+2026-06-30T17:29:20.3440011Z [1m[92m   Compiling[0m crypto-common v0.1.7
+2026-06-30T17:29:20.3990615Z [1m[92m   Compiling[0m block-buffer v0.10.4
+2026-06-30T17:29:20.4845625Z [1m[92m   Compiling[0m digest v0.10.7
+2026-06-30T17:29:20.5079907Z [1m[92m   Compiling[0m is_terminal_polyfill v1.70.2
+2026-06-30T17:29:20.5436280Z [1m[92m   Compiling[0m anstyle v1.0.14
+2026-06-30T17:29:20.6262038Z [1m[92m   Compiling[0m anstyle-query v1.1.5
+2026-06-30T17:29:20.6639949Z [1m[92m   Compiling[0m serde v1.0.228
+2026-06-30T17:29:20.7179919Z [1m[92m   Compiling[0m cpufeatures v0.2.17
+2026-06-30T17:29:20.7520331Z [1m[92m   Compiling[0m colorchoice v1.0.5
+2026-06-30T17:29:20.7954563Z [1m[92m   Compiling[0m once_cell v1.21.4
+2026-06-30T17:29:20.8085315Z [1m[92m   Compiling[0m anstream v0.6.21
+2026-06-30T17:29:20.8942255Z [1m[92m   Compiling[0m getrandom v0.2.17
+2026-06-30T17:29:21.1097041Z [1m[92m   Compiling[0m heck v0.5.0
+2026-06-30T17:29:21.2572072Z [1m[92m   Compiling[0m signature v2.2.0
+2026-06-30T17:29:21.3152086Z [1m[92m   Compiling[0m strsim v0.11.1
+2026-06-30T17:29:21.8179939Z [1m[92m   Compiling[0m subtle v2.6.1
+2026-06-30T17:29:21.9049786Z [1m[92m   Compiling[0m zeroize v1.9.0
+2026-06-30T17:29:22.0020049Z [1m[92m   Compiling[0m clap_lex v0.7.7
+2026-06-30T17:29:22.2009792Z [1m[92m   Compiling[0m allocator-api2 v0.2.21
+2026-06-30T17:29:22.5359737Z [1m[92m   Compiling[0m serde_json v1.0.134
+2026-06-30T17:29:22.6096980Z [1m[92m   Compiling[0m clap_builder v4.5.27
+2026-06-30T17:29:22.7809844Z [1m[92m   Compiling[0m serde_derive v1.0.228
+2026-06-30T17:29:23.5090946Z [1m[92m   Compiling[0m curve25519-dalek-derive v0.1.1
+2026-06-30T17:29:23.5357155Z [1m[92m   Compiling[0m hashbrown v0.14.5
+2026-06-30T17:29:23.9060095Z [1m[92m   Compiling[0m curve25519-dalek v4.1.3
+2026-06-30T17:29:24.1589860Z [1m[92m   Compiling[0m clap_derive v4.5.28
+2026-06-30T17:29:25.7539984Z [1m[92m   Compiling[0m ed25519 v2.2.3
+2026-06-30T17:29:25.8270055Z [1m[92m   Compiling[0m rand_core v0.6.4
+2026-06-30T17:29:25.8675308Z [1m[92m   Compiling[0m sha2 v0.10.8
+2026-06-30T17:29:25.9400063Z [1m[92m   Compiling[0m ttf-parser v0.21.1
+2026-06-30T17:29:26.3290261Z [1m[92m   Compiling[0m memchr v2.8.2
+2026-06-30T17:29:26.7229928Z [1m[92m   Compiling[0m itoa v1.0.18
+2026-06-30T17:29:26.8547379Z [1m[92m   Compiling[0m ryu v1.0.23
+2026-06-30T17:29:27.1819875Z [1m[92m   Compiling[0m ed25519-dalek v2.1.1
+2026-06-30T17:29:27.4090002Z [1m[92m   Compiling[0m fontdue v0.9.2
+2026-06-30T17:29:28.0399976Z [1m[92m   Compiling[0m clap v4.5.28
+2026-06-30T17:29:28.0709947Z [1m[92m   Compiling[0m hex v0.4.3
+2026-06-30T17:29:29.1191246Z [1m[92m   Compiling[0m malphas_cli v2.7.5 (/home/runner/work/malphas/malphas/malphas_cli)
+2026-06-30T17:29:36.0674723Z [1m[92m    Finished[0m `release` profile [optimized] target(s) in 17.21s
+2026-06-30T17:29:36.1072652Z [1m[92m   Compiling[0m bouncing_demo v2.7.5 (/home/runner/work/malphas/malphas/systems/bouncing_demo)
+2026-06-30T17:29:38.4508657Z [1m[92m    Finished[0m `release` profile [optimized] target(s) in 2.36s
+2026-06-30T17:29:38.4541807Z [0;32m[OK][0m Built core: /home/runner/work/malphas/malphas/target/release/libmalphas_core.so
+2026-06-30T17:29:38.4542975Z [0;32m[OK][0m Built CLI: /home/runner/work/malphas/malphas/target/release/malphas-cli
+2026-06-30T17:29:38.4543885Z [1;33m[WARN][0m No signature file found for libmalphas_core.so
+2026-06-30T17:29:38.4557251Z [0;36m[INFO][0m Copying libmalphas_core.so to motors/ as malphas_core_20260630_172847.so...
+2026-06-30T17:29:38.4575526Z [0;32m[OK][0m Copied motor: /home/runner/work/malphas/malphas/flutter_app/motors/malphas_core_20260630_172847.so
+2026-06-30T17:29:38.4576587Z [0;36m[INFO][0m Copying CLI executable to motors/...
+2026-06-30T17:29:38.4604540Z [0;32m[OK][0m Copied CLI: /home/runner/work/malphas/malphas/flutter_app/motors/malphas-cli
+2026-06-30T17:29:38.4605827Z [0;36m[INFO][0m Copying bouncing_demo system to motors/...
+2026-06-30T17:29:38.4620501Z [0;32m[OK][0m Copied system: /home/runner/work/malphas/malphas/flutter_app/motors/libbouncing_demo.so
+2026-06-30T17:29:38.4634740Z [0;32m[OK][0m Copied system: /home/runner/work/malphas/malphas/libbouncing_demo.so
+2026-06-30T17:29:38.4663704Z [0;32m[OK][0m Copied system .mxc: /home/runner/work/malphas/malphas/examples/bouncing_demo/bouncing_demo.mxc
+2026-06-30T17:29:38.4664526Z [0;36m[INFO][0m Copying non-timestamped motor to workspace root...
+2026-06-30T17:29:38.4681137Z [0;32m[OK][0m Copied motor: /home/runner/work/malphas/malphas/libmalphas_core.so
+2026-06-30T17:29:38.4682341Z [0;36m[INFO][0m Cleaning up old so motors (keeping the 3 most recent)...
+2026-06-30T17:29:38.4683076Z [0;32m[OK][0m Motor cleanup complete
+2026-06-30T17:29:38.4683847Z [0;36m[INFO][0m Copying latest library into existing Flutter build directories...
+2026-06-30T17:29:38.4697380Z [0;36m[INFO][0m Android NDK detected; building multi-arch libraries...
+2026-06-30T17:29:38.4728264Z [0;36m[INFO][0m Building arm64-v8a (aarch64-linux-android)...
+2026-06-30T17:29:38.5457489Z [1m[92m   Compiling[0m typenum v1.20.1
+2026-06-30T17:29:38.5458278Z [1m[92m   Compiling[0m generic-array v0.14.7
+2026-06-30T17:29:38.5466681Z [1m[92m   Compiling[0m libc v0.2.186
+2026-06-30T17:29:38.5472831Z [1m[92m   Compiling[0m cfg-if v1.0.4
+2026-06-30T17:29:38.5662290Z [1m[92m   Compiling[0m subtle v2.6.1
+2026-06-30T17:29:38.5727634Z [1m[92m   Compiling[0m zstd-sys v2.0.16+zstd.1.5.7
+2026-06-30T17:29:38.6744908Z [1m[92m   Compiling[0m crc32fast v1.5.0
+2026-06-30T17:29:38.6892292Z [1m[92m   Compiling[0m simd-adler32 v0.3.9
+2026-06-30T17:29:39.0762448Z [1m[92m   Compiling[0m cpufeatures v0.2.17
+2026-06-30T17:29:39.1090201Z [1m[92m   Compiling[0m lzma-sys v0.1.20
+2026-06-30T17:29:39.3907951Z [1m[92m   Compiling[0m bzip2-sys v0.1.13+1.0.8
+2026-06-30T17:29:39.7820752Z [1m[92m   Compiling[0m crypto-common v0.1.7
+2026-06-30T17:29:39.8379927Z [1m[92m   Compiling[0m block-buffer v0.10.4
+2026-06-30T17:29:39.8964340Z [1m[92m   Compiling[0m digest v0.10.7
+2026-06-30T17:29:40.0234220Z [1m[92m   Compiling[0m inout v0.1.4
+2026-06-30T17:29:40.0716348Z [1m[92m   Compiling[0m zeroize v1.9.0
+2026-06-30T17:29:40.3209055Z [1m[92m   Compiling[0m adler2 v2.0.1
+2026-06-30T17:29:40.3918121Z [1m[92m   Compiling[0m crc-catalog v2.5.0
+2026-06-30T17:29:40.4277013Z [1m[92m   Compiling[0m crossbeam-utils v0.8.21
+2026-06-30T17:29:40.4307769Z [1m[92m   Compiling[0m crc v3.4.0
+2026-06-30T17:29:40.5643054Z [1m[92m   Compiling[0m miniz_oxide v0.8.9
+2026-06-30T17:29:41.8125411Z [1m[92m   Compiling[0m getrandom v0.3.4
+2026-06-30T17:29:41.8179257Z [1m[92m   Compiling[0m thiserror v2.0.18
+2026-06-30T17:29:41.8506535Z [1m[92m   Compiling[0m curve25519-dalek v4.1.3
+2026-06-30T17:29:41.8770219Z [1m[92m   Compiling[0m cipher v0.4.4
+2026-06-30T17:29:42.0405222Z [1m[92m   Compiling[0m hmac v0.12.1
+2026-06-30T17:29:42.0980594Z [1m[92m   Compiling[0m getrandom v0.2.17
+2026-06-30T17:29:42.1180215Z [1m[92m   Compiling[0m equivalent v1.0.2
+2026-06-30T17:29:42.1482276Z [1m[92m   Compiling[0m hashbrown v0.17.1
+2026-06-30T17:29:42.2549694Z [1m[92m   Compiling[0m time-core v0.1.9
+2026-06-30T17:29:42.4160010Z [1m[92m   Compiling[0m byteorder v1.5.0
+2026-06-30T17:29:42.6207478Z [1m[92m   Compiling[0m bumpalo v3.20.3
+2026-06-30T17:29:42.7690361Z [1m[92m   Compiling[0m signature v2.2.0
+2026-06-30T17:29:42.8280336Z [1m[92m   Compiling[0m log v0.4.33
+2026-06-30T17:29:42.8392146Z [1m[92m   Compiling[0m deranged v0.5.8
+2026-06-30T17:29:42.9570708Z [1m[92m   Compiling[0m num-conv v0.2.2
+2026-06-30T17:29:43.0587115Z [1m[92m   Compiling[0m powerfmt v0.2.0
+2026-06-30T17:29:43.1815769Z [1m[92m   Compiling[0m zip v2.4.2
+2026-06-30T17:29:43.1842825Z [1m[92m   Compiling[0m zopfli v0.8.3
+2026-06-30T17:29:43.8418109Z [1m[92m   Compiling[0m time v0.3.51
+2026-06-30T17:29:44.4001470Z [1m[92m   Compiling[0m ed25519 v2.2.3
+2026-06-30T17:29:44.4953999Z [1m[92m   Compiling[0m indexmap v2.14.0
+2026-06-30T17:29:44.5539966Z [1m[92m   Compiling[0m lzma-rs v0.3.0
+2026-06-30T17:29:45.1949654Z [1m[92m   Compiling[0m rand_core v0.6.4
+2026-06-30T17:29:45.2989780Z [1m[92m   Compiling[0m bzip2 v0.5.2
+2026-06-30T17:29:45.3668007Z [1m[92m   Compiling[0m pbkdf2 v0.12.2
+2026-06-30T17:29:45.4090729Z [1m[92m   Compiling[0m aes v0.8.4
+2026-06-30T17:29:46.0267985Z [1m[92m   Compiling[0m flate2 v1.1.9
+2026-06-30T17:29:46.9830480Z [1m[92m   Compiling[0m sha2 v0.10.8
+2026-06-30T17:29:48.0859824Z [1m[92m   Compiling[0m sha1 v0.10.6
+2026-06-30T17:29:48.2339934Z [1m[92m   Compiling[0m constant_time_eq v0.3.1
+2026-06-30T17:29:48.2830211Z [1m[92m   Compiling[0m deflate64 v0.1.12
+2026-06-30T17:29:48.3775374Z [1m[92m   Compiling[0m memchr v2.8.2
+2026-06-30T17:29:48.7748266Z [1m[92m   Compiling[0m ed25519-dalek v2.1.1
+2026-06-30T17:29:49.0629592Z [1m[92m   Compiling[0m crossbeam-queue v0.3.12
+2026-06-30T17:29:49.0900593Z [1m[92m   Compiling[0m arc-swap v1.9.2
+2026-06-30T17:29:49.1385045Z [1m[92m   Compiling[0m memmap2 v0.9.11
+2026-06-30T17:29:49.2729683Z [1m[92m   Compiling[0m libloading v0.8.9
+2026-06-30T17:29:49.3541446Z [1m[92m   Compiling[0m hex v0.4.3
+2026-06-30T17:29:49.9616382Z [1m[92m   Compiling[0m xz2 v0.1.7
+2026-06-30T17:29:52.7053177Z [1m[92m   Compiling[0m zstd-safe v7.2.4
+2026-06-30T17:29:52.8090083Z [1m[92m   Compiling[0m zstd v0.13.3
+2026-06-30T17:29:55.1406542Z [1m[92m   Compiling[0m malphas_core v2.7.5 (/home/runner/work/malphas/malphas/malphas_core)
+2026-06-30T17:29:56.8913120Z [1m[92m    Finished[0m `release` profile [optimized] target(s) in 18.41s
+2026-06-30T17:29:56.9019517Z [0;32m[OK][0m Copied Android library to: /home/runner/work/malphas/malphas/flutter_app/android/app/src/main/jniLibs/arm64-v8a/libmalphas_core.so
+2026-06-30T17:29:56.9020925Z [0;36m[INFO][0m Building armeabi-v7a (armv7-linux-androideabi)...
+2026-06-30T17:29:56.9744517Z [1m[92m   Compiling[0m typenum v1.20.1
+2026-06-30T17:29:56.9745695Z [1m[92m   Compiling[0m cfg-if v1.0.4
+2026-06-30T17:29:56.9747006Z [1m[92m   Compiling[0m generic-array v0.14.7
+2026-06-30T17:29:56.9771725Z [1m[92m   Compiling[0m libc v0.2.186
+2026-06-30T17:29:56.9898253Z [1m[92m   Compiling[0m subtle v2.6.1
+2026-06-30T17:29:57.0005198Z [1m[92m   Compiling[0m zstd-sys v2.0.16+zstd.1.5.7
+2026-06-30T17:29:57.0161494Z [1m[33mwarning[0m: zstd-sys@2.0.16+zstd.1.5.7: Compiler family detection failed due to error: ToolNotFound: failed to find tool "arm-linux-androideabi-clang": No such file or directory (os error 2)
+2026-06-30T17:29:57.0164268Z [1m[33mwarning[0m: zstd-sys@2.0.16+zstd.1.5.7: Compiler family detection failed due to error: ToolNotFound: failed to find tool "arm-linux-androideabi-clang": No such file or directory (os error 2)
+2026-06-30T17:29:57.0170484Z [1m[33mwarning[0m: zstd-sys@2.0.16+zstd.1.5.7: Compiler family detection failed due to error: ToolNotFound: failed to find tool "arm-linux-androideabi-clang": No such file or directory (os error 2)
+2026-06-30T17:29:57.0173488Z [1m[33mwarning[0m: zstd-sys@2.0.16+zstd.1.5.7: Compiler family detection failed due to error: ToolNotFound: failed to find tool "arm-linux-androideabi-clang": No such file or directory (os error 2)
+2026-06-30T17:29:57.0175529Z [1m[91merror[0m: failed to run custom build command for `zstd-sys v2.0.16+zstd.1.5.7`
+2026-06-30T17:29:57.0199027Z 
+2026-06-30T17:29:57.0199540Z Caused by:
+2026-06-30T17:29:57.0200682Z   process didn't exit successfully: `/home/runner/work/malphas/malphas/target/release/build/zstd-sys-0e491ba77e7ef3b2/build-script-build` (exit status: 1)
+2026-06-30T17:29:57.0201941Z   --- stdout
+2026-06-30T17:29:57.0202399Z   cargo:rerun-if-env-changed=ZSTD_SYS_USE_PKG_CONFIG
+2026-06-30T17:29:57.0203017Z   cargo:rerun-if-env-changed=CC_FORCE_DISABLE
+2026-06-30T17:29:57.0203516Z   CC_FORCE_DISABLE = None
+2026-06-30T17:29:57.0203994Z   cargo:rerun-if-env-changed=CC_armv7-linux-androideabi
+2026-06-30T17:29:57.0204875Z   CC_armv7-linux-androideabi = None
+2026-06-30T17:29:57.0205412Z   cargo:rerun-if-env-changed=CC_armv7_linux_androideabi
+2026-06-30T17:29:57.0206016Z   CC_armv7_linux_androideabi = None
+2026-06-30T17:29:57.0206495Z   cargo:rerun-if-env-changed=TARGET_CC
+2026-06-30T17:29:57.0206973Z   TARGET_CC = None
+2026-06-30T17:29:57.0207359Z   cargo:rerun-if-env-changed=CC
+2026-06-30T17:29:57.0207792Z   CC = None
+2026-06-30T17:29:57.0208204Z   cargo:rerun-if-env-changed=CC_ENABLE_DEBUG_OUTPUT
+2026-06-30T17:29:57.0209824Z   cargo:warning=Compiler family detection failed due to error: ToolNotFound: failed to find tool "arm-linux-androideabi-clang": No such file or directory (os error 2)
+2026-06-30T17:29:57.0211467Z   cargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS
+2026-06-30T17:29:57.0212076Z   CRATE_CC_NO_DEFAULTS = None
+2026-06-30T17:29:57.0212542Z   cargo:rerun-if-env-changed=CFLAGS
+2026-06-30T17:29:57.0213011Z   CFLAGS = None
+2026-06-30T17:29:57.0213422Z   cargo:rerun-if-env-changed=TARGET_CFLAGS
+2026-06-30T17:29:57.0213926Z   TARGET_CFLAGS = None
+2026-06-30T17:29:57.0214451Z   cargo:rerun-if-env-changed=CFLAGS_armv7_linux_androideabi
+2026-06-30T17:29:57.0215096Z   CFLAGS_armv7_linux_androideabi = None
+2026-06-30T17:29:57.0215722Z   cargo:rerun-if-env-changed=CFLAGS_armv7-linux-androideabi
+2026-06-30T17:29:57.0216377Z   CFLAGS_armv7-linux-androideabi = None
+2026-06-30T17:29:57.0216934Z   cargo:rerun-if-env-changed=CC_ENABLE_DEBUG_OUTPUT
+2026-06-30T17:29:57.0218254Z   cargo:warning=Compiler family detection failed due to error: ToolNotFound: failed to find tool "arm-linux-androideabi-clang": No such file or directory (os error 2)
+2026-06-30T17:29:57.0222466Z   cargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS
+2026-06-30T17:29:57.0223055Z   CRATE_CC_NO_DEFAULTS = None
+2026-06-30T17:29:57.0223538Z   cargo:rerun-if-env-changed=CFLAGS
+2026-06-30T17:29:57.0224011Z   CFLAGS = None
+2026-06-30T17:29:57.0224410Z   cargo:rerun-if-env-changed=TARGET_CFLAGS
+2026-06-30T17:29:57.0224926Z   TARGET_CFLAGS = None
+2026-06-30T17:29:57.0225451Z   cargo:rerun-if-env-changed=CFLAGS_armv7_linux_androideabi
+2026-06-30T17:29:57.0226086Z   CFLAGS_armv7_linux_androideabi = None
+2026-06-30T17:29:57.0226703Z   cargo:rerun-if-env-changed=CFLAGS_armv7-linux-androideabi
+2026-06-30T17:29:57.0227366Z   CFLAGS_armv7-linux-androideabi = None
+2026-06-30T17:29:57.0227947Z   cargo:rerun-if-env-changed=CC_ENABLE_DEBUG_OUTPUT
+2026-06-30T17:29:57.0230063Z   cargo:warning=Compiler family detection failed due to error: ToolNotFound: failed to find tool "arm-linux-androideabi-clang": No such file or directory (os error 2)
+2026-06-30T17:29:57.0231452Z   cargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS
+2026-06-30T17:29:57.0232000Z   CRATE_CC_NO_DEFAULTS = None
+2026-06-30T17:29:57.0232467Z   cargo:rerun-if-env-changed=CFLAGS
+2026-06-30T17:29:57.0232926Z   CFLAGS = None
+2026-06-30T17:29:57.0233318Z   cargo:rerun-if-env-changed=TARGET_CFLAGS
+2026-06-30T17:29:57.0233816Z   TARGET_CFLAGS = None
+2026-06-30T17:29:57.0234343Z   cargo:rerun-if-env-changed=CFLAGS_armv7_linux_androideabi
+2026-06-30T17:29:57.0234975Z   CFLAGS_armv7_linux_androideabi = None
+2026-06-30T17:29:57.0235588Z   cargo:rerun-if-env-changed=CFLAGS_armv7-linux-androideabi
+2026-06-30T17:29:57.0236205Z   CFLAGS_armv7-linux-androideabi = None
+2026-06-30T17:29:57.0236766Z   cargo:rerun-if-env-changed=CC_ENABLE_DEBUG_OUTPUT
+2026-06-30T17:29:57.0238127Z   cargo:warning=Compiler family detection failed due to error: ToolNotFound: failed to find tool "arm-linux-androideabi-clang": No such file or directory (os error 2)
+2026-06-30T17:29:57.0239771Z   cargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS
+2026-06-30T17:29:57.0240326Z   CRATE_CC_NO_DEFAULTS = None
+2026-06-30T17:29:57.0240785Z   cargo:rerun-if-env-changed=CFLAGS
+2026-06-30T17:29:57.0241248Z   CFLAGS = None
+2026-06-30T17:29:57.0241652Z   cargo:rerun-if-env-changed=TARGET_CFLAGS
+2026-06-30T17:29:57.0242147Z   TARGET_CFLAGS = None
+2026-06-30T17:29:57.0242667Z   cargo:rerun-if-env-changed=CFLAGS_armv7_linux_androideabi
+2026-06-30T17:29:57.0243562Z   CFLAGS_armv7_linux_androideabi = None
+2026-06-30T17:29:57.0244171Z   cargo:rerun-if-env-changed=CFLAGS_armv7-linux-androideabi
+2026-06-30T17:29:57.0244792Z   CFLAGS_armv7-linux-androideabi = None
+2026-06-30T17:29:57.0245120Z 
+2026-06-30T17:29:57.0245265Z   --- stderr
+2026-06-30T17:29:57.0245463Z 
+2026-06-30T17:29:57.0245469Z 
+2026-06-30T17:29:57.0246088Z   error occurred in cc-rs: failed to find tool "arm-linux-androideabi-clang": No such file or directory (os error 2)
+2026-06-30T17:29:57.0246882Z 
+2026-06-30T17:29:57.0246888Z 
+2026-06-30T17:29:57.0247427Z [1m[33mwarning[0m: build failed, waiting for other jobs to finish...
+2026-06-30T17:29:57.4523432Z [0;31m[ERROR][0m Failed to build armv7-linux-androideabi; aborting Android build.
+2026-06-30T17:29:57.4539973Z ##[error]Process completed with exit code 1.
+2026-06-30T17:29:57.4674366Z Node 20 is being deprecated. This workflow is running with Node 24 by default. If you need to temporarily use Node 20, you can set the ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true environment variable. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+2026-06-30T17:29:57.4675646Z Post job cleanup.
+2026-06-30T17:29:57.5485828Z [command]/usr/bin/git version
+2026-06-30T17:29:57.5554065Z git version 2.54.0
+2026-06-30T17:29:57.5593999Z Temporarily overriding HOME='/home/runner/work/_temp/298b03cc-d702-4665-88f1-596b2c4a68ab' before making global git config changes
+2026-06-30T17:29:57.5595437Z Adding repository directory to the temporary git global config as a safe directory
+2026-06-30T17:29:57.5600554Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/malphas/malphas
+2026-06-30T17:29:57.5635339Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-06-30T17:29:57.5668794Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-06-30T17:29:57.5887914Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-06-30T17:29:57.5912609Z http.https://github.com/.extraheader
+2026-06-30T17:29:57.5924070Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+2026-06-30T17:29:57.5954722Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-06-30T17:29:57.6168757Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-06-30T17:29:57.6197840Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-06-30T17:29:57.6550505Z Cleaning up orphan processes
+2026-06-30T17:29:57.6804456Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

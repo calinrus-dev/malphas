@@ -1,0 +1,73 @@
+﻿2026-06-30T17:28:15.3694402Z Node 20 is being deprecated. This workflow is running with Node 24 by default. If you need to temporarily use Node 20, you can set the ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true environment variable. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+2026-06-30T17:28:15.3704000Z ##[group]Run actions/checkout@v4
+2026-06-30T17:28:15.3705152Z with:
+2026-06-30T17:28:15.3705749Z   repository: calinrus-dev/malphas
+2026-06-30T17:28:15.3710736Z   token: ***
+2026-06-30T17:28:15.3711229Z   ssh-strict: true
+2026-06-30T17:28:15.3711721Z   ssh-user: git
+2026-06-30T17:28:15.3712218Z   persist-credentials: true
+2026-06-30T17:28:15.3712770Z   clean: true
+2026-06-30T17:28:15.3713260Z   sparse-checkout-cone-mode: true
+2026-06-30T17:28:15.3713858Z   fetch-depth: 1
+2026-06-30T17:28:15.3714338Z   fetch-tags: false
+2026-06-30T17:28:15.3714839Z   show-progress: true
+2026-06-30T17:28:15.3715356Z   lfs: false
+2026-06-30T17:28:15.3715819Z   submodules: false
+2026-06-30T17:28:15.3716364Z   set-safe-directory: true
+2026-06-30T17:28:15.3717197Z ##[endgroup]
+2026-06-30T17:28:15.4704488Z Syncing repository: calinrus-dev/malphas
+2026-06-30T17:28:15.4706480Z ##[group]Getting Git version info
+2026-06-30T17:28:15.4707323Z Working directory is '/home/runner/work/malphas/malphas'
+2026-06-30T17:28:15.4708861Z [command]/usr/bin/git version
+2026-06-30T17:28:15.4789792Z git version 2.54.0
+2026-06-30T17:28:15.4843444Z ##[endgroup]
+2026-06-30T17:28:15.4857494Z Temporarily overriding HOME='/home/runner/work/_temp/d19a15e4-1dd7-4e7e-a209-6203b9929a0e' before making global git config changes
+2026-06-30T17:28:15.4859583Z Adding repository directory to the temporary git global config as a safe directory
+2026-06-30T17:28:15.4863503Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/malphas/malphas
+2026-06-30T17:28:15.4915394Z Deleting the contents of '/home/runner/work/malphas/malphas'
+2026-06-30T17:28:15.4919699Z ##[group]Initializing the repository
+2026-06-30T17:28:15.4924959Z [command]/usr/bin/git init /home/runner/work/malphas/malphas
+2026-06-30T17:28:15.5061640Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-06-30T17:28:15.5063168Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-06-30T17:28:15.5064529Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-06-30T17:28:15.5065575Z hint: call:
+2026-06-30T17:28:15.5066506Z hint:
+2026-06-30T17:28:15.5067842Z hint: 	git config --global init.defaultBranch <name>
+2026-06-30T17:28:15.5069605Z hint:
+2026-06-30T17:28:15.5071030Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-06-30T17:28:15.5073190Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-06-30T17:28:15.5075036Z hint:
+2026-06-30T17:28:15.5076090Z hint: 	git branch -m <name>
+2026-06-30T17:28:15.5077297Z hint:
+2026-06-30T17:28:15.5078928Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-06-30T17:28:15.5081233Z Initialized empty Git repository in /home/runner/work/malphas/malphas/.git/
+2026-06-30T17:28:15.5084466Z [command]/usr/bin/git remote add origin https://github.com/calinrus-dev/malphas
+2026-06-30T17:28:15.5129588Z ##[endgroup]
+2026-06-30T17:28:15.5131172Z ##[group]Disabling automatic garbage collection
+2026-06-30T17:28:15.5133453Z [command]/usr/bin/git config --local gc.auto 0
+2026-06-30T17:28:15.5164021Z ##[endgroup]
+2026-06-30T17:28:15.5166124Z ##[group]Setting up auth
+2026-06-30T17:28:15.5171247Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-06-30T17:28:15.5207687Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-06-30T17:28:15.5579684Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-06-30T17:28:15.5612277Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-06-30T17:28:15.5825830Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-06-30T17:28:15.5855942Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-06-30T17:28:15.6072174Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-06-30T17:28:15.6105075Z ##[endgroup]
+2026-06-30T17:28:15.6105995Z ##[group]Fetching the repository
+2026-06-30T17:28:15.6114051Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +988253fdbe213b1362efda914f58719502b37354:refs/remotes/origin/main
+2026-06-30T17:28:16.2318175Z From https://github.com/calinrus-dev/malphas
+2026-06-30T17:28:16.2319947Z  * [new ref]         988253fdbe213b1362efda914f58719502b37354 -> origin/main
+2026-06-30T17:28:16.2361103Z ##[endgroup]
+2026-06-30T17:28:16.2362316Z ##[group]Determining the checkout info
+2026-06-30T17:28:16.2363508Z ##[endgroup]
+2026-06-30T17:28:16.2372051Z [command]/usr/bin/git sparse-checkout disable
+2026-06-30T17:28:16.2427498Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-06-30T17:28:16.2460212Z ##[group]Checking out the ref
+2026-06-30T17:28:16.2568176Z [command]/usr/bin/git checkout --progress --force -B main refs/remotes/origin/main
+2026-06-30T17:28:16.2968186Z Switched to a new branch 'main'
+2026-06-30T17:28:16.2970259Z branch 'main' set up to track 'origin/main'.
+2026-06-30T17:28:16.2977138Z ##[endgroup]
+2026-06-30T17:28:16.3028026Z [command]/usr/bin/git log -1 --format=%H
+2026-06-30T17:28:16.3051878Z 988253fdbe213b1362efda914f58719502b37354

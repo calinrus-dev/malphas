@@ -235,10 +235,36 @@ build_android() {
         rm -rf "$ROOT/flutter_app/android/app/src/main/jniLibs/$abi"
     done
 
+    # NDK r26c and newer use versioned LLVM triples. Use API 21 as the
+    # baseline for broad device compatibility.
+    local api=21
+
     for entry in "${abis[@]}"; do
         local abi="${entry%%:*}"
         local target="${entry#*:}"
         info "Building $abi ($target)..."
+
+        case "$target" in
+            aarch64-linux-android)
+                export CC_aarch64_linux_android="$toolchain/aarch64-linux-android${api}-clang"
+                export CXX_aarch64_linux_android="$toolchain/aarch64-linux-android${api}-clang++"
+                export AR_aarch64_linux_android="$toolchain/llvm-ar"
+                export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$toolchain/aarch64-linux-android${api}-clang"
+                ;;
+            armv7-linux-androideabi)
+                export CC_armv7_linux_androideabi="$toolchain/armv7a-linux-androideabi${api}-clang"
+                export CXX_armv7_linux_androideabi="$toolchain/armv7a-linux-androideabi${api}-clang++"
+                export AR_armv7_linux_androideabi="$toolchain/llvm-ar"
+                export CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER="$toolchain/armv7a-linux-androideabi${api}-clang"
+                ;;
+            x86_64-linux-android)
+                export CC_x86_64_linux_android="$toolchain/x86_64-linux-android${api}-clang"
+                export CXX_x86_64_linux_android="$toolchain/x86_64-linux-android${api}-clang++"
+                export AR_x86_64_linux_android="$toolchain/llvm-ar"
+                export CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER="$toolchain/x86_64-linux-android${api}-clang"
+                ;;
+        esac
+
         if ! cargo build --release --target "$target" --package malphas_core; then
             error "Failed to build $target; aborting Android build."
             exit 1

@@ -60,7 +60,7 @@ jobs:
             lib="flutter_app/android/app/src/main/jniLibs/$abi/libmalphas_core.so"
             if [ -f "$lib" ]; then
               echo "Signing $lib"
-              "$CLI" sign "$lib"
+              "$CLI" sign "$lib" "$key"
             else
               echo "Missing $lib; cannot sign."
               exit 1
