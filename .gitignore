@@ -52,4 +52,7 @@ packages/
 *_logs/
 *_logs_*.zip
 runs.json
+ann.json
+run_*.json
+wf_log_*.zip
 
