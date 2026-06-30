@@ -49,4 +49,7 @@ examples/bouncing_demo/bindings.rs
 kanjivg.zip
 kanjivg_extracted/
 packages/
+*_logs/
+*_logs_*.zip
+runs.json
 
