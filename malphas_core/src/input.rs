@@ -82,6 +82,12 @@ pub fn process_input_event(event_type: i32, x: f32, y: f32) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    /// Serialize input-queue tests because they all share the same static
+    /// `OnceLock` instance. Holding this lock while draining/running prevents
+    /// concurrent tests from perturbing the capacity assertions.
+    static INPUT_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     fn drain_queue() -> Vec<InputEvent> {
         let mut out = Vec::new();
@@ -93,6 +99,7 @@ mod tests {
 
     #[test]
     fn test_input_coalescence_and_capacity_drop() {
+        let _guard = INPUT_TEST_LOCK.lock().unwrap();
         // Ensure a clean queue; tests share the static OnceLock.
         let _ = drain_queue();
 
@@ -115,6 +122,7 @@ mod tests {
 
     #[test]
     fn test_invalid_event_type_is_rejected() {
+        let _guard = INPUT_TEST_LOCK.lock().unwrap();
         let _ = drain_queue();
         assert_eq!(process_input_event(-1, 0.0, 0.0), -1);
         assert_eq!(process_input_event(3, 0.0, 0.0), -1);
@@ -123,6 +131,7 @@ mod tests {
 
     #[test]
     fn test_non_finite_coordinates_are_rejected() {
+        let _guard = INPUT_TEST_LOCK.lock().unwrap();
         let _ = drain_queue();
         assert_eq!(process_input_event(0, f32::NAN, 0.0), -1);
         assert_eq!(process_input_event(0, 0.0, f32::NAN), -1);
@@ -132,6 +141,7 @@ mod tests {
 
     #[test]
     fn test_capacity_drops_oldest_event() {
+        let _guard = INPUT_TEST_LOCK.lock().unwrap();
         let _ = drain_queue();
         // Fill the queue.
         for i in 0..INPUT_QUEUE_CAPACITY {
