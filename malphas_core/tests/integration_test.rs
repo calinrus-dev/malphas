@@ -1,4 +1,4 @@
-//! End-to-end integration test for the Malphas FFI core v2.7.5.
+//! End-to-end integration test for the Malphas FFI core v2.9.0.
 //!
 //! Exercises the full lifecycle: init → load MSP → load signed bouncing_demo.mxc →
 //! trigger pulse → shutdown, verifying that the system produces render
@@ -9,7 +9,7 @@ use std::sync::atomic::Ordering;
 
 use ed25519_dalek::{Signer, SigningKey};
 use malphas_core::msp_loader::{
-    compute_msp_checksum, MspEntityDescriptor, MspHeader, ERROR_PAYLOAD_RESERVE, MSP_MAGIC,
+    compute_msp_sha256, MspEntityDescriptor, MspHeader, ERROR_PAYLOAD_RESERVE, MSP_MAGIC,
     MSP_VERSION,
 };
 use rand_core::OsRng;
@@ -53,11 +53,16 @@ struct MalphasDoubleBufferBridge {
     _padding8: u64,
 }
 
-fn system_library_path() -> std::path::PathBuf {
+fn workspace_root() -> std::path::PathBuf {
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let workspace_root = manifest_dir
+    manifest_dir
         .parent()
-        .expect("malphas_core inside workspace");
+        .expect("malphas_core inside workspace")
+        .to_path_buf()
+}
+
+fn system_library_path() -> std::path::PathBuf {
+    let workspace_root = workspace_root();
     let profile = if cfg!(debug_assertions) {
         "debug"
     } else {
@@ -130,7 +135,7 @@ fn build_test_msp(path: &std::path::Path) {
 
     let mut file = std::fs::File::create(path).unwrap();
 
-    let checksum = compute_msp_checksum(
+    let checksum = compute_msp_sha256(
         &[
             descriptor_as_bytes(&descriptor).as_slice(),
             payload_section.as_slice(),
@@ -145,7 +150,7 @@ fn build_test_msp(path: &std::path::Path) {
         payload_section_offset: payload_section_offset as u32,
         payload_section_size: payload_section.len() as u32,
         checksum,
-        _padding: [0; 32],
+        _padding: [0; 8],
     };
     file.write_all(&header_as_bytes(&header)).unwrap();
 
@@ -164,8 +169,8 @@ fn header_as_bytes(header: &MspHeader) -> [u8; 64] {
     buf[12..16].copy_from_slice(&header.entity_count.to_le_bytes());
     buf[16..20].copy_from_slice(&header.payload_section_offset.to_le_bytes());
     buf[20..24].copy_from_slice(&header.payload_section_size.to_le_bytes());
-    buf[24..32].copy_from_slice(&header.checksum.to_le_bytes());
-    buf[32..64].copy_from_slice(&header._padding);
+    buf[24..56].copy_from_slice(&header.checksum);
+    buf[56..64].copy_from_slice(&header._padding);
     buf
 }
 
@@ -232,17 +237,16 @@ fn end_to_end_init_load_msp_system_pulse_shutdown() {
     );
     assert_eq!(load_result, 0, "load_msp must succeed");
 
-    // 3. Install the system binary under an approved sandbox root.
-    let original_dir = std::env::current_dir().unwrap();
-    let work_dir = std::env::temp_dir().join(format!("malphas_work_{}", std::process::id()));
+    // 3. Install the system binary under an approved sandbox root inside the
+    // canonical workspace.
+    let workspace = workspace_root();
+    let systems_root = workspace.join("systems");
+    std::fs::create_dir_all(&systems_root).unwrap();
+    let work_dir = systems_root.join(format!("_malphas_integration_{}", std::process::id()));
     std::fs::create_dir_all(&work_dir).unwrap();
-    std::env::set_current_dir(&work_dir).unwrap();
-
-    let systems_dir = std::path::Path::new("systems");
-    std::fs::create_dir_all(systems_dir).unwrap();
 
     let system_file_name = system_path.file_name().unwrap();
-    let sandboxed_system = systems_dir.join(system_file_name);
+    let sandboxed_system = work_dir.join(system_file_name);
     std::fs::copy(&system_path, &sandboxed_system).unwrap();
 
     let system_bytes = std::fs::read(&sandboxed_system).unwrap();
@@ -259,9 +263,8 @@ fn end_to_end_init_load_msp_system_pulse_shutdown() {
     )
     .unwrap();
 
-    let relative_system_path = std::path::Path::new("systems").join(system_file_name);
     let system_result = malphas_core::load_system(
-        std::ffi::CString::new(relative_system_path.to_str().unwrap())
+        std::ffi::CString::new(sandboxed_system.to_str().unwrap())
             .unwrap()
             .as_ptr(),
     );
@@ -310,6 +313,6 @@ fn end_to_end_init_load_msp_system_pulse_shutdown() {
     assert_eq!(malphas_core::shutdown_engine(), 0);
 
     let _ = std::fs::remove_file(&msp_path);
-    std::env::set_current_dir(&original_dir).unwrap();
+    let _ = std::fs::remove_file(msp_path.with_extension("msp.sig"));
     let _ = std::fs::remove_dir_all(&work_dir);
 }

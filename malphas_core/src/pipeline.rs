@@ -1,4 +1,4 @@
-// C-ABI structures and the background simulation tick for Malphas v2.7.5.
+// C-ABI structures and the background simulation tick for Malphas v2.9.0.
 //
 // The hot path is driven by a single VSync pulse from Flutter.  On each tick
 // the core obtains the fresh Silver Platter from the mapped MSP and hands the
@@ -9,13 +9,14 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 
+use crate::bridge::get_front_buffer_snapshot;
 use crate::input::drain_input_events;
 use crate::msp_loader::MSP_MAP;
 use crate::system_host::tick_systems;
 
 /// ABI version embedded in the bridge.  Dart must verify this value before
 /// trusting the layout.  Format: 0xMMmmpp00 (major, minor, patch).
-pub const BRIDGE_ABI_VERSION: u32 = 0x02070500;
+pub const BRIDGE_ABI_VERSION: u32 = 0x02090000;
 
 // ---------------------------------------------------------------------------
 // Global shared-memory handles and engine lifecycle state.
@@ -27,7 +28,6 @@ pub(crate) static TELEMETRY_ORIGIN: OnceLock<Instant> = OnceLock::new();
 pub(crate) static LAST_PULSE_MICROS: AtomicU64 = AtomicU64::new(0);
 static VM_TICK_MICROS: AtomicU64 = AtomicU64::new(0);
 static PULSE_LATENCY_MICROS: AtomicU64 = AtomicU64::new(0);
-static HIT_TESTS_COUNT: AtomicU64 = AtomicU64::new(0);
 static COMMANDS_GENERATED_COUNT: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) fn telemetry_now_micros() -> u64 {
@@ -43,10 +43,6 @@ pub(crate) fn get_vm_tick_micros_internal() -> u64 {
 
 pub(crate) fn get_pulse_latency_micros_internal() -> u64 {
     PULSE_LATENCY_MICROS.load(Ordering::Relaxed)
-}
-
-pub(crate) fn get_hit_tests_count_internal() -> u64 {
-    HIT_TESTS_COUNT.load(Ordering::Relaxed)
 }
 
 pub(crate) fn get_commands_generated_count_internal() -> u64 {
@@ -71,7 +67,7 @@ pub struct DartRenderCommand {
 
 /// In-Arena text object pointed to by text render commands.
 ///
-/// Kept for ABI compatibility; text rendering in v2.7.0 is handled by systems.
+/// Kept for ABI compatibility; text rendering in v2.9.0 is handled by systems.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct TextPayload {
@@ -148,6 +144,9 @@ pub(crate) fn allocate_bridge(max_commands: u32) -> Option<*mut MalphasDoubleBuf
         return None;
     }
 
+    // SAFETY: `bridge_ptr` is non-null, 64-byte aligned, and points to
+    // `bridge_size` freshly allocated bytes, so zero-initialising the struct is
+    // valid.  The subsequent field writes only touch that owned allocation.
     unsafe {
         std::ptr::write_bytes(bridge_ptr as *mut u8, 0, bridge_size);
         (*bridge_ptr).abi_version = BRIDGE_ABI_VERSION;
@@ -206,6 +205,10 @@ pub(crate) fn bridge_state() -> Option<Arc<BridgeState>> {
 // Tick entry points.
 // ---------------------------------------------------------------------------
 pub(crate) fn process_engine_tick_sync(_dt_micros: u64) -> i32 {
+    // Synchronous ticks are not preceded by a `trigger_engine_pulse`, so record
+    // the current time as the pulse timestamp so latency telemetry reflects the
+    // moment the sync tick was requested.
+    LAST_PULSE_MICROS.store(telemetry_now_micros(), Ordering::Relaxed);
     process_engine_tick_internal();
     0
 }
@@ -223,18 +226,23 @@ pub(crate) fn process_engine_tick_internal() {
         None => return,
     };
 
-    let back_index = unsafe { (*bridge.bridge).atomic_back_index.load(Ordering::Acquire) };
+    // Use the same consistent snapshot pattern as `get_front_buffer_snapshot`:
+    // read the back index once with Acquire ordering and derive the back buffer
+    // (the one the simulation thread writes into) as the opposite side.
+    let front_snapshot = get_front_buffer_snapshot(bridge.bridge);
+    let back_index = if front_snapshot.0 == 0 { 1 } else { 0 };
     let commands_ptr = if back_index == 0 {
         bridge.buffer_a
     } else {
         bridge.buffer_b
     };
-    let command_count_atomic_ptr = unsafe {
-        if back_index == 0 {
-            &(*bridge.bridge).buffer_a_command_count
-        } else {
-            &(*bridge.bridge).buffer_b_command_count
-        }
+    let command_count_atomic_ptr = if back_index == 0 {
+        // SAFETY: `bridge.bridge` is a valid, aligned bridge owned by this
+        // `BridgeState`; the field address is derived from a live allocation.
+        unsafe { &(*bridge.bridge).buffer_a_command_count }
+    } else {
+        // SAFETY: Same as above.
+        unsafe { &(*bridge.bridge).buffer_b_command_count }
     };
     if commands_ptr.is_null() {
         return;
@@ -280,6 +288,9 @@ pub(crate) fn process_engine_tick_internal() {
         Ordering::Relaxed,
     );
 
+    // SAFETY: `bridge.bridge` is a valid, aligned bridge owned by this
+    // `BridgeState`; the atomic stores publish the command count and flip the
+    // back buffer index to the front-buffer reader.
     unsafe {
         command_count_atomic_ptr.store(written, Ordering::Release);
         (*bridge.bridge)
@@ -287,10 +298,10 @@ pub(crate) fn process_engine_tick_internal() {
             .store(written, Ordering::Release);
     }
 
-    HIT_TESTS_COUNT.store(0, Ordering::Relaxed);
     COMMANDS_GENERATED_COUNT.store(written as u64, Ordering::Relaxed);
 
     let next_back = if back_index == 0 { 1 } else { 0 };
+    // SAFETY: Same as above: the bridge is live and exclusively owned by Rust.
     unsafe {
         (*bridge.bridge)
             .atomic_back_index

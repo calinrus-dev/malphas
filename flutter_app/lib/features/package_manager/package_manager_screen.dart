@@ -251,7 +251,8 @@ class _PackageManagerPanelState extends State<PackageManagerPanel> {
                             color: Colors.redAccent,
                             size: 18,
                           ),
-                          onPressed: () => _controller.deletePackage(p.id),
+                          onPressed: () async =>
+                              await _controller.deletePackage(p.id),
                         ),
                       ],
                     ),

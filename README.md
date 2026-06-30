@@ -1,4 +1,4 @@
-# Malphas v2.8.0 — Fortress CI
+# Malphas v2.9.0 — Fortress CI
 
 [![Rust CI](https://github.com/calinrus-dev/malphas/actions/workflows/rust_ci.yml/badge.svg)](https://github.com/calinrus-dev/malphas/actions/workflows/rust_ci.yml)
 [![Flutter CI](https://github.com/calinrus-dev/malphas/actions/workflows/flutter_ci.yml/badge.svg)](https://github.com/calinrus-dev/malphas/actions/workflows/flutter_ci.yml)
@@ -10,7 +10,7 @@
 
 Malphas is a high-performance **Data-Oriented Design (DOD)** runtime. All logic, state, and render production live in native, memory-mapped code. Flutter is treated as a passive display terminal; the Rust core owns every byte that matters.
 
-**v2.8.0 — Fortress CI** polishes the v2.7.5 hardening and makes the entire delivery pipeline green:
+**v2.9.0 — Sovereign Runtime** polishes the v2.8.0 hardening and makes the entire delivery pipeline green:
 
 - Cross-platform CI/CD parity: Rust, Flutter, Android, and Windows release builds are all verified on every push.
 - Reusable workflows inherit secrets correctly, and artifact downloads are robust across Linux, macOS, and Windows.
@@ -18,7 +18,7 @@ Malphas is a high-performance **Data-Oriented Design (DOD)** runtime. All logic,
 - Flaky tests fixed: input-queue tests are serialized and security tests use absolute paths to avoid `chdir` races.
 - Asset packaging fixed: `flutter_app/assets/packages/.gitkeep` guarantees the directory exists on a clean checkout.
 
-The v2.7.5 runtime hardening remains in place:
+The v2.9.0 runtime hardening remains in place:
 
 - Rust-owned FFI bridge and command buffers.
 - Ed25519 sidecar signatures for the engine, `.msp` packs, and `.mxc` systems.
@@ -65,7 +65,7 @@ If you are still thinking in `object.update()`, you are in the wrong execution e
 
 ```text
 ┌─────────────────────────────────────────────────────────────────────┐
-│                  MALPHAS v2.8.0 — SOVEREIGN RUNTIME                 │
+│                  MALPHAS v2.9.0 — SOVEREIGN RUNTIME                 │
 │                                                                     │
 │   ┌────────────┐   ┌───────────────┐   ┌─────────────────────────┐ │
 │   │    MSP     │──▶│ Memory Router │──▶│          MXC            │ │
@@ -271,7 +271,7 @@ No `List<DartRenderCommand>`. No `jsonDecode`. No per-frame allocation. There is
 
 ## Security Model
 
-v2.8.0 makes the supply chain auditable and the runtime fail-safe.
+v2.9.0 makes the supply chain auditable and the runtime fail-safe.
 
 | Asset | Protection |
 |-------|------------|
@@ -279,7 +279,7 @@ v2.8.0 makes the supply chain auditable and the runtime fail-safe.
 | MSP data pack | Ed25519 sidecar signature (`.msp.sig`) verified before `mmap`. |
 | MXC system library | Ed25519 sidecar signature (`.sig`) verified before `dlopen`. |
 | Trust anchor | Configurable at runtime via `setTrustAnchor` / `set_trust_anchor`. |
-| System loading | Path sandbox: only paths under `systems/`, `packages/`, or `motors/` are allowed. |
+| System loading | Path sandbox: only paths under `systems/`, `packages/`, `motors/`, or `flutter_app/motors/` are allowed. |
 | Panic isolation | `catch_unwind` around system `init` and `tick`; a panicking system is tainted, not the engine. |
 | Integrity utilities | Streaming SHA-256, constant-time comparison, ZIP bomb/symlink defences. |
 
@@ -295,7 +295,7 @@ Every push to `main` is verified by:
 
 | Workflow | What it checks |
 |---|---|
-| **Rust CI** | `cargo fmt`, `cargo clippy --all-targets`, `cargo test --release --locked`, security tests, and native artifact signing. |
+| **Rust CI** | `cargo fmt`, `cargo clippy --all-targets`, `cargo test --release --locked`, `cargo audit`, security tests, and native artifact signing. |
 | **Flutter CI** | Flutter analyze, unit/integration tests against the downloaded native motor, and manifest compilation. |
 | **Flutter Lint** | Dart format, `flutter analyze`, and headless Flutter tests. |
 | **Flutter Windows Release Build** | Full Windows release build and artifact packaging. |
@@ -427,6 +427,14 @@ grep -n "size_of::<MalphasDoubleBufferBridge>()" malphas_core/src/pipeline.rs
 | **FFI Bridge** | `MalphasDoubleBufferBridge`. A 64-byte shared-memory structure between Rust and Dart. | A message bus, event channel, or serialization protocol. |
 
 **Golden rule:** if you use the words "object", "method", "class", "component", or "skin" inside the core, you have lost the game.
+
+---
+
+## Documentation
+
+- [`docs/FFI_CONTRACT.md`](docs/FFI_CONTRACT.md) — exact C-ABI layout, atomic ordering, and version policy for the Rust/Dart boundary.
+- [`docs/SECURITY.md`](docs/SECURITY.md) — threat model, trust-anchor setup, sandbox rules, and security reporting.
+- [`CHANGELOG.md`](CHANGELOG.md) — release notes and migration guide.
 
 ---
 

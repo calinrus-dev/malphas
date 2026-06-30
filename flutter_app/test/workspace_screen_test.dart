@@ -30,6 +30,12 @@ void main() {
   testWidgets('WorkspaceScreen shows auto-load error for missing package', (
     WidgetTester tester,
   ) async {
+    final bindings = MalphasBindings();
+    if (!bindings.isNativeAvailable) {
+      markTestSkipped('Native motor is not available in this environment');
+      return;
+    }
+
     final env = MalphasEnvironment(
       id: 'env_missing',
       name: 'Missing Pack',

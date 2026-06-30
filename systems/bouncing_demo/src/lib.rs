@@ -1,4 +1,4 @@
-//! Bouncing demo system for Malphas v2.7.5.
+//! Bouncing demo system for Malphas v2.9.0.
 //!
 //! This `.mxc` (Malphas eXecutable Core) is a hot-swappable dynamic library
 //! that receives the Silver Platter lookup table every frame.  It keeps its own

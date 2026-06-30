@@ -1,3 +1,4 @@
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -29,7 +30,9 @@ class PackageController extends ChangeNotifier {
   factory PackageController() => _instance;
   PackageController._internal();
 
-  static final Map<String, ui.Image> skinImages = {};
+  static const int _maxSkinImages = 32;
+  static final LinkedHashMap<String, ui.Image> skinImages =
+      LinkedHashMap<String, ui.Image>();
 
   final List<EntityPackage> _registry = [];
   final List<Entity> _entities = [];
@@ -70,7 +73,7 @@ class PackageController extends ChangeNotifier {
 
   Future<void> updateWorkspaceRoot(String? path) async {
     _workspaceRootOverride = path;
-    _persistence.saveWorkspaceRootOverride(path);
+    await _persistence.saveWorkspaceRootOverride(path);
     _initialized = false;
     await init();
   }
@@ -102,7 +105,7 @@ class PackageController extends ChangeNotifier {
     if (_initialized) return;
 
     try {
-      final savedOverride = _persistence.loadWorkspaceRootOverride();
+      final savedOverride = await _persistence.loadWorkspaceRootOverride();
       if (savedOverride != null && savedOverride.isNotEmpty) {
         _workspaceRootOverride = savedOverride;
       } else if (Platform.isAndroid || Platform.isIOS) {
@@ -150,7 +153,7 @@ class PackageController extends ChangeNotifier {
 
       // Restore previously loaded package ids so `isLoaded` state survives
       // across app launches.
-      final persistedIds = _persistence.loadRegistryIds();
+      final persistedIds = await _persistence.loadRegistryIds();
 
       // Scan examples/**/*.msp
       final examplesDir = Directory('$workspace/examples');
@@ -226,8 +229,8 @@ class PackageController extends ChangeNotifier {
     _properties.addAll(packProperties);
   }
 
-  void _persistRegistry() {
-    _persistence.saveRegistryIds(
+  Future<void> _persistRegistry() async {
+    await _persistence.saveRegistryIds(
       _registry.where((p) => p.isLoaded).map((p) => p.id).toList(),
     );
   }
@@ -236,7 +239,7 @@ class PackageController extends ChangeNotifier {
   _ParsedPackageResult? _parseMspPackage(File file) {
     try {
       final bytes = file.readAsBytesSync();
-      if (bytes.length < 128) return null;
+      if (bytes.length < 56) return null;
 
       // Verify magic header: 'MLPS'
       if (bytes[0] != 0x4D ||
@@ -249,21 +252,58 @@ class PackageController extends ChangeNotifier {
       final data = ByteData.view(bytes.buffer, bytes.offsetInBytes);
       final version = data.getUint32(4, Endian.little);
 
-      // Read pack_id (16 bytes ASCII at offset 48)
-      final packIdBytes = bytes.sublist(48, 64);
-      final packId = utf8.decode(packIdBytes.takeWhile((b) => b != 0).toList());
+      final entitiesTableOffset = data.getUint32(8, Endian.little);
+      final entitiesCount = data.getUint32(12, Endian.little);
+      final payloadSectionOffset = data.getUint32(16, Endian.little);
+      final payloadSectionSize = data.getUint32(20, Endian.little);
+      // checksum at bytes 24-56
 
-      final entitiesCount = data.getUint32(80, Endian.little);
-      final entitiesTableOffset = data.getUint32(76, Endian.little);
+      // Validate header values are within file bounds.
+      if (entitiesTableOffset > bytes.length ||
+          payloadSectionOffset > bytes.length) {
+        return null;
+      }
+      if (payloadSectionOffset + payloadSectionSize > bytes.length) {
+        return null;
+      }
+
+      String? packId;
+      final manifestCandidates = [
+        File(
+            '${file.parent.path}/${file.uri.pathSegments.last.split('.').first}.manifest.json'),
+        File('${file.parent.path}/manifest.json'),
+      ];
+      File? manifestFile;
+      for (final candidate in manifestCandidates) {
+        if (candidate.existsSync()) {
+          manifestFile = candidate;
+          break;
+        }
+      }
+
+      if (manifestFile != null) {
+        try {
+          final manifestJson = jsonDecode(manifestFile.readAsStringSync())
+              as Map<String, dynamic>;
+          packId = manifestJson['pack_id'] as String?;
+        } catch (_) {
+          // Ignore malformed manifest; fall through to null packId.
+        }
+      }
+
+      packId ??= file.uri.pathSegments.last.split('.').first;
 
       final List<Entity> parsedEntities = [];
       final List<EntityTag> parsedTags = [];
       final List<EntityPayload> parsedPayloads = [];
       final List<EntityProperty> parsedProperties = [];
 
+      const descriptorSize = 64;
       for (int i = 0; i < entitiesCount; i++) {
-        final entryOffset = entitiesTableOffset + (i * 64);
-        if (entryOffset + 64 > bytes.length) break;
+        final entryOffset = entitiesTableOffset + (i * descriptorSize);
+        if (entryOffset < 0 || entryOffset + descriptorSize > bytes.length) {
+          break;
+        }
 
         final entId = data.getUint32(entryOffset, Endian.little);
 
@@ -278,18 +318,6 @@ class PackageController extends ChangeNotifier {
         );
         parsedTags.add(EntityTag(entId, 'Zero-Copy', true));
         parsedProperties.add(EntityProperty(entId, 'ID', '$entId'));
-      }
-
-      final manifestCandidates = [
-        File('${file.parent.path}/$packId.manifest.json'),
-        File('${file.parent.path}/manifest.json'),
-      ];
-      File? manifestFile;
-      for (final candidate in manifestCandidates) {
-        if (candidate.existsSync()) {
-          manifestFile = candidate;
-          break;
-        }
       }
 
       if (manifestFile != null) {
@@ -437,20 +465,42 @@ class PackageController extends ChangeNotifier {
 
     final manifestText = manifestFile.readAsStringSync();
     final manifest = jsonDecode(manifestText) as Map<String, dynamic>;
-    final output = await compiler.compilePackage(manifest);
+
+    // Copy the manifest and any referenced payload files into a working
+    // directory so the compiler can resolve relative payload_file paths.
+    final compileDir =
+        await Directory.systemTemp.createTemp('malphas_compile_bouncing_demo_');
+    await manifestFile.copy('${compileDir.path}/manifest.json');
+    final entities = manifest['entities'];
+    if (entities is List) {
+      for (final ent in entities) {
+        final payloadFile = ent['payload_file'] as String?;
+        if (payloadFile != null && payloadFile.isNotEmpty) {
+          final source = File('$workspace/examples/bouncing_demo/$payloadFile');
+          if (source.existsSync()) {
+            await source.copy('${compileDir.path}/$payloadFile');
+          }
+        }
+      }
+    }
+
+    final output = await compiler.compilePackage(
+      manifest,
+      sourceDir: compileDir,
+    );
 
     final packId = manifest['pack_id'] as String? ?? 'bouncing_demo';
 
-    File(
+    await File(
       '$workspace/examples/bouncing_demo/$packId.msp',
-    ).writeAsBytesSync(output.mspBytes);
+    ).writeAsBytes(output.mspBytes);
   }
 
   List<EntityPackage> getAllPackages() => List.unmodifiable(_registry);
   List<EntityPackage> getActivePackages() =>
       List.unmodifiable(_registry.where((p) => p.isLoaded));
 
-  void setPackageLoaded(String id, {required bool loaded}) {
+  Future<void> setPackageLoaded(String id, {required bool loaded}) async {
     final index = _registry.indexWhere((p) => p.id == id);
     if (index == -1) return;
     final p = _registry[index];
@@ -463,20 +513,20 @@ class PackageController extends ChangeNotifier {
       p.coverImagePath,
       loaded,
     );
-    _persistRegistry();
+    await _persistRegistry();
     notifyListeners();
   }
 
-  void injectPackage(EntityPackage pack) {
+  Future<void> injectPackage(EntityPackage pack) async {
     _registry.add(pack);
-    _persistRegistry();
+    await _persistRegistry();
     notifyListeners();
   }
 
-  void deletePackage(String id) {
+  Future<void> deletePackage(String id) async {
     _registry.removeWhere((p) => p.id == id);
     _entities.removeWhere((e) => e.packageId == id);
-    _persistRegistry();
+    await _persistRegistry();
     notifyListeners();
   }
 
@@ -507,7 +557,6 @@ class PackageController extends ChangeNotifier {
     for (final payload in packPayloads) {
       final path = payload.assetPath;
       if (path.isEmpty || path == 'none') continue;
-      if (skinImages.containsKey(path)) continue;
 
       try {
         File file = File(path);
@@ -519,12 +568,28 @@ class PackageController extends ChangeNotifier {
           final bytes = await file.readAsBytes();
           final codec = await ui.instantiateImageCodec(bytes);
           final frame = await codec.getNextFrame();
-          skinImages[path] = frame.image;
+          _putSkinImage(path, frame.image);
         }
       } catch (_) {
         // Skip individual failed loads
       }
     }
+  }
+
+  void _putSkinImage(String path, ui.Image image) {
+    if (skinImages.containsKey(path)) {
+      // Move to most-recently-used position.
+      skinImages.remove(path);
+    }
+    while (skinImages.length >= _maxSkinImages && skinImages.isNotEmpty) {
+      final evicted = skinImages.remove(skinImages.keys.first);
+      try {
+        evicted?.dispose();
+      } catch (_) {
+        // Safe check
+      }
+    }
+    skinImages[path] = image;
   }
 
   /// Explicitly disposes of all loaded ui.Image structures to free native RAM.
@@ -639,38 +704,89 @@ class PackageController extends ChangeNotifier {
       }).toList(),
     };
 
-    // 2. Build the stripped minimal manifest for malphas-cli
+    // 2. Prepare a working directory and generate real aligned payload files.
+    final compileDir =
+        await Directory.systemTemp.createTemp('malphas_compile_');
+    final compilerProcessedPayloads = <EntityPayload>[];
+
+    final strippedEntities = <Map<String, dynamic>>[];
+    for (final ent in entities) {
+      // Generate a minimal aligned payload blob derived from the entity
+      // properties so the compiler has a real asset to embed.
+      final entProps = properties
+          .where((p) => p.entityId == ent.id)
+          .fold<Map<String, String>>({}, (acc, p) {
+        acc[p.key] = p.value;
+        return acc;
+      });
+      final payloadFileName = 'entity_${ent.id}.bin';
+      final payloadFile = File('${compileDir.path}/$payloadFileName');
+
+      const payloadSize = 64;
+      final payloadBytes = Uint8List(payloadSize);
+      // Encode a tiny header so the payload is deterministic and not all zeros.
+      final idBytes = ByteData(4)..setUint32(0, ent.id, Endian.little);
+      payloadBytes.setRange(0, 4, idBytes.buffer.asUint8List());
+      final propText = utf8.encode(jsonEncode(entProps));
+      final copyLength =
+          propText.length > payloadSize - 4 ? payloadSize - 4 : propText.length;
+      payloadBytes.setRange(4, 4 + copyLength, propText);
+      await payloadFile.writeAsBytes(payloadBytes);
+
+      compilerProcessedPayloads.add(EntityPayload(
+        ent.activePayloadId == 0 ? 1 : ent.activePayloadId,
+        ent.id,
+        'Payload ${ent.id}',
+        'packages/$packId/$payloadFileName',
+        '1.0',
+      ));
+
+      strippedEntities.add({
+        'entity_id': ent.id,
+        'tag_mask': tags
+                .where((t) => t.entityId == ent.id)
+                .fold<int>(0, (mask, t) => mask | _tagMaskFromName(t.name)) |
+            1,
+        'payload_file': payloadFileName,
+      });
+    }
+
+    // 3. Build the stripped minimal manifest for malphas-cli.
     final strippedManifest = {
       'pack_id': packId,
-      'canvas_width': canvasWidth,
-      'canvas_height': canvasHeight,
-      'entities': entities.map((ent) {
-        final entProps = properties
-            .where((p) => p.entityId == ent.id)
-            .fold<Map<String, String>>({}, (acc, p) {
-          acc[p.key] = p.value;
-          return acc;
-        });
-        return {
-          'entity_id': ent.id,
-          'properties': entProps,
-        };
-      }).toList(),
+      'entities': strippedEntities,
     };
 
-    // 3. Compile using MalphasPackageCompiler
+    // 4. Compile using MalphasPackageCompiler.
     final compiler = MalphasPackageCompiler();
-    final output = await compiler.compilePackage(strippedManifest);
+    final output = await compiler.compilePackage(
+      strippedManifest,
+      sourceDir: compileDir,
+    );
 
-    // 4. Save files to packages/
+    // 5. Save files to packages/.
     final mspFile = File('${packagesDir.path}/$packId.msp');
     final manifestFile = File('${packagesDir.path}/$packId.manifest.json');
 
     await mspFile.writeAsBytes(output.mspBytes);
     await manifestFile.writeAsString(jsonEncode(richManifest));
 
-    // 5. Reload registry
+    // 6. Update processed payloads to reference the generated payload files.
+    processedPayloads.clear();
+    processedPayloads.addAll(compilerProcessedPayloads);
+
+    // 7. Reload registry.
     _initialized = false;
     await init();
+  }
+
+  int _tagMaskFromName(String name) {
+    // Simple deterministic bit mapping for tag names.
+    final lower = name.toLowerCase();
+    if (lower.contains('render')) return 1;
+    if (lower.contains('physics')) return 2;
+    if (lower.contains('input')) return 4;
+    if (lower.contains('audio')) return 8;
+    return 16;
   }
 }

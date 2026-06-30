@@ -1,18 +1,24 @@
-//! Malphas package compiler and signer CLI (v2.7.5).
+//! Malphas package compiler and signer CLI (v2.9.0).
 //!
 //! Subcommands:
 //!   compile <manifest.json>  -- Build <pack_id>.msp and generate bindings.rs
-//!   sign    <file> <privkey> -- Write <file>.sig
+//!   sign    <file>           -- Write <file>.sig using a signing key from
+//!                               MALPHAS_SIGNING_KEY, --signing-key-env,
+//!                               --signing-key-file, or stdin
+//!   pubkey  <file>           -- Print the Ed25519 public key for a signing key
+//!                               from MALPHAS_SIGNING_KEY, --signing-key-env,
+//!                               --signing-key-file, or stdin
 
 mod bindings_codegen;
 mod compiler;
 mod manifest;
 
 use clap::{Parser, Subcommand};
-use ed25519_dalek::{Signer, SigningKey};
+use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
 use sha2::{Digest, Sha256};
 use std::error::Error;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use crate::bindings_codegen::generate_bindings_next_to_manifest;
@@ -41,8 +47,23 @@ enum Commands {
     Sign {
         /// File to sign
         file: PathBuf,
-        /// 32-byte Ed25519 private key as hex
-        private_key_hex: String,
+        /// Read the 32-byte Ed25519 private key from this environment variable.
+        /// Falls back to MALPHAS_SIGNING_KEY when neither source is provided.
+        #[arg(long, value_name = "VAR")]
+        signing_key_env: Option<String>,
+        /// Read the 32-byte Ed25519 private key from this file (use `-` for stdin).
+        #[arg(long, value_name = "PATH")]
+        signing_key_file: Option<PathBuf>,
+    },
+    /// Print the Ed25519 public key for a private key.
+    Pubkey {
+        /// Read the 32-byte Ed25519 private key from this environment variable.
+        /// Falls back to MALPHAS_SIGNING_KEY when neither source is provided.
+        #[arg(long, value_name = "VAR")]
+        signing_key_env: Option<String>,
+        /// Read the 32-byte Ed25519 private key from this file (use `-` for stdin).
+        #[arg(long, value_name = "PATH")]
+        signing_key_file: Option<PathBuf>,
     },
 }
 
@@ -57,10 +78,20 @@ fn main() {
         }
         Commands::Sign {
             file,
-            private_key_hex,
+            signing_key_env,
+            signing_key_file,
         } => {
-            if let Err(e) = sign_file(&file, &private_key_hex) {
+            if let Err(e) = sign_file_cli(&file, signing_key_env, signing_key_file) {
                 eprintln!("Sign failed: {e}");
+                std::process::exit(1);
+            }
+        }
+        Commands::Pubkey {
+            signing_key_env,
+            signing_key_file,
+        } => {
+            if let Err(e) = print_public_key_cli(signing_key_env, signing_key_file) {
+                eprintln!("Pubkey failed: {e}");
                 std::process::exit(1);
             }
         }
@@ -87,6 +118,42 @@ fn compile_workspace(manifest_path: &Path) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+fn resolve_signing_key(
+    env_var: Option<String>,
+    file_path: Option<PathBuf>,
+) -> Result<String, Box<dyn Error>> {
+    if let Some(var) = env_var {
+        let value = std::env::var(&var).map_err(|e| {
+            format!("failed to read signing key from environment variable `{var}`: {e}")
+        })?;
+        return Ok(value);
+    }
+
+    if let Some(path) = file_path {
+        let mut key = String::new();
+        if path.as_os_str() == "-" {
+            std::io::stdin()
+                .read_to_string(&mut key)
+                .map_err(|e| format!("failed to read signing key from stdin: {e}"))?;
+        } else {
+            let mut file = fs::File::open(&path).map_err(|e| {
+                format!("failed to open signing key file '{}': {e}", path.display())
+            })?;
+            file.read_to_string(&mut key).map_err(|e| {
+                format!("failed to read signing key file '{}': {e}", path.display())
+            })?;
+        }
+        return Ok(key);
+    }
+
+    // Default fallback when no explicit source is provided.
+    let default_var = "MALPHAS_SIGNING_KEY";
+    std::env::var(default_var).map_err(|e| {
+        format!("failed to read signing key from default environment variable `{default_var}`: {e}")
+            .into()
+    })
+}
+
 fn decode_hex_32(s: &str) -> Result<[u8; 32], Box<dyn Error>> {
     let cleaned = s.trim().trim_start_matches("0x").trim_start_matches("0X");
     let bytes = hex::decode(cleaned)?;
@@ -98,18 +165,28 @@ fn decode_hex_32(s: &str) -> Result<[u8; 32], Box<dyn Error>> {
     Ok(array)
 }
 
-fn sign_file(file_path: &Path, private_key_hex: &str) -> Result<(), Box<dyn Error>> {
-    if private_key_hex.trim().is_empty() {
-        return Err(format!(
-            "empty signing key for '{}'; use a valid 32-byte Ed25519 seed",
-            file_path.display()
-        )
-        .into());
+fn signing_key_from_source(
+    env_var: Option<String>,
+    file_path: Option<PathBuf>,
+) -> Result<SigningKey, Box<dyn Error>> {
+    let key_hex = resolve_signing_key(env_var, file_path)?;
+    if key_hex.trim().is_empty() {
+        return Err("empty signing key; use a valid 32-byte Ed25519 seed".into());
     }
+    let seed = decode_hex_32(&key_hex)?;
+    Ok(SigningKey::from_bytes(&seed))
+}
 
-    let seed = decode_hex_32(private_key_hex)?;
-    let signing_key = SigningKey::from_bytes(&seed);
+fn sign_file_cli(
+    file_path: &Path,
+    env_var: Option<String>,
+    file_key_path: Option<PathBuf>,
+) -> Result<(), Box<dyn Error>> {
+    let signing_key = signing_key_from_source(env_var, file_key_path)?;
+    sign_file_with_key(file_path, &signing_key)
+}
 
+fn sign_file_with_key(file_path: &Path, signing_key: &SigningKey) -> Result<(), Box<dyn Error>> {
     let data = fs::read(file_path)?;
     let hash = Sha256::digest(&data);
     let signature = signing_key.sign(&hash);
@@ -125,27 +202,44 @@ fn sign_file(file_path: &Path, private_key_hex: &str) -> Result<(), Box<dyn Erro
     Ok(())
 }
 
+fn print_public_key_cli(
+    env_var: Option<String>,
+    file_path: Option<PathBuf>,
+) -> Result<(), Box<dyn Error>> {
+    let signing_key = signing_key_from_source(env_var, file_path)?;
+    let public_key: VerifyingKey = signing_key.verifying_key();
+    println!("{}", hex::encode(public_key.to_bytes()));
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::Write;
+    use std::sync::Mutex;
+
+    /// Serializes tests that manipulate `MALPHAS_SIGNING_KEY` because
+    /// `std::env::var` is process-global and tests run in parallel by default.
+    static SIGNING_KEY_ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn temp_dir() -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("malphas_cli_test_{}", std::process::id()))
+    }
 
     #[test]
     fn sign_command_writes_verifiable_signature() {
         use ed25519_dalek::{Verifier, VerifyingKey};
         use rand_core::OsRng;
 
-        let tmp_dir =
-            std::env::temp_dir().join(format!("malphas_cli_sign_test_{}", std::process::id()));
+        let tmp_dir = temp_dir().join("signature");
         fs::create_dir_all(&tmp_dir).unwrap();
 
         let data_path = tmp_dir.join("payload.bin");
         fs::write(&data_path, b"MALPHAS CLI SIGN TEST").unwrap();
 
         let signing_key = SigningKey::generate(&mut OsRng);
-        let private_key_hex = hex::encode(signing_key.to_bytes());
 
-        sign_file(&data_path, &private_key_hex).unwrap();
+        sign_file_with_key(&data_path, &signing_key).unwrap();
 
         let sig_path = data_path.with_extension("bin.sig");
         assert!(sig_path.exists());
@@ -160,22 +254,147 @@ mod tests {
         let hash = Sha256::digest(&data);
         assert!(verifying_key.verify(&hash, &signature).is_ok());
 
-        // 0x prefix must also be accepted.
-        let data_path_0x = tmp_dir.join("payload_0x.bin");
-        fs::write(&data_path_0x, b"MALPHAS CLI SIGN TEST 0X").unwrap();
-        sign_file(&data_path_0x, &format!("0x{private_key_hex}")).unwrap();
-        let sig_path_0x = data_path_0x.with_extension("bin.sig");
-        assert!(sig_path_0x.exists());
-
-        // Empty key must be rejected.
-        let empty_result = sign_file(&data_path, "");
-        assert!(empty_result.is_err());
-
         let _ = fs::remove_file(&data_path);
         let _ = fs::remove_file(&sig_path);
-        let _ = fs::remove_file(&data_path_0x);
-        let _ = fs::remove_file(&sig_path_0x);
         let _ = fs::remove_dir(&tmp_dir);
+    }
+
+    #[test]
+    fn sign_command_accepts_key_from_env_variable() {
+        use rand_core::OsRng;
+
+        let tmp_dir = temp_dir().join("env");
+        fs::create_dir_all(&tmp_dir).unwrap();
+
+        let data_path = tmp_dir.join("payload.bin");
+        fs::write(&data_path, b"MALPHAS CLI SIGN ENV TEST").unwrap();
+
+        let signing_key = SigningKey::generate(&mut OsRng);
+        let env_var = "MALPHAS_TEST_SIGNING_KEY_ENV";
+        std::env::set_var(env_var, hex::encode(signing_key.to_bytes()));
+
+        sign_file_cli(&data_path, Some(env_var.to_string()), None).unwrap();
+
+        assert!(data_path.with_extension("bin.sig").exists());
+
+        let _ = fs::remove_file(&data_path);
+        let _ = fs::remove_file(data_path.with_extension("bin.sig"));
+        let _ = fs::remove_dir(&tmp_dir);
+    }
+
+    #[test]
+    fn sign_command_accepts_key_from_file() {
+        use rand_core::OsRng;
+
+        let tmp_dir = temp_dir().join("file");
+        fs::create_dir_all(&tmp_dir).unwrap();
+
+        let data_path = tmp_dir.join("payload.bin");
+        fs::write(&data_path, b"MALPHAS CLI SIGN FILE TEST").unwrap();
+
+        let signing_key = SigningKey::generate(&mut OsRng);
+        let key_path = tmp_dir.join("key.hex");
+        fs::write(
+            &key_path,
+            format!("0x{}", hex::encode(signing_key.to_bytes())),
+        )
+        .unwrap();
+
+        sign_file_cli(&data_path, None, Some(key_path.clone())).unwrap();
+
+        assert!(data_path.with_extension("bin.sig").exists());
+
+        let _ = fs::remove_file(&data_path);
+        let _ = fs::remove_file(data_path.with_extension("bin.sig"));
+        let _ = fs::remove_file(&key_path);
+        let _ = fs::remove_dir(&tmp_dir);
+    }
+
+    #[test]
+    fn sign_command_rejects_missing_key_source() {
+        let _guard = SIGNING_KEY_ENV_LOCK.lock().unwrap();
+        let tmp_dir = temp_dir().join("missing");
+        fs::create_dir_all(&tmp_dir).unwrap();
+
+        let data_path = tmp_dir.join("payload.bin");
+        fs::write(&data_path, b"MALPHAS CLI SIGN MISSING TEST").unwrap();
+
+        // Ensure the default env var is absent so the fallback fails cleanly.
+        std::env::remove_var("MALPHAS_SIGNING_KEY");
+
+        let result = sign_file_cli(&data_path, None, None);
+        assert!(result.is_err());
+
+        let _ = fs::remove_file(&data_path);
+        let _ = fs::remove_dir(&tmp_dir);
+    }
+
+    #[test]
+    fn sign_command_rejects_empty_signing_key() {
+        let tmp_dir = temp_dir().join("empty_key");
+        fs::create_dir_all(&tmp_dir).unwrap();
+
+        let data_path = tmp_dir.join("payload.bin");
+        fs::write(&data_path, b"MALPHAS CLI SIGN EMPTY TEST").unwrap();
+
+        let env_var = "MALPHAS_TEST_EMPTY_SIGNING_KEY";
+        std::env::set_var(env_var, "   ");
+
+        let result = sign_file_cli(&data_path, Some(env_var.to_string()), None);
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("empty signing key"));
+
+        std::env::remove_var(env_var);
+        let _ = fs::remove_file(&data_path);
+        let _ = fs::remove_dir(&tmp_dir);
+    }
+
+    #[test]
+    fn sign_command_uses_default_malphas_signing_key() {
+        let _guard = SIGNING_KEY_ENV_LOCK.lock().unwrap();
+        use rand_core::OsRng;
+
+        let tmp_dir = temp_dir().join("default_env");
+        fs::create_dir_all(&tmp_dir).unwrap();
+
+        let data_path = tmp_dir.join("payload.bin");
+        fs::write(&data_path, b"MALPHAS CLI SIGN DEFAULT TEST").unwrap();
+
+        let signing_key = SigningKey::generate(&mut OsRng);
+        std::env::set_var("MALPHAS_SIGNING_KEY", hex::encode(signing_key.to_bytes()));
+
+        sign_file_cli(&data_path, None, None).unwrap();
+
+        assert!(data_path.with_extension("bin.sig").exists());
+
+        std::env::remove_var("MALPHAS_SIGNING_KEY");
+        let _ = fs::remove_file(&data_path);
+        let _ = fs::remove_file(data_path.with_extension("bin.sig"));
+        let _ = fs::remove_dir(&tmp_dir);
+    }
+
+    #[test]
+    fn pubkey_command_prints_matching_public_key() {
+        use rand_core::OsRng;
+
+        let signing_key = SigningKey::generate(&mut OsRng);
+        let expected = hex::encode(signing_key.verifying_key().to_bytes());
+
+        let key_path =
+            std::env::temp_dir().join(format!("malphas_cli_pubkey_key_{}.hex", std::process::id()));
+        fs::write(&key_path, hex::encode(signing_key.to_bytes())).unwrap();
+
+        let mut output = Vec::new();
+        {
+            let signing_key = signing_key_from_source(None, Some(key_path.clone())).unwrap();
+            let public_key = signing_key.verifying_key();
+            output.extend_from_slice(hex::encode(public_key.to_bytes()).as_bytes());
+        }
+
+        assert_eq!(String::from_utf8(output).unwrap().trim(), expected);
+
+        let _ = fs::remove_file(&key_path);
     }
 
     #[test]

@@ -6,8 +6,8 @@ use std::os::raw::c_char;
 use std::path::Path;
 
 use crate::integrity_policy::{
-    IntegrityError, IntegrityPolicy, MAX_ZIP_COMPRESSION_RATIO, MAX_ZIP_ENTRIES,
-    MAX_ZIP_UNCOMPRESSED_SIZE,
+    verify_sha256_file, IntegrityError, IntegrityPolicy, MAX_ZIP_COMPRESSION_RATIO,
+    MAX_ZIP_ENTRIES, MAX_ZIP_UNCOMPRESSED_SIZE,
 };
 use zip::ZipArchive;
 
@@ -15,6 +15,8 @@ pub(crate) fn c_str_to_str<'a>(ptr: *const c_char) -> Option<&'a str> {
     if ptr.is_null() {
         return None;
     }
+    // SAFETY: The caller guarantees `ptr` is a valid, NUL-terminated C string
+    // for the lifetime of the call.
     unsafe { CStr::from_ptr(ptr).to_str().ok() }
 }
 
@@ -27,7 +29,8 @@ pub(crate) fn c_str_to_str<'a>(ptr: *const c_char) -> Option<&'a str> {
 /// `expected_sha` may be given with or without a leading `0x`/`0X` prefix and
 /// is compared in constant time on the decoded bytes.
 ///
-/// Returns 0 on success, non-zero on error.
+/// Files larger than `MAX_SHA_FILE_SIZE` are rejected.  Returns 0 on success,
+/// non-zero on error.
 pub fn verify_binary_integrity(filepath: *const c_char, expected_sha: *const c_char) -> i32 {
     let filepath_str = match c_str_to_str(filepath) {
         Some(s) => s,
@@ -38,13 +41,13 @@ pub fn verify_binary_integrity(filepath: *const c_char, expected_sha: *const c_c
         None => return -2,
     };
 
-    let policy = IntegrityPolicy::default();
-    match policy.verify_sha256(Path::new(filepath_str), expected_sha_str) {
+    match verify_sha256_file(Path::new(filepath_str), expected_sha_str) {
         Ok(()) => 0,
         Err(IntegrityError::HashMismatch) => 1,
         Err(IntegrityError::Io(_)) => -3,
         Err(IntegrityError::HexDecode(_)) => -4,
         Err(IntegrityError::InvalidHashLength { .. }) => -5,
+        Err(IntegrityError::FileTooLarge { .. }) => -9,
         Err(_) => -6,
     }
 }
@@ -53,8 +56,8 @@ pub fn verify_binary_integrity(filepath: *const c_char, expected_sha: *const c_c
 /// `filepath`.
 ///
 /// `signature_hex` and `public_key_hex` may be given with or without a leading
-/// `0x`/`0X` prefix.  If `public_key_hex` is empty, the default test-only trust
-/// anchor is used.
+/// `0x`/`0X` prefix.  An empty or whitespace-only `public_key_hex` is rejected;
+/// callers must supply a valid 32-byte Ed25519 public key.
 ///
 /// Files larger than 256 MiB are rejected.  Returns 0 if the signature is
 /// valid, non-zero otherwise.
@@ -76,15 +79,15 @@ pub fn verify_engine_signature(
         None => return -3,
     };
 
-    let policy = if public_key_hex_str.trim().is_empty() {
-        IntegrityPolicy::default()
-    } else {
-        match IntegrityPolicy::from_hex(public_key_hex_str) {
-            Ok(p) => p,
-            Err(IntegrityError::HexDecode(_)) => return -5,
-            Err(IntegrityError::InvalidPublicKeyLength { .. }) => return -5,
-            Err(_) => return -7,
-        }
+    if public_key_hex_str.trim().is_empty() {
+        return -5;
+    }
+
+    let policy = match IntegrityPolicy::from_hex(public_key_hex_str) {
+        Ok(p) => p,
+        Err(IntegrityError::HexDecode(_)) => return -5,
+        Err(IntegrityError::InvalidPublicKeyLength { .. }) => return -5,
+        Err(_) => return -7,
     };
 
     match policy.verify_ed25519_signature(Path::new(filepath_str), signature_hex_str) {
@@ -356,6 +359,21 @@ mod tests {
         std::fs::remove_file(temp_path).unwrap();
 
         assert_ne!(res, 0);
+    }
+
+    #[test]
+    fn test_verify_engine_signature_rejects_empty_public_key() {
+        let temp_path = std::path::Path::new("temp_test_engine_empty_pk.bin");
+        std::fs::write(temp_path, b"MALPHAS REINFORCED v2.2 Phase 6 engine").unwrap();
+
+        let filepath_c = std::ffi::CString::new(temp_path.to_str().unwrap()).unwrap();
+        let sig_c = std::ffi::CString::new("0".repeat(128)).unwrap();
+        let pk_c = std::ffi::CString::new("").unwrap();
+
+        let res = verify_engine_signature(filepath_c.as_ptr(), sig_c.as_ptr(), pk_c.as_ptr());
+        std::fs::remove_file(temp_path).unwrap();
+
+        assert_eq!(res, -5);
     }
 
     #[test]

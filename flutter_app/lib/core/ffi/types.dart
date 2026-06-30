@@ -56,12 +56,14 @@ final class TextPayload extends Struct {
 /// * Fields are ordered exactly like the Rust `#[repr(C, align(64))]` struct.
 /// * `atomicBackIndex` is flipped by Rust with Release ordering; Dart reads it
 ///   with Acquire ordering through the delegate functions.
+/// * `abiVersion` is set by Rust during `init_engine` and must be verified by
+///   Dart before the bridge is trusted.
 final class MalphasDoubleBufferBridge extends Struct {
   @Uint32()
   external int bufferACommandCount;
 
   @Uint32()
-  external int _padA;
+  external int abiVersion;
 
   external Pointer<DartRenderCommand> bufferACommands;
 

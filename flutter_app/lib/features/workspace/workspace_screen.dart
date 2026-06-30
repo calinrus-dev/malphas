@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../../core/compiler/package_compiler.dart';
 import '../../core/ffi/malphas_bindings.dart';
 import '../../core/ui_primitives/primitive_canvas.dart';
+import '../engine_manager/engine_controller.dart';
 import '../engine_manager/engine_manager_screen.dart';
 import '../hub/environment_model.dart';
 import '../package_manager/package_controller.dart';
@@ -60,6 +61,19 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
       return;
     }
 
+    // Configure the Ed25519 trust anchor from build-time configuration before
+    // loading any signed assets.
+    final trustAnchor = EngineController.publicKeyHex;
+    if (trustAnchor.isNotEmpty) {
+      final anchorResult = _bindings.setTrustAnchor(trustAnchor);
+      if (anchorResult != 0) {
+        setState(() {
+          _lastError = 'Engine trust anchor failed (code $anchorResult)';
+        });
+        return;
+      }
+    }
+
     setState(() => _engineReady = true);
     await _autoLoadEnvironment();
   }
@@ -93,7 +107,14 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
 
     final systemPath = _resolveSystemPath(packId);
     if (systemPath != null) {
-      _bindings.loadSystem(systemPath);
+      final systemResult = _bindings.loadSystem(systemPath);
+      if (systemResult != 0) {
+        setState(() {
+          _lastError =
+              'AUTO-LOAD ERROR: load_system returned $systemResult for $packId';
+        });
+        return;
+      }
     }
   }
 

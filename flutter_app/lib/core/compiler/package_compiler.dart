@@ -4,7 +4,7 @@ import 'dart:typed_data';
 
 /// Output of a `malphas-cli compile` invocation.
 ///
-/// In v2.7.5 the CLI only produces the `.msp` Silver Platter.  The `.mxc`
+/// In v2.9.0 the CLI only produces the `.msp` Silver Platter.  The `.mxc`
 /// system library is a Rust `cdylib` built separately by Cargo.
 class CompileOutput {
   final Uint8List mspBytes;
@@ -17,13 +17,27 @@ class MalphasPackageCompiler {
   static const String _exeName = 'malphas-cli';
   static const String _fontFileName = 'JetBrainsMono-Regular.ttf';
 
-  Future<CompileOutput> compilePackage(Map<String, dynamic> manifest) async {
+  /// Compiles a Malphas package manifest by delegating to the native
+  /// `malphas-cli` executable.
+  ///
+  /// If [sourceDir] is provided, it is used as the compilation working
+  /// directory and must already contain a `manifest.json` file.  This allows
+  /// callers to place payload `.bin` files next to the manifest before the
+  /// compiler runs.  When [sourceDir] is omitted a fresh temporary directory is
+  /// created and deleted automatically.
+  Future<CompileOutput> compilePackage(
+    Map<String, dynamic> manifest, {
+    Directory? sourceDir,
+  }) async {
     final packId = manifest['pack_id'] as String? ?? 'pack_custom_01';
 
-    // 1. Create a temporary directory and write the manifest JSON next to it.
-    final tempDir = await Directory.systemTemp.createTemp('malphas_compile_');
+    // 1. Prepare the working directory and write the manifest JSON next to it.
+    final tempDir =
+        sourceDir ?? await Directory.systemTemp.createTemp('malphas_compile_');
     final manifestFile = File('${tempDir.path}/manifest.json');
-    await manifestFile.writeAsString(jsonEncode(manifest));
+    if (sourceDir == null) {
+      await manifestFile.writeAsString(jsonEncode(manifest));
+    }
 
     // The CLI expects JetBrainsMono-Regular.ttf next to the manifest.
     final fontFile = _resolveFontFile();
@@ -34,7 +48,7 @@ class MalphasPackageCompiler {
     // 2. Locate the native CLI executable.
     final exePath = await _resolveCliExecutable();
     if (exePath == null) {
-      await _bestEffortDelete(tempDir);
+      if (sourceDir == null) await _bestEffortDelete(tempDir);
       throw Exception('malphas-cli executable not found');
     }
 
@@ -51,7 +65,7 @@ class MalphasPackageCompiler {
       },
     );
     if (result.exitCode != 0) {
-      await _bestEffortDelete(tempDir);
+      if (sourceDir == null) await _bestEffortDelete(tempDir);
       throw Exception(
         'malphas-cli compile failed (exit ${result.exitCode}): '
         'stderr=${result.stderr}, stdout=${result.stdout}',
@@ -61,13 +75,16 @@ class MalphasPackageCompiler {
     // 4. Read the generated .msp file.
     final mspFile = File('${tempDir.path}/$packId.msp');
     if (!await mspFile.exists()) {
-      await _bestEffortDelete(tempDir);
+      if (sourceDir == null) await _bestEffortDelete(tempDir);
       throw Exception('Expected compiled package not found: ${mspFile.path}');
     }
     final mspBytes = await mspFile.readAsBytes();
 
-    // 5. Clean up the temporary manifest and generated binaries.
-    await _bestEffortDelete(tempDir);
+    // 5. Clean up the temporary manifest and generated binaries only if we
+    // created the directory ourselves.
+    if (sourceDir == null) {
+      await _bestEffortDelete(tempDir);
+    }
 
     return CompileOutput(mspBytes);
   }

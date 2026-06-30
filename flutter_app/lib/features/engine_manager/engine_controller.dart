@@ -10,13 +10,15 @@ class EngineController extends ChangeNotifier {
 
   EngineController._internal();
 
-  // MALPHAS REINFORCED v2.4.3 — Ed25519 public key for engine
-  // signature verification. This is the test key generated for local builds
-  // and CI; it must match the private key used to sign the motor artifacts.
-  // Public key hex: aac8adcae7707a961bd03e24c1196d2593ba62f491ab00c0dd20bfa9b284aa1c
-  static const String _enginePublicKeyHex =
-      'aac8adcae7707a961bd03e24c1196d2593ba62f491ab00c0dd20bfa9b284aa1c';
-  static String get publicKeyHex => _enginePublicKeyHex;
+  /// Ed25519 public key used to verify engine signatures.
+  ///
+  /// This value is supplied at build time via
+  /// `--dart-define=MALPHAS_TRUST_ANCHOR=...`.  Release builds must provide a
+  /// real production key; when the define is missing the engine is reported as
+  /// corrupt.
+  static const String _trustAnchorHex =
+      String.fromEnvironment('MALPHAS_TRUST_ANCHOR');
+  static String get publicKeyHex => _trustAnchorHex;
 
   static String _defaultBinaryName() {
     if (Platform.isWindows) return 'malphas_core.dll';
@@ -107,7 +109,13 @@ class EngineController extends ChangeNotifier {
     }
 
     // MALPHAS REINFORCED v2.2 Phase 6 — Ed25519 signature verification.
-    // A companion .sig file must exist next to the engine binary.
+    // A companion .sig file must exist next to the engine binary and a trust
+    // anchor must have been configured at build time.
+    if (_trustAnchorHex.isEmpty) {
+      engines[index].status = EngineStatus.corrupt;
+      return;
+    }
+
     final sigPath = '$targetPath.sig';
     final sigFile = File(sigPath);
     if (!sigFile.existsSync()) {
@@ -119,7 +127,7 @@ class EngineController extends ChangeNotifier {
     final result = _bindings.verifyEngineSignature(
       targetPath,
       signatureHex,
-      _enginePublicKeyHex,
+      _trustAnchorHex,
     );
 
     if (result == 0) {
@@ -140,7 +148,7 @@ class EngineController extends ChangeNotifier {
         MalphasEngine(
           id: 'embedded_native_core',
           name: 'Embedded Native Core',
-          version: 'v2.7.5',
+          version: 'v2.9.0',
           runtime: NativeRuntime.rust,
           binaryName: _defaultBinaryName(),
           sha256: 'Embedded (OS Verified)',
@@ -253,9 +261,10 @@ class EngineController extends ChangeNotifier {
 
   /// Atomically swaps the active engine.
   ///
-  /// The implementation is consistent: it reloads the native core from the
-  /// requested binary path, re-verifies its signature, and only marks the
-  /// engine as active when the signature check passes.
+  /// The implementation is consistent: it shuts down the current engine,
+  /// reloads the native core from the requested binary path, reinitialises the
+  /// FFI bridge, re-verifies its signature, and only marks the engine as active
+  /// when the signature check passes.
   bool hotSwapEngine(String id) {
     final targetIndex = engines.indexWhere((e) => e.id == id);
     if (targetIndex == -1) return false;
@@ -269,7 +278,23 @@ class EngineController extends ChangeNotifier {
     }
 
     try {
+      _bindings.shutdownEngine();
       _bindings.reloadNativeLibrary(sourcePath);
+
+      if (!_bindings.isNativeAvailable) {
+        engines[targetIndex].status = EngineStatus.corrupt;
+        notifyListeners();
+        return false;
+      }
+
+      final initResult = _bindings.initEngine();
+      if (initResult != 0) {
+        debugPrint('hotSwapEngine init failed for "$id": code $initResult');
+        engines[targetIndex].status = EngineStatus.corrupt;
+        notifyListeners();
+        return false;
+      }
+
       verifyEngineIntegrity(id);
 
       if (engines[targetIndex].status == EngineStatus.standby) {
@@ -312,13 +337,5 @@ class EngineController extends ChangeNotifier {
       if (File(candidate).existsSync()) return candidate;
     }
     return null;
-  }
-
-  /// Reloads the native core from disk.  This tears down the current engine
-  /// thread, frees shared memory, discards any unlocked temp binaries, loads
-  /// the requested binary under a unique filename (bypassing the Dart/Windows
-  /// DLL cache), and reinitialises the FFI bridge.
-  void reloadNativeCore(String sourcePath) {
-    _bindings.reloadNativeLibrary(sourcePath);
   }
 }

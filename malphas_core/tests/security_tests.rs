@@ -1,4 +1,4 @@
-//! Security-focused integration tests for Malphas v2.7.5.
+//! Security-focused integration tests for Malphas v2.9.0.
 //!
 //! Covers signature enforcement and sandbox path validation for `.msp` and `.mxc`.
 
@@ -6,7 +6,7 @@ use std::io::Write;
 
 use ed25519_dalek::{Signer, SigningKey};
 use malphas_core::msp_loader::{
-    compute_msp_checksum, MspEntityDescriptor, MspHeader, ERROR_PAYLOAD_RESERVE, MSP_MAGIC,
+    compute_msp_sha256, MspEntityDescriptor, MspHeader, ERROR_PAYLOAD_RESERVE, MSP_MAGIC,
     MSP_VERSION,
 };
 use rand_core::OsRng;
@@ -36,11 +36,16 @@ struct EntityPayload {
     max_y: f32,
 }
 
-fn system_library_path() -> std::path::PathBuf {
+fn workspace_root() -> std::path::PathBuf {
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let workspace_root = manifest_dir
+    manifest_dir
         .parent()
-        .expect("malphas_core inside workspace");
+        .expect("malphas_core inside workspace")
+        .to_path_buf()
+}
+
+fn system_library_path() -> std::path::PathBuf {
+    let workspace_root = workspace_root();
     let profile = if cfg!(debug_assertions) {
         "debug"
     } else {
@@ -130,7 +135,7 @@ fn build_test_msp(path: &std::path::Path) {
 
     let mut file = std::fs::File::create(path).unwrap();
 
-    let checksum = compute_msp_checksum(
+    let checksum = compute_msp_sha256(
         &[
             descriptor_as_bytes(&descriptor).as_slice(),
             payload_section.as_slice(),
@@ -145,7 +150,7 @@ fn build_test_msp(path: &std::path::Path) {
         payload_section_offset: payload_section_offset as u32,
         payload_section_size: payload_section.len() as u32,
         checksum,
-        _padding: [0; 32],
+        _padding: [0; 8],
     };
     file.write_all(&header_as_bytes(&header)).unwrap();
 
@@ -164,8 +169,8 @@ fn header_as_bytes(header: &MspHeader) -> [u8; 64] {
     buf[12..16].copy_from_slice(&header.entity_count.to_le_bytes());
     buf[16..20].copy_from_slice(&header.payload_section_offset.to_le_bytes());
     buf[20..24].copy_from_slice(&header.payload_section_size.to_le_bytes());
-    buf[24..32].copy_from_slice(&header.checksum.to_le_bytes());
-    buf[32..64].copy_from_slice(&header._padding);
+    buf[24..56].copy_from_slice(&header.checksum);
+    buf[56..64].copy_from_slice(&header._padding);
     buf
 }
 
@@ -196,10 +201,10 @@ fn c_string(s: &str) -> std::ffi::CString {
     std::ffi::CString::new(s).unwrap()
 }
 
-/// A unique temp working directory with an approved `systems/` root.
+/// A unique temp working directory under the canonical workspace `systems/` root.
 fn make_sandbox_workdir(label: &str) -> (std::path::PathBuf, std::path::PathBuf) {
-    let work_dir = std::env::temp_dir().join(format!(
-        "malphas_security_{}_{}_{}",
+    let work_dir = workspace_root().join("systems").join(format!(
+        "_malphas_security_{}_{}_{}",
         label,
         std::process::id(),
         std::time::SystemTime::now()
@@ -227,6 +232,8 @@ fn reject_unsigned_msp() {
 
     let result = malphas_core::load_msp(c_string(msp_path.to_str().unwrap()).as_ptr());
     assert_eq!(result, ERR_MSP_SIGNATURE_MISSING);
+
+    let _ = std::fs::remove_file(&msp_path);
 }
 
 #[test]
@@ -238,6 +245,9 @@ fn reject_msp_with_malformed_signature() {
 
     let result = malphas_core::load_msp(c_string(msp_path.to_str().unwrap()).as_ptr());
     assert_eq!(result, ERR_MSP_SIGNATURE_INVALID);
+
+    let _ = std::fs::remove_file(&msp_path);
+    let _ = std::fs::remove_file(msp_path.with_extension("msp.sig"));
 }
 
 #[test]
@@ -251,6 +261,9 @@ fn reject_msp_signed_with_wrong_key() {
 
     let result = malphas_core::load_msp(c_string(msp_path.to_str().unwrap()).as_ptr());
     assert_eq!(result, ERR_MSP_SIGNATURE_INVALID);
+
+    let _ = std::fs::remove_file(&msp_path);
+    let _ = std::fs::remove_file(msp_path.with_extension("msp.sig"));
 }
 
 #[test]
@@ -266,6 +279,63 @@ fn reject_system_outside_sandbox() {
         .join("evil.dll");
     let result = malphas_core::load_system(c_string(traversal.to_str().unwrap()).as_ptr());
     assert_eq!(result, ERR_SYSTEM_SANDBOX);
+}
+
+#[test]
+fn reject_system_path_outside_workspace() {
+    let lib_path = ensure_system_built();
+    let outside =
+        std::env::temp_dir().join(format!("malphas_sec_outside_{}.dll", std::process::id()));
+    std::fs::copy(&lib_path, &outside).unwrap();
+
+    let result = malphas_core::load_system(c_string(outside.to_str().unwrap()).as_ptr());
+    assert_eq!(result, ERR_SYSTEM_SANDBOX);
+
+    let _ = std::fs::remove_file(&outside);
+}
+
+#[test]
+fn reject_system_traversal_inside_workspace() {
+    let lib_path = ensure_system_built();
+    let (work_dir, systems_dir) = make_sandbox_workdir("traversal");
+    let sandboxed = systems_dir.join(lib_path.file_name().unwrap());
+    std::fs::copy(&lib_path, &sandboxed).unwrap();
+
+    // A relative path that walks upward from the workspace root must be rejected
+    // before any file access.
+    let result = malphas_core::load_system(c_string("../evil.dll").as_ptr());
+    assert_eq!(result, ERR_SYSTEM_SANDBOX);
+
+    let _ = std::fs::remove_dir_all(&work_dir);
+}
+
+#[test]
+fn reject_system_symlink_outside_sandbox() {
+    let lib_path = ensure_system_built();
+    let (work_dir, systems_dir) = make_sandbox_workdir("symlink");
+
+    let outside = std::env::temp_dir().join(format!(
+        "malphas_sec_symlink_target_{}.dll",
+        std::process::id()
+    ));
+    std::fs::copy(&lib_path, &outside).unwrap();
+
+    let link_name = systems_dir.join("outside_link.dll");
+
+    #[cfg(target_family = "unix")]
+    let link_created = std::os::unix::fs::symlink(&outside, &link_name).is_ok();
+    #[cfg(target_family = "windows")]
+    let link_created = std::os::windows::fs::symlink_file(&outside, &link_name).is_ok();
+    #[cfg(not(any(target_family = "unix", target_family = "windows")))]
+    let link_created = false;
+
+    if link_created {
+        let result = malphas_core::load_system(c_string(link_name.to_str().unwrap()).as_ptr());
+        assert_eq!(result, ERR_SYSTEM_SANDBOX);
+    }
+
+    let _ = std::fs::remove_file(&outside);
+    let _ = std::fs::remove_dir_all(&work_dir);
 }
 
 #[test]
@@ -287,6 +357,8 @@ fn reject_unsigned_system() {
     let rel_path = sandboxed.strip_prefix(&work_dir).unwrap();
     let result = load_system_in_sandbox(rel_path, &work_dir);
     assert_eq!(result, ERR_SYSTEM_SIGNATURE_MISSING);
+
+    let _ = std::fs::remove_dir_all(&work_dir);
 }
 
 #[test]
@@ -302,4 +374,6 @@ fn reject_system_signed_with_wrong_key() {
     let rel_path = sandboxed.strip_prefix(&work_dir).unwrap();
     let result = load_system_in_sandbox(rel_path, &work_dir);
     assert_eq!(result, ERR_SYSTEM_SIGNATURE_INVALID);
+
+    let _ = std::fs::remove_dir_all(&work_dir);
 }

@@ -374,7 +374,7 @@ class _PackageCreatorScreenState extends State<PackageCreatorScreen> {
               final pack = _controller
                   .getAllPackages()
                   .firstWhere((p) => p.id == packId);
-              _controller.setPackageLoaded(packId, loaded: true);
+              await _controller.setPackageLoaded(packId, loaded: true);
               await _controller.preloadSkins(pack);
             }
           } finally {

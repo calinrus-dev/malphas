@@ -11,7 +11,7 @@ jobs:
     name: Verify version sync
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
 
       - name: Verify versions match across Cargo.toml, pubspec.yaml and README.md
         shell: bash
@@ -51,16 +51,16 @@ jobs:
       run:
         working-directory: flutter_app
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
 
       - name: Download native artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
         with:
           name: malphas_core-ubuntu-latest
           path: flutter_app/native/
 
       - name: Download CLI executable
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
         with:
           name: malphas-cli-ubuntu-latest
           path: flutter_app/native/
@@ -91,7 +91,7 @@ jobs:
           cp "$LIB" ../"$base"
 
       - name: Download engine signature
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
         continue-on-error: true
         with:
           name: malphas_core-sig-ubuntu-latest
@@ -117,14 +117,14 @@ jobs:
           cp "$SIG" ../"$base"
 
       - name: Download signed bouncing_demo system
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
         continue-on-error: true
         with:
           name: bouncing_demo-mxc-ubuntu-latest
           path: flutter_app/mxc/
 
       - name: Download bouncing_demo system library (unsigned fallback)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
         continue-on-error: true
         with:
           name: bouncing_demo-ubuntu-latest
@@ -170,6 +170,18 @@ jobs:
           cp "$CLI_BIN" motors/malphas-cli
           chmod +x motors/malphas-cli
 
+      - name: Derive test trust anchor
+        shell: bash
+        env:
+          MALPHAS_SIGNING_KEY: ${{ secrets.TEST_SIGNING_KEY }}
+        run: |
+          if [ -z "$MALPHAS_SIGNING_KEY" ]; then
+            echo "PUBKEY=" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          PUBKEY=$(./motors/malphas-cli pubkey --signing-key-env MALPHAS_SIGNING_KEY)
+          echo "PUBKEY=$PUBKEY" >> "$GITHUB_ENV"
+
       - name: Compile bouncing_demo manifest with downloaded CLI
         shell: bash
         run: |
@@ -177,7 +189,7 @@ jobs:
           ./motors/malphas-cli compile ../examples/bouncing_demo/manifest.json
 
       - name: Set up Flutter
-        uses: subosito/flutter-action@v2
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
           channel: stable
           cache: true
@@ -194,7 +206,6 @@ jobs:
       - name: Run Flutter Tests (Native Headless)
         env:
           LD_LIBRARY_PATH: ${{ github.workspace }}/flutter_app/motors
-          MALPHAS_INSECURE_SKIP_VERIFY: 1
         run: |
           export LD_LIBRARY_PATH="${{ github.workspace }}/flutter_app/motors"
-          xvfb-run -a flutter test
+          xvfb-run -a flutter test --dart-define=MALPHAS_TRUST_ANCHOR="$PUBKEY"

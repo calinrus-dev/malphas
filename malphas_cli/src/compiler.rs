@@ -1,4 +1,4 @@
-//! Malphas Source Pack (MSP) compiler v2.7.5.
+//! Malphas Source Pack (MSP) compiler v2.9.0.
 //!
 //! Builds a rigid, 64-byte aligned binary from a human-readable workspace:
 //!
@@ -14,6 +14,8 @@ use std::error::Error;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+
+use sha2::{Digest, Sha256};
 
 use crate::manifest::Manifest;
 
@@ -32,8 +34,8 @@ pub struct MspHeader {
     pub entity_count: u32,
     pub payload_section_offset: u32,
     pub payload_section_size: u32,
-    pub checksum: u64,
-    pub _padding: [u8; 32],
+    pub checksum: [u8; 32],
+    pub _padding: [u8; 8],
 }
 
 /// 64-byte aligned entity descriptor (one cache line).
@@ -51,24 +53,11 @@ pub struct MspEntityDescriptor {
     pub _padding: [u8; 40],
 }
 
-/// Compute the deterministic u64 checksum used by the runtime loader.
+/// Compute the deterministic SHA-256 digest used by the runtime loader.
 ///
-/// The checksum covers the entity table concatenated with the payload section.
-pub fn compute_msp_checksum(data: &[u8]) -> u64 {
-    let mut checksum: u64 = 0;
-    let chunks = data.chunks_exact(8);
-    let remainder = chunks.remainder();
-    for chunk in chunks {
-        let mut word = [0u8; 8];
-        word.copy_from_slice(chunk);
-        checksum ^= u64::from_le_bytes(word);
-    }
-    if !remainder.is_empty() {
-        let mut word = [0u8; 8];
-        word[..remainder.len()].copy_from_slice(remainder);
-        checksum ^= u64::from_le_bytes(word);
-    }
-    checksum
+/// The digest covers the entity table concatenated with the payload section.
+pub fn compute_msp_sha256(data: &[u8]) -> [u8; 32] {
+    Sha256::digest(data).into()
 }
 
 /// Append zero bytes until `data.len()` is a multiple of 64.
@@ -94,6 +83,60 @@ pub fn validate_pack_id(pack_id: &str) -> Result<(), Box<dyn Error>> {
         return Err(format!("pack_id contains invalid characters: {pack_id}").into());
     }
     Ok(())
+}
+
+/// Resolve and validate a payload file path.
+///
+/// The path must be relative, must not contain parent-directory components,
+/// and must resolve to a location inside the manifest directory.  Symlinks are
+/// followed by `canonicalize` and rejected if they escape the workspace.
+fn resolve_payload_path(
+    payload_file: &Path,
+    manifest_dir: &Path,
+) -> Result<PathBuf, Box<dyn Error>> {
+    if payload_file.is_absolute() {
+        return Err(format!(
+            "absolute payload paths are not allowed: {}",
+            payload_file.display()
+        )
+        .into());
+    }
+
+    if payload_file
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return Err(format!(
+            "payload paths must not contain '..' components: {}",
+            payload_file.display()
+        )
+        .into());
+    }
+
+    let canonical_manifest = manifest_dir.canonicalize().map_err(|e| {
+        format!(
+            "failed to canonicalize manifest directory '{}': {e}",
+            manifest_dir.display()
+        )
+    })?;
+
+    let resolved = manifest_dir.join(payload_file);
+    let canonical_payload = resolved.canonicalize().map_err(|e| {
+        format!(
+            "failed to canonicalize payload file '{}': {e}",
+            resolved.display()
+        )
+    })?;
+
+    if !canonical_payload.starts_with(&canonical_manifest) {
+        return Err(format!(
+            "payload file '{}' resolves outside the manifest directory",
+            payload_file.display()
+        )
+        .into());
+    }
+
+    Ok(canonical_payload)
 }
 
 /// Build the MSP byte vector from a parsed manifest and its directory.
@@ -125,7 +168,7 @@ pub fn build_msp(manifest: &Manifest, manifest_dir: &Path) -> Result<Vec<u8>, Bo
     let mut descriptors: Vec<MspEntityDescriptor> = Vec::with_capacity(entity_count);
 
     for entity in &manifest.entities {
-        let payload_path = manifest_dir.join(&entity.payload_file);
+        let payload_path = resolve_payload_path(&entity.payload_file, manifest_dir)?;
         let payload_bytes = fs::read(&payload_path).map_err(|e| {
             format!(
                 "failed to read payload file '{}': {e}",
@@ -171,7 +214,7 @@ pub fn build_msp(manifest: &Manifest, manifest_dir: &Path) -> Result<Vec<u8>, Bo
     body.extend_from_slice(&payload_section);
 
     // Checksum covers entity table + payload section.
-    let checksum = compute_msp_checksum(&body);
+    let checksum = compute_msp_sha256(&body);
 
     let header = MspHeader {
         magic: MSP_MAGIC,
@@ -181,7 +224,7 @@ pub fn build_msp(manifest: &Manifest, manifest_dir: &Path) -> Result<Vec<u8>, Bo
         payload_section_offset: payload_section_offset as u32,
         payload_section_size: payload_section.len() as u32,
         checksum,
-        _padding: [0; 32],
+        _padding: [0; 8],
     };
 
     let mut output = Vec::with_capacity(header_size + body.len());
@@ -222,8 +265,8 @@ pub fn header_as_bytes(header: &MspHeader) -> [u8; 64] {
     buf[12..16].copy_from_slice(&header.entity_count.to_le_bytes());
     buf[16..20].copy_from_slice(&header.payload_section_offset.to_le_bytes());
     buf[20..24].copy_from_slice(&header.payload_section_size.to_le_bytes());
-    buf[24..32].copy_from_slice(&header.checksum.to_le_bytes());
-    buf[32..64].copy_from_slice(&header._padding);
+    buf[24..56].copy_from_slice(&header.checksum);
+    buf[56..64].copy_from_slice(&header._padding);
     buf
 }
 
@@ -355,14 +398,15 @@ mod tests {
         assert_eq!(&msp[0..4], b"MLPS");
         assert_eq!(msp.len() % 64, 0);
 
-        // Verify checksum over entity table + payload section.
+        // Verify SHA-256 digest over entity table + payload section.
         let entity_table_offset = u32::from_le_bytes(msp[8..12].try_into().unwrap()) as usize;
+        let payload_section_offset = u32::from_le_bytes(msp[16..20].try_into().unwrap()) as usize;
         let payload_section_size = u32::from_le_bytes(msp[20..24].try_into().unwrap()) as usize;
-        let stored_checksum = u64::from_le_bytes(msp[24..32].try_into().unwrap());
-        let calculated = compute_msp_checksum(
-            &msp[entity_table_offset..entity_table_offset + payload_section_size],
+        let stored_checksum = &msp[24..56];
+        let calculated = compute_msp_sha256(
+            &msp[entity_table_offset..payload_section_offset + payload_section_size],
         );
-        assert_eq!(calculated, stored_checksum);
+        assert_eq!(&calculated[..], stored_checksum);
 
         // Verify payload size and content.
         let desc_payload_size =
@@ -396,5 +440,69 @@ mod tests {
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
         assert!(msg.contains("duplicate entity_id"));
+    }
+
+    #[test]
+    fn build_msp_rejects_traversal_payload_file() {
+        let tmp_dir =
+            std::env::temp_dir().join(format!("malphas_cli_test_traversal_{}", std::process::id()));
+        fs::create_dir_all(&tmp_dir).unwrap();
+
+        let manifest_dir = tmp_dir.join("workspace");
+        fs::create_dir_all(&manifest_dir).unwrap();
+
+        // Regression: the exact traversal payload from the v2.9.0 hardening spec
+        // must be rejected before any filesystem read is attempted.
+        let manifest = Manifest {
+            pack_id: "traversal_test".to_string(),
+            entities: vec![ManifestEntity {
+                entity_id: 0,
+                tag_mask: 1,
+                payload_file: PathBuf::from("../etc/passwd"),
+            }],
+        };
+
+        let result = build_msp(&manifest, &manifest_dir);
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("'..' components") || msg.contains("outside the manifest directory"),
+            "unexpected error message: {msg}"
+        );
+
+        let _ = fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn build_msp_rejects_absolute_payload_path() {
+        let tmp_dir =
+            std::env::temp_dir().join(format!("malphas_cli_test_absolute_{}", std::process::id()));
+        fs::create_dir_all(&tmp_dir).unwrap();
+
+        let payload_file = tmp_dir.join("entity.bin");
+        write_file(&payload_file, b"payload");
+
+        let manifest_dir = tmp_dir.join("workspace");
+        fs::create_dir_all(&manifest_dir).unwrap();
+
+        let manifest = Manifest {
+            pack_id: "absolute_test".to_string(),
+            entities: vec![ManifestEntity {
+                entity_id: 0,
+                tag_mask: 1,
+                payload_file: payload_file.clone(),
+            }],
+        };
+
+        let result = build_msp(&manifest, &manifest_dir);
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("absolute payload paths are not allowed"),
+            "unexpected error message: {msg}"
+        );
+
+        let _ = fs::remove_file(&payload_file);
+        let _ = fs::remove_dir_all(&tmp_dir);
     }
 }

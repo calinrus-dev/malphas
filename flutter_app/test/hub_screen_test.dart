@@ -85,7 +85,7 @@ void main() {
     WidgetTester tester,
   ) async {
     final persistence = AppStatePersistenceService();
-    persistence.saveEnvironments([
+    await persistence.saveEnvironments([
       MalphasEnvironment(
         id: 'env_pinned_test',
         name: 'Pinned Test',

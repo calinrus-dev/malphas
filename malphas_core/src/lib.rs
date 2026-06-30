@@ -1,4 +1,4 @@
-// Malphas Core v2.7.5 - Data-Oriented Design memory router.
+// Malphas Core v2.9.0 - Data-Oriented Design memory router.
 //
 // This crate is a C-ABI boundary; pointer arguments are validated inside each
 // function before they are dereferenced, so the not_unsafe_ptr_arg_deref lint
@@ -17,10 +17,6 @@ mod integrity_policy;
 pub use integrity_policy::set_global_trust_anchor;
 use integrity_policy::IntegrityError;
 
-// The VM bytecode interpreter was deprecated in v2.7.0.  The module is kept
-// empty so existing imports do not break during the migration.
-pub mod vm {}
-
 use std::os::raw::c_char;
 
 use crate::bridge::{
@@ -30,6 +26,7 @@ use crate::bridge::{
     get_buffer_b_command_count as get_buffer_b_command_count_internal,
     get_buffer_b_commands as get_buffer_b_commands_internal,
     get_commands_written as get_commands_written_internal,
+    get_front_buffer_snapshot as get_front_buffer_snapshot_internal,
     get_text_payload_pointer as get_text_payload_pointer_internal, init_engine_internal,
     malphas_alloc as malphas_alloc_internal, malphas_free as malphas_free_internal,
     pause_engine_internal, shutdown_engine_internal, trigger_engine_pulse_internal,
@@ -45,9 +42,8 @@ use crate::msp_loader::{
     load_msp_file as load_msp_file_internal, refresh_msp_file as refresh_msp_file_internal,
 };
 use crate::pipeline::{
-    get_commands_generated_count_internal, get_hit_tests_count_internal,
-    get_pulse_latency_micros_internal, get_vm_tick_micros_internal, DartRenderCommand,
-    MalphasDoubleBufferBridge, TextPayload,
+    get_commands_generated_count_internal, get_pulse_latency_micros_internal,
+    get_vm_tick_micros_internal, DartRenderCommand, MalphasDoubleBufferBridge, TextPayload,
 };
 use crate::system_host::{
     get_loaded_system_count_internal, load_system_file as load_system_file_internal,
@@ -197,6 +193,33 @@ pub extern "C" fn get_commands_written(bridge: *mut MalphasDoubleBufferBridge) -
     get_commands_written_internal(bridge)
 }
 
+/// Returns a consistent snapshot of the front render-command buffer.
+///
+/// `out_front_index` and `out_front_count` are optional out-parameters; pass
+/// null if they are not needed.  The returned pointer is the front command
+/// buffer and remains valid for the lifetime of the bridge.
+#[no_mangle]
+pub extern "C" fn get_front_buffer_snapshot(
+    bridge: *mut MalphasDoubleBufferBridge,
+    out_front_index: *mut u8,
+    out_front_count: *mut u32,
+) -> *mut DartRenderCommand {
+    let (front_index, front_count, ptr) = get_front_buffer_snapshot_internal(bridge);
+    if !out_front_index.is_null() {
+        // SAFETY: `out_front_index` is non-null and owned by the caller.
+        unsafe {
+            *out_front_index = front_index;
+        }
+    }
+    if !out_front_count.is_null() {
+        // SAFETY: `out_front_count` is non-null and owned by the caller.
+        unsafe {
+            *out_front_count = front_count;
+        }
+    }
+    ptr
+}
+
 #[no_mangle]
 pub extern "C" fn get_text_payload_pointer(
     command: *const DartRenderCommand,
@@ -215,11 +238,6 @@ pub extern "C" fn get_vm_tick_micros() -> u64 {
 #[no_mangle]
 pub extern "C" fn get_pulse_latency_micros() -> u64 {
     get_pulse_latency_micros_internal()
-}
-
-#[no_mangle]
-pub extern "C" fn get_hit_tests_count() -> u64 {
-    get_hit_tests_count_internal()
 }
 
 #[no_mangle]

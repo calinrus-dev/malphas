@@ -15,6 +15,88 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+## [2.9.0] - 2026-06-30
+
+### Breaking Changes
+
+- ABI bump to `BRIDGE_ABI_VERSION = 0x02090000`.  Dart must verify this value in
+  `initEngine` before trusting the bridge layout.
+- Rust now owns the FFI bridge and command buffers.  Dart must not allocate or
+  free `MalphasDoubleBufferBridge`; it only receives a read-only pointer from
+  `init_engine`.
+- Trust anchor is mandatory in release builds.  Release `malphas_core` binaries
+  ship without a default anchor; loading signed assets fails until
+  `setTrustAnchor` / `set_trust_anchor` is called or `MALPHAS_TRUST_ANCHOR` is
+  supplied at build time.
+- Removed the bytecode VM and `vm.rs`; `.mxc` files are native `cdylib`
+  libraries exporting `malphas_init_system` and `malphas_tick`.
+- New FFI snapshot getter contract: Dart must read `atomic_back_index` and the
+  matching command count through Rust getters with Acquire ordering; direct
+  struct field reads of atomic data are not supported.
+
+### Added
+
+- Ed25519 sidecar signatures for engine libraries, `.msp` packs, and `.mxc`
+  systems.  Signatures are verified over SHA-256 hashes of the target files.
+- Runtime sandbox for `.mxc` loading.  Only paths under `systems/`, `packages/`,
+  and `motors/` are accepted; symlinks and `..` traversal are rejected.
+- Lockless input event queue with event-type validation, NaN/infinity rejection,
+  spatial coalescence, and per-frame draining.
+- Panic isolation via `catch_unwind` around system `init` and `tick`; a
+  misbehaving system is tainted instead of crashing the engine.
+- `set_trust_anchor` FFI call and Dart `setTrustAnchor` for runtime trust anchor
+  configuration and key rotation.
+- `MALPHAS_TRUST_ANCHOR` `--dart-define` support in Flutter release builds so
+  the engine binary can be verified before loading.
+- Security integration test suite covering unsigned assets, invalid signatures,
+  sandbox traversal, and symlink rejection.
+
+### Changed
+
+- `init_engine` now takes only `max_commands` and returns the Rust-allocated
+  bridge pointer.
+- `MalphasBindings.initEngine` verifies `bridge.abiVersion` and rejects ABI
+  mismatches.
+- `PrimitiveCanvas` front-buffer getters use the atomic back index and count
+  getters instead of direct struct field reads.
+- Workspace version, `pubspec.yaml`, `README.md`, and `BRIDGE_ABI_VERSION` all
+  derive from the single root `VERSION` file.
+
+### Fixed
+
+- Input-queue tests are serialized around the shared static queue to eliminate
+  flakiness.
+- Security tests use absolute paths instead of `std::env::set_current_dir` to
+  avoid races between parallel tests.
+- `.gitignore` updated so `packages/` only ignores the repository-root directory
+  and `flutter_app/assets/packages/.gitkeep` is tracked.
+
+### Removed
+
+- `malphas_core/src/vm.rs` and all bytecode VM container semantics.
+- Dart-side allocation of `MalphasDoubleBufferBridge` and command buffers.
+
+### Migrating from v2.8.0 to v2.9.0
+
+1. **Update FFI initialization.**  Replace any `init_engine(...)` call with the
+   new single-argument signature `init_engine(max_commands)`.  The bridge pointer
+   returned by Rust is read-only; remove all Dart-side bridge allocation.
+2. **Verify the ABI version.**  In Dart, read `bridge.abiVersion` after
+   `initEngine` and ensure it equals `0x02090000` before rendering.
+3. **Provide a production trust anchor.**  Before loading MSP or MXC assets,
+   call `setTrustAnchor(publicKeyHex)` with your release Ed25519 public key, or
+   build Flutter with `--dart-define=MALPHAS_TRUST_ANCHOR=<public-key-hex>`.
+4. **Sign your assets.**  Use `malphas-cli sign` or set `MALPHAS_SIGNING_KEY`
+   during `./build.sh` / `.\build_core.ps1` to produce `.sig` sidecars for the
+   engine, MSP, and MXC files.
+5. **Place systems in allowed directories.**  Move or keep `.mxc` files under
+   `systems/`, `packages/`, or `motors/` so the sandbox accepts them.
+6. **Remove VM-based systems.**  Recompile any old bytecode systems as native
+   `cdylib` libraries exporting `malphas_init_system` and `malphas_tick`.
+7. **For local development only**, debug builds may set
+   `MALPHAS_INSECURE_SKIP_VERIFY=1`.  This bypass is compiled out of release
+   builds and must never be used in production.
+
 ## [2.8.0] - 2026-06-30
 
 ### Added

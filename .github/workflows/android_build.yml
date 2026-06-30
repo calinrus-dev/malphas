@@ -12,22 +12,24 @@ jobs:
     name: Build Android native libraries
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
           targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
 
       - name: Cache Cargo dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           workspaces: "."
 
       - name: Install Android NDK r26c
         run: |
           NDK_URL="https://dl.google.com/android/repository/android-ndk-r26c-linux.zip"
+          EXPECTED_SHA256="6d38b603a4152b8470f393d1f7132bc6b1fd3b73b6172599056eb5f91b359252"
           curl --fail -L -o "$RUNNER_TEMP/ndk.zip" "$NDK_URL"
+          echo "$EXPECTED_SHA256  $RUNNER_TEMP/ndk.zip" | sha256sum -c -
           unzip -q "$RUNNER_TEMP/ndk.zip" -d "$RUNNER_TEMP/ndk"
           NDK_HOME="$RUNNER_TEMP/ndk/android-ndk-r26c"
           echo "ANDROID_NDK_HOME=$NDK_HOME" >> "$GITHUB_ENV"
@@ -60,7 +62,7 @@ jobs:
             lib="flutter_app/android/app/src/main/jniLibs/$abi/libmalphas_core.so"
             if [ -f "$lib" ]; then
               echo "Signing $lib"
-              "$CLI" sign "$lib" "$key"
+              "$CLI" sign --signing-key-env MALPHAS_SIGNING_KEY "$lib"
             else
               echo "Missing $lib; cannot sign."
               exit 1
@@ -68,7 +70,7 @@ jobs:
           done
 
       - name: Upload Android libraries
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: malphas-core-android
           path: flutter_app/android/app/src/main/jniLibs/

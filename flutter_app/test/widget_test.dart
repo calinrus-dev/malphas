@@ -83,6 +83,13 @@ void main() {
     // 1. Initialise the engine and allocate the bridge/buffers.
     expect(bindings.initEngine(), equals(0));
 
+    // Configure the trust anchor from build-time configuration so signed MSP
+    // and MXC assets can be verified in this integration test.
+    const trustAnchor = String.fromEnvironment('MALPHAS_TRUST_ANCHOR');
+    if (trustAnchor.isNotEmpty) {
+      expect(bindings.setTrustAnchor(trustAnchor), equals(0));
+    }
+
     // 2. Load the Silver Platter and the .mxc system.
     expect(bindings.loadMsp(mspFile.path), equals(0));
     expect(bindings.loadSystem(systemPath), equals(0));
@@ -93,13 +100,13 @@ void main() {
       await Future.delayed(const Duration(milliseconds: 10));
     }
 
-    final count = bindings.commandCount;
-    expect(count, greaterThan(0));
+    final snapshot = bindings.getFrontBufferSnapshot();
+    expect(snapshot.count, greaterThan(0));
 
-    final commandsPtr = bindings.commandsPointer;
+    final commandsPtr = snapshot.commands;
     expect(commandsPtr, isNot(dffi.nullptr));
     final commandTypes = <int>[];
-    for (int i = 0; i < count; i++) {
+    for (int i = 0; i < snapshot.count; i++) {
       commandTypes.add(commandsPtr[i].commandType);
     }
 

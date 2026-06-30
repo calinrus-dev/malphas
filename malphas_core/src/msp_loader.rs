@@ -11,20 +11,29 @@
 // memory it must allocate its own SoA state from the read-only static payloads.
 
 use std::ffi::{c_char, CStr};
-use std::fs::OpenOptions;
+use std::fs::{File, OpenOptions};
+use std::io::Read;
 use std::path::Path;
 use std::sync::Arc;
 
 use arc_swap::ArcSwapOption;
 use memmap2::Mmap;
+use sha2::{Digest, Sha256};
 
 use crate::integrity_policy::global_trust_anchor;
 
 pub const MSP_MAGIC: [u8; 4] = *b"MLPS";
 pub const MSP_VERSION: u32 = 2;
 
+/// Maximum size of an MSP file that the loader will map.  Files larger than
+/// this are rejected before any memory is mapped.
+pub const MAX_MSP_SIZE: u64 = 256 * 1024 * 1024;
+
 const ERR_MSP_SIGNATURE_MISSING: i32 = -120;
 const ERR_MSP_SIGNATURE_INVALID: i32 = -121;
+const ERR_MSP_TOO_LARGE: i32 = -122;
+const ERR_MSP_DUPLICATE_ENTITY_ID: i32 = -113;
+const ERR_MSP_INVALID_LAYOUT: i32 = -114;
 
 /// Space reserved at the end of the payload section for hardcoded Error
 /// Payloads.  Every valid MSP must contain at least this many bytes of
@@ -33,7 +42,7 @@ pub const ERROR_PAYLOAD_RESERVE: usize = 64 * 1024;
 
 /// 64-byte aligned MSP header.
 ///
-/// Layout: 4 + 4 + 4 + 4 + 4 + 4 + 8 = 32 bytes of fields, plus 32 bytes of
+/// Layout: 4 + 4 + 4 + 4 + 4 + 4 + 32 = 56 bytes of fields, plus 8 bytes of
 /// manual padding to lock the struct size to exactly one cache line.
 #[repr(C, align(64))]
 #[derive(Clone, Copy, Debug)]
@@ -44,13 +53,13 @@ pub struct MspHeader {
     pub entity_count: u32,
     pub payload_section_offset: u32,
     pub payload_section_size: u32,
-    pub checksum: u64,
-    pub _padding: [u8; 32],
+    pub checksum: [u8; 32],
+    pub _padding: [u8; 8],
 }
 
 /// 64-byte aligned entity descriptor.
 ///
-/// The field order is fixed by the v2.7.5 ABI.  Because `tag_mask` is a u64
+/// The field order is fixed by the v2.9.0 ABI.  Because `tag_mask` is a u64
 /// placed after a u32, the compiler inserts 4 bytes of implicit padding before
 /// `tag_mask`.  The manual padding is therefore 40 bytes (not 44) so the total
 /// struct size remains exactly 64 bytes.
@@ -64,25 +73,12 @@ pub struct MspEntityDescriptor {
     pub _padding: [u8; 40],
 }
 
-/// Deterministic u64 checksum over a byte slice.
+/// Deterministic SHA-256 digest over a byte slice.
 ///
-/// The CLI computes the same value over the entity table and payload section
+/// The CLI computes the same digest over the entity table and payload section
 /// so the file can be validated without heap allocations at load time.
-pub fn compute_msp_checksum(data: &[u8]) -> u64 {
-    let mut checksum: u64 = 0;
-    let chunks = data.chunks_exact(8);
-    let remainder = chunks.remainder();
-    for chunk in chunks {
-        let mut word = [0u8; 8];
-        word.copy_from_slice(chunk);
-        checksum ^= u64::from_le_bytes(word);
-    }
-    if !remainder.is_empty() {
-        let mut word = [0u8; 8];
-        word[..remainder.len()].copy_from_slice(remainder);
-        checksum ^= u64::from_le_bytes(word);
-    }
-    checksum
+pub fn compute_msp_sha256(data: &[u8]) -> [u8; 32] {
+    Sha256::digest(data).into()
 }
 
 /// In-memory view of a mapped MSP.
@@ -96,8 +92,8 @@ pub struct MspMap {
     error_payload_ptr: *const u8,
 }
 
-// The mmap-backed pointer table is read-only after construction and the
-// underlying Mmap is Send + Sync, so it is safe to share across threads.
+// SAFETY: The mmap-backed pointer table is read-only after construction and
+// the underlying Mmap is Send + Sync, so it is safe to share across threads.
 unsafe impl Send for MspMap {}
 unsafe impl Sync for MspMap {}
 
@@ -105,6 +101,13 @@ impl MspMap {
     /// Map an MSP file from disk in read-only mode.
     pub fn load(path: &Path) -> Result<Self, i32> {
         let file = OpenOptions::new().read(true).open(path).map_err(|_| -100)?;
+        let metadata = file.metadata().map_err(|_| -100)?;
+        if metadata.len() > MAX_MSP_SIZE {
+            return Err(ERR_MSP_TOO_LARGE);
+        }
+        // SAFETY: We map the opened file read-only.  The mapping is never
+        // written through by Rust code; systems must treat the payload pointer
+        // range as immutable.
         let mmap = unsafe { Mmap::map(&file).map_err(|_| -101)? };
         Self::from_mmap(mmap)
     }
@@ -117,6 +120,8 @@ impl MspMap {
             return Err(-102);
         }
 
+        // SAFETY: `base` points to the start of the mmap and `len` was checked to
+        // be at least `size_of::<MspHeader>()`, so the header is fully contained.
         let header = unsafe { std::ptr::read_unaligned(base as *const MspHeader) };
 
         if header.magic != MSP_MAGIC {
@@ -130,16 +135,35 @@ impl MspMap {
         let entity_count = header.entity_count as usize;
         let payload_section_offset = header.payload_section_offset as usize;
         let payload_section_size = header.payload_section_size as usize;
+        let header_size = std::mem::size_of::<MspHeader>();
 
         // All major sections must start on a 64-byte boundary.
         if !entity_table_offset.is_multiple_of(64) || !payload_section_offset.is_multiple_of(64) {
             return Err(-105);
         }
 
+        // Strict section ordering: the entity table must start after the header
+        // and the payload section must start after the entity table ends.  This
+        // prevents overlapping sections and keeps the checksum region contiguous.
+        if entity_table_offset < header_size {
+            return Err(ERR_MSP_INVALID_LAYOUT);
+        }
+
         let descriptor_size = std::mem::size_of::<MspEntityDescriptor>();
         let entity_table_end = entity_table_offset
             .checked_add(entity_count.checked_mul(descriptor_size).ok_or(-106)?)
             .ok_or(-106)?;
+        if payload_section_offset < entity_table_end {
+            return Err(ERR_MSP_INVALID_LAYOUT);
+        }
+
+        // Reject header-claimed sizes that would exceed the absolute maximum
+        // before checking them against the (possibly smaller) file length.
+        let max_size = MAX_MSP_SIZE as usize;
+        if payload_section_size > max_size || entity_table_end > max_size {
+            return Err(ERR_MSP_TOO_LARGE);
+        }
+
         if entity_table_end > len {
             return Err(-106);
         }
@@ -157,12 +181,17 @@ impl MspMap {
 
         // Checksum covers entity table + payload section (everything after the
         // header that is not padding).
-        let checksum = compute_msp_checksum(&mmap[entity_table_offset..payload_section_end]);
+        let checksum = compute_msp_sha256(&mmap[entity_table_offset..payload_section_end]);
         if checksum != header.checksum {
             return Err(-109);
         }
 
+        // SAFETY: `payload_section_offset` and `payload_section_size` were
+        // validated against the mapping length, so the resulting pointer lies
+        // inside the read-only mmap.
         let payload_base = unsafe { base.add(payload_section_offset) };
+        // SAFETY: `ERROR_PAYLOAD_RESERVE` is guaranteed <= `payload_section_size`,
+        // so the offset stays inside the payload section within the mmap.
         let error_payload_ptr =
             unsafe { payload_base.add(payload_section_size - ERROR_PAYLOAD_RESERVE) };
 
@@ -171,12 +200,16 @@ impl MspMap {
         lookup_table.resize(entity_count, error_payload_ptr);
 
         if entity_count > 0 {
+            // SAFETY: `entity_table_offset` and `entity_count` were validated to
+            // lie inside the mapped region and the section is 64-byte aligned,
+            // matching the descriptor layout.
             let descriptors = unsafe {
                 std::slice::from_raw_parts(
                     base.add(entity_table_offset) as *const MspEntityDescriptor,
                     entity_count,
                 )
             };
+            let mut seen = vec![false; entity_count];
             for descriptor in descriptors {
                 let id = descriptor.entity_id as usize;
                 if id >= entity_count {
@@ -184,6 +217,10 @@ impl MspMap {
                     // error payload pointer in that slot.
                     continue;
                 }
+                if seen[id] {
+                    return Err(ERR_MSP_DUPLICATE_ENTITY_ID);
+                }
+                seen[id] = true;
                 let offset = descriptor.payload_offset as usize;
                 let size = descriptor.payload_size as usize;
                 if offset
@@ -192,6 +229,9 @@ impl MspMap {
                 {
                     lookup_table[id] = error_payload_ptr;
                 } else {
+                    // SAFETY: `offset` and `size` were checked to lie inside the
+                    // payload section, so the resulting pointer is within the
+                    // read-only mapping.
                     lookup_table[id] = unsafe { payload_base.add(offset) };
                 }
             }
@@ -229,6 +269,8 @@ impl MspMap {
     #[inline]
     pub fn resolve_payload(&self, entity_id: u32) -> *const u8 {
         if entity_id < self.entity_count {
+            // SAFETY: `entity_id` is in bounds and `lookup_table` has length
+            // `entity_count`, so the offset is valid.
             unsafe { *self.lookup_table.as_ptr().add(entity_id as usize) }
         } else {
             self.error_payload_ptr
@@ -266,21 +308,52 @@ fn msp_signature_path(path: &Path) -> Option<std::path::PathBuf> {
 /// The file must carry a valid Ed25519 sidecar signature unless the
 /// `MALPHAS_INSECURE_SKIP_VERIFY` environment variable is set (debug only).
 pub fn load_msp(path: &Path) -> Result<(), i32> {
+    #[cfg(debug_assertions)]
     let skip_verify = std::env::var_os("MALPHAS_INSECURE_SKIP_VERIFY").is_some();
+    #[cfg(not(debug_assertions))]
+    let skip_verify = false;
 
-    if !skip_verify {
+    let signed_hash = if !skip_verify {
         let sig_path = msp_signature_path(path).ok_or(ERR_MSP_SIGNATURE_MISSING)?;
         let signature_hex =
             std::fs::read_to_string(&sig_path).map_err(|_| ERR_MSP_SIGNATURE_INVALID)?;
-        if global_trust_anchor()
-            .verify_ed25519_signature(path, &signature_hex)
-            .is_err()
-        {
+        let policy = global_trust_anchor().ok_or(ERR_MSP_SIGNATURE_INVALID)?;
+
+        let mut file = File::open(path).map_err(|_| ERR_MSP_SIGNATURE_INVALID)?;
+        let mut hasher = Sha256::new();
+        let mut buffer = [0u8; 8192];
+        loop {
+            match file.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(n) => hasher.update(&buffer[..n]),
+                Err(_) => return Err(ERR_MSP_SIGNATURE_INVALID),
+            }
+        }
+        let message_hash: [u8; 32] = hasher.finalize().into();
+
+        policy
+            .verify_ed25519_signature_prehash(&message_hash, &signature_hex)
+            .map_err(|_| ERR_MSP_SIGNATURE_INVALID)?;
+        Some(message_hash)
+    } else {
+        None
+    };
+
+    let new_map = MspMap::load(path)?;
+
+    if let Some(expected) = signed_hash {
+        let mapped_hash: [u8; 32] = Sha256::digest(&new_map.mmap).into();
+        // SECURITY: Re-verify the mapped bytes against the hash that was signed.
+        // This closes the TOCTOU window between signature verification and mmap
+        // so the runtime never executes an image that differs from the signed
+        // digest.  It does not remove all races (the file can still be swapped
+        // between the size check and the first read), but it guarantees that
+        // the mapped image is the one the signature covers.
+        if mapped_hash != expected {
             return Err(ERR_MSP_SIGNATURE_INVALID);
         }
     }
 
-    let new_map = MspMap::load(path)?;
     MSP_MAP.store(Some(Arc::new(new_map)));
     Ok(())
 }
@@ -294,6 +367,8 @@ fn c_str_to_path<'a>(ptr: *const c_char) -> Option<&'a Path> {
     if ptr.is_null() {
         return None;
     }
+    // SAFETY: The caller is required by the C-ABI contract to pass a valid,
+    // NUL-terminated string.  We only convert it, never mutate it.
     unsafe { CStr::from_ptr(ptr).to_str().ok().map(Path::new) }
 }
 
@@ -364,7 +439,7 @@ mod tests {
             .copy_from_slice(&entity_table);
         data.extend_from_slice(&payload_section);
 
-        let checksum = compute_msp_checksum(&data[entity_table_offset..]);
+        let checksum = compute_msp_sha256(&data[entity_table_offset..]);
 
         let header = MspHeader {
             magic: MSP_MAGIC,
@@ -374,7 +449,7 @@ mod tests {
             payload_section_offset: payload_section_offset as u32,
             payload_section_size: payload_section.len() as u32,
             checksum,
-            _padding: [0; 32],
+            _padding: [0; 8],
         };
 
         let mut file = std::fs::File::create(path).unwrap();
@@ -391,8 +466,8 @@ mod tests {
         buf[12..16].copy_from_slice(&header.entity_count.to_le_bytes());
         buf[16..20].copy_from_slice(&header.payload_section_offset.to_le_bytes());
         buf[20..24].copy_from_slice(&header.payload_section_size.to_le_bytes());
-        buf[24..32].copy_from_slice(&header.checksum.to_le_bytes());
-        buf[32..64].copy_from_slice(&header._padding);
+        buf[24..56].copy_from_slice(&header.checksum);
+        buf[56..64].copy_from_slice(&header._padding);
         buf
     }
 
@@ -445,12 +520,18 @@ mod tests {
         let table = map.lookup_table_ptr();
         assert!(!table.is_null());
 
+        // SAFETY: The table has length `entity_count` (2) and was built by the
+        // loader, so slots 0 and 1 are valid.
         let payload0 = unsafe { *table.add(0) };
+        // SAFETY: Same as above.
         let payload1 = unsafe { *table.add(1) };
         assert!(!payload0.is_null());
         assert!(!payload1.is_null());
 
+        // SAFETY: `payload0` points to at least 4 valid bytes inside the mapped
+        // payload section.
         assert_eq!(unsafe { std::slice::from_raw_parts(payload0, 4) }, b"ENT0");
+        // SAFETY: Same as above.
         assert_eq!(unsafe { std::slice::from_raw_parts(payload1, 4) }, b"ENT1");
 
         // Invalid IDs must resolve to the Error Payload area.
@@ -485,7 +566,10 @@ mod tests {
         let map = MspMap::load(&path).expect("MSP with invalid descriptor must still load");
         let table = map.lookup_table_ptr();
 
+        // SAFETY: The table has length `entity_count` (2) and was built by the
+        // loader, so slots 0 and 1 are valid.
         assert_ne!(unsafe { *table.add(0) }, map.error_payload_ptr());
+        // SAFETY: Same as above.
         assert_eq!(unsafe { *table.add(1) }, map.error_payload_ptr());
 
         let _ = std::fs::remove_file(&path);
@@ -525,6 +609,112 @@ mod tests {
 
         let result = MspMap::load(&path);
         assert!(matches!(result, Err(-109)));
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn oversized_msp_is_rejected() {
+        let path = temp_msp_path("oversized");
+        // Write a header that claims a payload just above the limit.
+        let header = MspHeader {
+            magic: MSP_MAGIC,
+            version: MSP_VERSION,
+            entity_table_offset: 64,
+            entity_count: 0,
+            payload_section_offset: 64,
+            payload_section_size: (MAX_MSP_SIZE + 1) as u32,
+            checksum: [0u8; 32],
+            _padding: [0; 8],
+        };
+        let mut file = std::fs::File::create(&path).unwrap();
+        file.write_all(&header_as_bytes(&header)).unwrap();
+        // Extend the file so mmap succeeds but the size check fires first.
+        file.write_all(&[0u8; 65]).unwrap();
+        file.flush().unwrap();
+        drop(file);
+
+        let result = MspMap::load(&path);
+        assert!(matches!(result, Err(ERR_MSP_TOO_LARGE)));
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn entity_table_overlap_header_rejected() {
+        let path = temp_msp_path("layout_et_overlap");
+        let header = MspHeader {
+            magic: MSP_MAGIC,
+            version: MSP_VERSION,
+            entity_table_offset: 0, // Invalid: overlaps the header.
+            entity_count: 1,
+            payload_section_offset: 64,
+            payload_section_size: ERROR_PAYLOAD_RESERVE as u32,
+            checksum: [0u8; 32],
+            _padding: [0; 8],
+        };
+        let mut file = std::fs::File::create(&path).unwrap();
+        file.write_all(&header_as_bytes(&header)).unwrap();
+        file.write_all(&[0u8; 128]).unwrap();
+        file.flush().unwrap();
+        drop(file);
+
+        let result = MspMap::load(&path);
+        assert!(matches!(result, Err(ERR_MSP_INVALID_LAYOUT)));
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn payload_section_overlap_entity_table_rejected() {
+        let path = temp_msp_path("layout_payload_overlap");
+        // One descriptor makes the entity table span [64, 128).
+        let header = MspHeader {
+            magic: MSP_MAGIC,
+            version: MSP_VERSION,
+            entity_table_offset: 64,
+            entity_count: 1,
+            payload_section_offset: 64, // Invalid: before entity_table_end (128).
+            payload_section_size: ERROR_PAYLOAD_RESERVE as u32,
+            checksum: [0u8; 32],
+            _padding: [0; 8],
+        };
+        let mut file = std::fs::File::create(&path).unwrap();
+        file.write_all(&header_as_bytes(&header)).unwrap();
+        file.write_all(&[0u8; 128]).unwrap();
+        file.flush().unwrap();
+        drop(file);
+
+        let result = MspMap::load(&path);
+        assert!(matches!(result, Err(ERR_MSP_INVALID_LAYOUT)));
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn duplicate_entity_id_rejected() {
+        let path = temp_msp_path("duplicate_id");
+        let descriptors = vec![
+            MspEntityDescriptor {
+                entity_id: 0,
+                tag_mask: 1,
+                payload_offset: 0,
+                payload_size: 64,
+                _padding: [0; 40],
+            },
+            MspEntityDescriptor {
+                entity_id: 0, // Duplicate.
+                tag_mask: 2,
+                payload_offset: 64,
+                payload_size: 64,
+                _padding: [0; 40],
+            },
+        ];
+        let payload_section = vec![0u8; 128];
+        write_msp_file(&path, &descriptors, &payload_section);
+
+        let result = MspMap::load(&path);
+        assert!(matches!(result, Err(ERR_MSP_DUPLICATE_ENTITY_ID)));
 
         let _ = std::fs::remove_file(&path);
     }

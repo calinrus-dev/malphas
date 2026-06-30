@@ -76,9 +76,9 @@ void main() {
       await tester.pump(const Duration(milliseconds: 16));
     }
 
-    final count = bindings.commandCount;
+    final snapshot = bindings.getFrontBufferSnapshot();
     expect(
-      count,
+      snapshot.count,
       greaterThan(0),
       reason: 'Engine should have generated at least one render command',
     );

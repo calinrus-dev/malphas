@@ -1,7 +1,7 @@
 // Dart-to-engine input event queue with spatial coalescence.
-use std::sync::OnceLock;
-
-use crossbeam_queue::ArrayQueue;
+#[cfg(test)]
+use std::cell::RefCell;
+use std::collections::VecDeque;
 
 const INPUT_QUEUE_CAPACITY: usize = 256;
 
@@ -33,21 +33,42 @@ pub struct InputEvent {
     pub y: f32,
 }
 
-static INPUT_QUEUE: OnceLock<ArrayQueue<InputEvent>> = OnceLock::new();
+#[cfg(not(test))]
+static INPUT_QUEUE: std::sync::Mutex<VecDeque<InputEvent>> = std::sync::Mutex::new(VecDeque::new());
 
-fn input_queue() -> &'static ArrayQueue<InputEvent> {
-    INPUT_QUEUE.get_or_init(|| ArrayQueue::new(INPUT_QUEUE_CAPACITY))
+#[cfg(test)]
+thread_local! {
+    static TEST_INPUT_QUEUE: RefCell<VecDeque<InputEvent>> = RefCell::new(VecDeque::with_capacity(INPUT_QUEUE_CAPACITY));
+}
+
+#[cfg(not(test))]
+fn with_input_queue<F, R>(f: F) -> R
+where
+    F: FnOnce(&mut VecDeque<InputEvent>) -> R,
+{
+    let mut guard = INPUT_QUEUE.lock().unwrap();
+    f(&mut guard)
+}
+
+#[cfg(test)]
+fn with_input_queue<F, R>(f: F) -> R
+where
+    F: FnOnce(&mut VecDeque<InputEvent>) -> R,
+{
+    TEST_INPUT_QUEUE.with(|q| f(&mut q.borrow_mut()))
+}
+
+/// Reset the input queue to an empty state.  Only available in tests so each
+/// test starts from a known baseline.
+#[cfg(test)]
+pub fn reset_input_queue_for_tests() {
+    with_input_queue(|queue| queue.clear());
 }
 
 /// Drain every pending input event from the queue.  Called once per engine
 /// tick so events never accumulate unbounded.
 pub fn drain_input_events() -> Vec<InputEvent> {
-    let mut out = Vec::new();
-    let queue = input_queue();
-    while let Some(ev) = queue.pop() {
-        out.push(ev);
-    }
-    out
+    with_input_queue(|queue| queue.drain(..).collect())
 }
 
 pub fn process_input_event(event_type: i32, x: f32, y: f32) -> i32 {
@@ -63,45 +84,34 @@ pub fn process_input_event(event_type: i32, x: f32, y: f32) -> i32 {
 
     let event = InputEvent { event_type, x, y };
 
-    let queue = input_queue();
-
-    // Coalesce consecutive events with identical type and coordinates.
-    if let Some(back) = queue.pop() {
-        if back.event_type != event_type
-            || back.x.to_bits() != x.to_bits()
-            || back.y.to_bits() != y.to_bits()
-        {
-            queue.force_push(back);
+    with_input_queue(|queue| {
+        // Coalesce consecutive events with identical type and coordinates by
+        // inspecting the back without removing it.
+        if let Some(back) = queue.back() {
+            if back.event_type == event_type
+                && back.x.to_bits() == x.to_bits()
+                && back.y.to_bits() == y.to_bits()
+            {
+                return 0;
+            }
         }
-    }
-    queue.force_push(event);
 
-    0
+        // Keep the queue bounded; drop the oldest event on overflow.
+        if queue.len() >= INPUT_QUEUE_CAPACITY {
+            queue.pop_front();
+        }
+        queue.push_back(event);
+        0
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
-
-    /// Serialize input-queue tests because they all share the same static
-    /// `OnceLock` instance. Holding this lock while draining/running prevents
-    /// concurrent tests from perturbing the capacity assertions.
-    static INPUT_TEST_LOCK: Mutex<()> = Mutex::new(());
-
-    fn drain_queue() -> Vec<InputEvent> {
-        let mut out = Vec::new();
-        while let Some(ev) = input_queue().pop() {
-            out.push(ev);
-        }
-        out
-    }
 
     #[test]
     fn test_input_coalescence_and_capacity_drop() {
-        let _guard = INPUT_TEST_LOCK.lock().unwrap();
-        // Ensure a clean queue; tests share the static OnceLock.
-        let _ = drain_queue();
+        reset_input_queue_for_tests();
 
         // First event is accepted.
         assert_eq!(process_input_event(0, 1.0, 2.0), 0);
@@ -110,7 +120,7 @@ mod tests {
         // Distinct event is appended.
         assert_eq!(process_input_event(1, 3.0, 4.0), 0);
 
-        let queue = drain_queue();
+        let queue = drain_input_events();
         assert_eq!(queue.len(), 2);
         assert_eq!(queue[0].event_type, InputEventType::Touch);
         assert_eq!(queue[0].x.to_bits(), 1.0f32.to_bits());
@@ -121,9 +131,32 @@ mod tests {
     }
 
     #[test]
+    fn input_queue_coalescence_preserves_order() {
+        reset_input_queue_for_tests();
+
+        // Identical events coalesce.
+        assert_eq!(process_input_event(0, 1.0, 2.0), 0);
+        assert_eq!(process_input_event(0, 1.0, 2.0), 0);
+        // Distinct events keep order even when coordinates partially match.
+        assert_eq!(process_input_event(0, 3.0, 4.0), 0);
+        assert_eq!(process_input_event(1, 3.0, 4.0), 0);
+        assert_eq!(process_input_event(0, 1.0, 2.0), 0);
+
+        let queue = drain_input_events();
+        assert_eq!(queue.len(), 4);
+        assert_eq!(queue[0].event_type, InputEventType::Touch);
+        assert_eq!(queue[0].x.to_bits(), 1.0f32.to_bits());
+        assert_eq!(queue[1].event_type, InputEventType::Touch);
+        assert_eq!(queue[1].x.to_bits(), 3.0f32.to_bits());
+        assert_eq!(queue[2].event_type, InputEventType::Move);
+        assert_eq!(queue[2].x.to_bits(), 3.0f32.to_bits());
+        assert_eq!(queue[3].event_type, InputEventType::Touch);
+        assert_eq!(queue[3].x.to_bits(), 1.0f32.to_bits());
+    }
+
+    #[test]
     fn test_invalid_event_type_is_rejected() {
-        let _guard = INPUT_TEST_LOCK.lock().unwrap();
-        let _ = drain_queue();
+        reset_input_queue_for_tests();
         assert_eq!(process_input_event(-1, 0.0, 0.0), -1);
         assert_eq!(process_input_event(3, 0.0, 0.0), -1);
         assert_eq!(process_input_event(0, 0.0, 0.0), 0);
@@ -131,8 +164,7 @@ mod tests {
 
     #[test]
     fn test_non_finite_coordinates_are_rejected() {
-        let _guard = INPUT_TEST_LOCK.lock().unwrap();
-        let _ = drain_queue();
+        reset_input_queue_for_tests();
         assert_eq!(process_input_event(0, f32::NAN, 0.0), -1);
         assert_eq!(process_input_event(0, 0.0, f32::NAN), -1);
         assert_eq!(process_input_event(0, f32::INFINITY, 0.0), -1);
@@ -141,8 +173,7 @@ mod tests {
 
     #[test]
     fn test_capacity_drops_oldest_event() {
-        let _guard = INPUT_TEST_LOCK.lock().unwrap();
-        let _ = drain_queue();
+        reset_input_queue_for_tests();
         // Fill the queue.
         for i in 0..INPUT_QUEUE_CAPACITY {
             assert_eq!(process_input_event(0, i as f32, 0.0), 0);
@@ -150,7 +181,7 @@ mod tests {
         // Push one more; the oldest event should be dropped.
         assert_eq!(process_input_event(0, 999.0, 0.0), 0);
 
-        let queue = drain_queue();
+        let queue = drain_input_events();
         assert_eq!(queue.len(), INPUT_QUEUE_CAPACITY);
         // The very first event (0.0) should have been evicted.
         assert_ne!(queue[0].x.to_bits(), 0.0f32.to_bits());

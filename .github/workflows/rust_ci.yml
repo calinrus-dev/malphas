@@ -16,13 +16,13 @@ jobs:
         os: [windows-latest, ubuntu-latest, macos-14]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
 
       - name: Cache Cargo dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           workspaces: "."
 
@@ -36,14 +36,33 @@ jobs:
       - name: Run Clippy
         run: cargo clippy --release --all-targets -- -D warnings
 
+      - name: Audit dependencies
+        shell: bash
+        run: |
+          cargo install cargo-audit --locked
+          set +e
+          output=$(cargo audit --deny warnings 2>&1)
+          status=$?
+          set -e
+          echo "$output"
+          if [ $status -ne 0 ]; then
+            # Do not fail the whole workflow if the advisory database is unreachable,
+            # but still fail on actual vulnerabilities or denied warnings.
+            if echo "$output" | grep -qiE "couldn't fetch advisory database|error loading advisory database"; then
+              if echo "$output" | grep -qiE "RUSTSEC-|vulnerabilities found"; then
+                exit $status
+              fi
+              echo "Advisory database is unreachable; treating audit failure as a warning."
+              exit 0
+            fi
+            exit $status
+          fi
+
       - name: Build release
         run: cargo build --release --locked
 
       - name: Run tests
         run: cargo test --release --locked
-
-      - name: Run security tests
-        run: cargo test --release --locked --test security_tests
 
       - name: Sign native engine with test key
         shell: bash
@@ -67,12 +86,12 @@ jobs:
           fi
           for lib in target/release/libmalphas_core.so target/release/libmalphas_core.dylib target/release/malphas_core.dll; do
             if [ -f "$lib" ]; then
-              "$CLI" sign "$lib" "$key"
+              "$CLI" sign --signing-key-env MALPHAS_SIGNING_KEY "$lib"
             fi
           done
 
       - name: Upload native artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: malphas_core-${{ matrix.os }}
           path: |
@@ -82,7 +101,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Upload engine signatures
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: malphas_core-sig-${{ matrix.os }}
           path: |
@@ -92,14 +111,14 @@ jobs:
           if-no-files-found: ignore
 
       - name: Upload CLI executable
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: malphas-cli-${{ matrix.os }}
           path: ${{ matrix.os == 'windows-latest' && 'target/release/malphas-cli.exe' || 'target/release/malphas-cli' }}
           if-no-files-found: error
 
       - name: Upload bouncing_demo system library
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: bouncing_demo-${{ matrix.os }}
           path: |
@@ -130,12 +149,12 @@ jobs:
           for sys in target/release/libbouncing_demo.so target/release/libbouncing_demo.dylib target/release/bouncing_demo.dll; do
             if [ -f "$sys" ]; then
               cp "$sys" bouncing_demo.mxc
-              "$CLI" sign bouncing_demo.mxc "$key"
+              "$CLI" sign --signing-key-env MALPHAS_SIGNING_KEY bouncing_demo.mxc
             fi
           done
 
       - name: Upload signed bouncing_demo .mxc
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: bouncing_demo-mxc-${{ matrix.os }}
           path: |

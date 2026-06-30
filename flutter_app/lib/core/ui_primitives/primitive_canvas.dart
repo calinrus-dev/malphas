@@ -82,8 +82,9 @@ class _PrimitivePainter extends CustomPainter {
       Paint()..color = const Color(0xff0a0a0a),
     );
 
-    final commands = _bindings.frontCommands;
-    final count = _bindings.frontCount;
+    final snapshot = _bindings.getFrontBufferSnapshot();
+    final commands = snapshot.commands;
+    final count = snapshot.count;
     if (commands == ffi.nullptr || count <= 0) return;
 
     final scaleX = size.width / _logicalWidth;
@@ -123,7 +124,7 @@ class _PrimitivePainter extends CustomPainter {
     double scaleX,
     double scaleY,
   ) {
-    // Systems are responsible for text content in v2.7.0.  Without an arena
+    // Systems are responsible for text content in v2.9.0.  Without an arena
     // atlas we render a small placeholder marker so text commands are still
     // visible during development.
     final center = Offset(cmd.x * scaleX, cmd.y * scaleY);

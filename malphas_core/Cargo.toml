@@ -8,6 +8,9 @@ authors.workspace = true
 name = "malphas_core"
 crate-type = ["cdylib", "rlib"]
 
+[features]
+test-anchor = []
+
 [dependencies]
 sha2 = "0.10.8"
 zip = "2"
@@ -18,7 +21,6 @@ hex = "0.4.3"
 memmap2 = "0.9"
 libloading = "0.8"
 subtle = "2.6"
-crossbeam-queue = "0.3"
 
 [dev-dependencies]
 ed25519-dalek = { version = "2.1.1", features = ["rand_core"] }

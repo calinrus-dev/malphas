@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:path_provider/path_provider.dart';
 import '../../features/hub/environment_model.dart';
 
 /// Persists lightweight app state (environments and the package registry ids)
@@ -26,23 +27,18 @@ class AppStatePersistenceService {
     _overrideDocumentsDirectory = null;
   }
 
-  Directory _documentsDirectory() {
+  Directory? _cachedDocumentsDirectory;
+
+  Future<Directory> _documentsDirectory() async {
     if (_overrideDocumentsDirectory != null) {
       return Directory(_overrideDocumentsDirectory!);
     }
-    // Synchronous fallback: path_provider is not always initialized in tests,
-    // so we use a directory next to the current working directory. Production
-    // builds should set an override if they need a different location.
-    final cwd = Directory.current.path;
-    final fallback = Directory('$cwd/malphas_state');
-    if (!fallback.existsSync()) {
-      fallback.createSync(recursive: true);
-    }
-    return fallback;
+    _cachedDocumentsDirectory ??= await getApplicationDocumentsDirectory();
+    return _cachedDocumentsDirectory!;
   }
 
-  File _stateFile(String name) {
-    final dir = _documentsDirectory();
+  Future<File> _stateFile(String name) async {
+    final dir = await _documentsDirectory();
     if (!dir.existsSync()) {
       dir.createSync(recursive: true);
     }
@@ -50,16 +46,16 @@ class AppStatePersistenceService {
   }
 
   /// Saves the list of environments.
-  void saveEnvironments(List<MalphasEnvironment> environments) {
-    final file = _stateFile('environments');
+  Future<void> saveEnvironments(List<MalphasEnvironment> environments) async {
+    final file = await _stateFile('environments');
     final jsonList = environments.map((e) => e.toJson()).toList();
     file.writeAsStringSync(jsonEncode(jsonList));
   }
 
   /// Loads the saved environments, or an empty list if none exist.
-  List<MalphasEnvironment> loadEnvironments() {
+  Future<List<MalphasEnvironment>> loadEnvironments() async {
     try {
-      final file = _stateFile('environments');
+      final file = await _stateFile('environments');
       if (!file.existsSync()) return [];
       final jsonList = jsonDecode(file.readAsStringSync()) as List<dynamic>;
       return jsonList
@@ -72,15 +68,15 @@ class AppStatePersistenceService {
   }
 
   /// Saves the ids of the packages that are currently registered.
-  void saveRegistryIds(List<String> packageIds) {
-    final file = _stateFile('registry');
+  Future<void> saveRegistryIds(List<String> packageIds) async {
+    final file = await _stateFile('registry');
     file.writeAsStringSync(jsonEncode(packageIds));
   }
 
   /// Loads the saved registry ids, or an empty list if none exist.
-  List<String> loadRegistryIds() {
+  Future<List<String>> loadRegistryIds() async {
     try {
-      final file = _stateFile('registry');
+      final file = await _stateFile('registry');
       if (!file.existsSync()) return [];
       final jsonList = jsonDecode(file.readAsStringSync()) as List<dynamic>;
       return jsonList.map((e) => e as String).toList();
@@ -90,8 +86,8 @@ class AppStatePersistenceService {
   }
 
   /// Saves the custom workspace root override.
-  void saveWorkspaceRootOverride(String? path) {
-    final file = _stateFile('workspace_root');
+  Future<void> saveWorkspaceRootOverride(String? path) async {
+    final file = await _stateFile('workspace_root');
     if (path == null) {
       if (file.existsSync()) {
         try {
@@ -104,9 +100,9 @@ class AppStatePersistenceService {
   }
 
   /// Loads the custom workspace root override.
-  String? loadWorkspaceRootOverride() {
+  Future<String?> loadWorkspaceRootOverride() async {
     try {
-      final file = _stateFile('workspace_root');
+      final file = await _stateFile('workspace_root');
       if (!file.existsSync()) return null;
       return file.readAsStringSync().trim();
     } catch (_) {

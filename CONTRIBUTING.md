@@ -133,7 +133,8 @@ Use the GitHub issue templates in `.github/ISSUE_TEMPLATE/`. Include:
 
 Do not commit private signing keys. The repository uses the `TEST_SIGNING_KEY`
 GitHub secret in CI. If you discover a security issue, please report it privately
-instead of opening a public issue.
+instead of opening a public issue. See `docs/SECURITY.md` for the full policy and
+reporting instructions.
 
 ### Threat model
 
@@ -147,3 +148,60 @@ instead of opening a public issue.
   isolated with `catch_unwind` and tainting.
 - `MALPHAS_INSECURE_SKIP_VERIFY` is a debug-only escape hatch and must never be
   enabled in production.
+
+## FFI change checklist
+
+The Rust/Dart boundary is version-locked and layout-sensitive.  Any change that
+touches the following must update both sides and the contract documentation:
+
+- [ ] `MalphasDoubleBufferBridge` in `malphas_core/src/pipeline.rs` **and**
+  `flutter_app/lib/core/ffi/types.dart`.
+- [ ] `DartRenderCommand` in `malphas_core/src/pipeline.rs` **and**
+  `flutter_app/lib/core/ffi/types.dart`.
+- [ ] `BRIDGE_ABI_VERSION` in `malphas_core/src/pipeline.rs` whenever a layout
+  changes (format `0xMMmmpp00`).
+- [ ] ABI version verification in `MalphasBindings.initEngine`.
+- [ ] Atomic field access in Dart through Rust getters only (`get_back_index`,
+  `get_buffer_a_command_count`, `get_buffer_b_command_count`, etc.).  No direct
+  atomic struct field reads.
+- [ ] Layout assertions in `malphas_core/src/pipeline.rs` and Dart tests.
+- [ ] `docs/FFI_CONTRACT.md` updated with the new layout, ordering, or error
+  codes.
+
+## Test requirements
+
+Every non-trivial change must be accompanied by tests:
+
+- Rust: add unit or integration tests in `malphas_core/src/` or
+  `malphas_core/tests/`.
+- Dart: add widget/unit tests in `flutter_app/test/`.
+- Security: add cases to `malphas_core/tests/security_tests.rs` for trust
+  anchor, signature, or sandbox changes.
+- FFI: add layout and concurrency tests when changing shared structures or
+  atomic ordering.
+
+All tests must pass locally before opening a pull request:
+
+```bash
+cargo fmt -- --check
+cargo clippy --all-targets -- -D warnings
+cargo test --release --locked
+cargo test --release --locked --test security_tests
+cd flutter_app && flutter analyze --no-fatal-infos --no-fatal-warnings
+cd flutter_app && dart format --set-exit-if-changed .
+cd flutter_app && flutter test
+```
+
+## Release process summary
+
+1. Ensure the root `VERSION` file contains the new version (e.g. `2.9.0`).
+2. Run `scripts/sync_version.sh` to propagate the version to `Cargo.toml`,
+   `flutter_app/pubspec.yaml`, `README.md`, and `malphas_core/src/pipeline.rs`.
+3. Run `scripts/check_version_sync.sh` to verify all version strings agree.
+4. Update `CHANGELOG.md` with the new release section and migration notes.
+5. Update `docs/SECURITY.md` and `docs/FFI_CONTRACT.md` if the security model or
+   FFI boundary changed.
+6. Verify the release build signs all native artifacts with a production key,
+   not the `TEST_SIGNING_KEY`.
+7. Tag the release as `v<VERSION>` and publish signed artifacts with a
+  `SHA256SUMS` file.

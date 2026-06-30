@@ -1,8 +1,8 @@
-# Malphas Agent Instructions -- v2.8.0
+# Malphas Agent Instructions -- v2.9.0
 
 These rules define the design language, build/test workflow, FFI safety constraints, and agent conventions of the Malphas project. All agents modifying code, documentation, or system mechanics must follow them.
 
-Version v2.8.0 -- Fortress CI. The Data-Oriented Memory Router from v2.7.0 is hardened: Rust owns the FFI bridge and command buffers, all native binaries require Ed25519 sidecar signatures, the input queue is lockless, and system panics are isolated with `catch_unwind`. v2.8.0 adds a fully green cross-platform CI/CD pipeline.
+Version v2.9.0 -- Sovereign Runtime. The Data-Oriented Memory Router from v2.8.0 is hardened: Rust owns the FFI bridge and command buffers, all native binaries require Ed25519 sidecar signatures, the input queue is lockless, and system panics are isolated with `catch_unwind`. v2.9.0 adds a trustworthy supply chain, a formally correct FFI double-buffer contract, and zero-known-defect quality gates.
 
 ## 1. Terminal Aesthetic
 
@@ -32,7 +32,7 @@ Malphas functions and behaves like an immersive graphical terminal. It rejects s
 - Flutter owns the only clock. The engine advances one tick per VSync via `trigger_engine_pulse()`. Do not add timers or sleeps in the Rust simulation thread.
 - The render command stream is a homogeneous array of 24-byte `DartRenderCommand` slots. Systems write these commands directly into the back buffer; Flutter reads the front buffer opposite using `get_back_index()`.
 - `malphas_core` is a Rust `cdylib` with decoupled modules: `pipeline`, `bridge`, `input`, `crypto`, `msp_loader`, and `system_host`. It exports a minimal C-ABI boundary; Flutter is a passive display server that only pulses and reads the front buffer.
-- `malphas-cli` is the canonical package compiler and signer. It consumes a v2.7.0 manifest and produces a `.msp` Silver Platter. `.mxc` system libraries are built separately by Cargo as `cdylib` crates.
+- `malphas-cli` is the canonical package compiler and signer. It consumes a v2.9.0 manifest and produces a `.msp` Silver Platter. `.mxc` system libraries are built separately by Cargo as `cdylib` crates.
 - The Flutter engine and package managers must discover resources from disk (`flutter_app/motors/`, `examples/`, `packages/`). Do not hard-code mock engines, mock packages, or placeholder SHA-256 hashes. Engine integrity checks must compute real SHA-256 sums of the motor files.
 
 ## 6. Build, Test & Release Commands
@@ -188,6 +188,6 @@ Malphas shares memory between Dart and Rust. Breaking these rules causes crashes
 
 - The runtime trusts only the configured Ed25519 trust anchor. Every loaded native binary (engine, `.msp`, `.mxc`) must carry a valid sidecar signature.
 - The runtime does **not** trust Flutter with bridge ownership. Dart receives a read-only pointer and must never allocate, free, or write into the bridge or command buffers.
-- The runtime does **not** trust arbitrary file-system paths. `.mxc` loading is sandboxed to `systems/`, `packages/`, and `motors/`.
+- The runtime does **not** trust arbitrary file-system paths. `.mxc` loading is sandboxed to `systems/`, `packages/`, `motors/`, and `flutter_app/motors/`.
 - The runtime does **not** trust loaded systems. Each system `init` and `tick` is wrapped in `catch_unwind`; a panicking or overflowing system is tainted and skipped.
 - `MALPHAS_INSECURE_SKIP_VERIFY` is a debug-only escape hatch. Agents must not rely on it in production code or release workflows.

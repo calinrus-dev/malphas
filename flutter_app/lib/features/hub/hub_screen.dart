@@ -42,18 +42,25 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
 
   Future<void> _initialize() async {
     _engineController.scanAvailableEngines();
+
+    // Build the default environments synchronously so the UI is never empty
+    // while the package controller and persisted state load in the background.
+    _buildEnvironments();
+    if (mounted) setState(() {});
+
     await _packageController.init();
-    final saved = _persistence.loadEnvironments();
+    final saved = await _persistence.loadEnvironments();
     if (saved.isNotEmpty) {
       _environments = saved;
     } else {
+      // Rebuild with any packages discovered during init.
       _buildEnvironments();
     }
     if (mounted) setState(() {});
   }
 
-  void _persistEnvironments() {
-    _persistence.saveEnvironments(_environments);
+  Future<void> _persistEnvironments() async {
+    await _persistence.saveEnvironments(_environments);
   }
 
   void _buildEnvironments() {
@@ -279,7 +286,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                           ),
                         );
                       });
-                      _persistEnvironments();
+                      await _persistEnvironments();
                       if (context.mounted) Navigator.of(context).pop();
                     }
                   },
@@ -477,7 +484,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                         env.engineId = selectedEngineId;
                         env.packageIds = selectedPackageIds;
                       });
-                      _persistEnvironments();
+                      await _persistEnvironments();
                       if (context.mounted) Navigator.of(context).pop();
                     }
                   },
@@ -550,7 +557,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                   setState(() {
                     env.name = name.trim();
                   });
-                  _persistEnvironments();
+                  await _persistEnvironments();
                   if (context.mounted) Navigator.of(context).pop();
                 }
               },
@@ -609,7 +616,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                 setState(() {
                   _environments.removeWhere((e) => e.id == env.id);
                 });
-                _persistEnvironments();
+                await _persistEnvironments();
                 if (context.mounted) Navigator.of(context).pop();
               },
             ),
@@ -791,7 +798,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
               final item = _environments.removeAt(fromIndex);
               _environments.insert(originalIndex, item);
             });
-            _persistEnvironments();
+            await _persistEnvironments();
           },
           builder: (context, candidateData, rejectedData) {
             return GestureDetector(
@@ -872,7 +879,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                           ),
                           onPressed: () async {
                             setState(() => env.isPinned = !env.isPinned);
-                            _persistEnvironments();
+                            await _persistEnvironments();
                           },
                         ),
                       ],
@@ -957,7 +964,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
               final item = _environments.removeAt(fromIndex);
               _environments.insert(originalIndex, item);
             });
-            _persistEnvironments();
+            await _persistEnvironments();
           },
           builder: (context, candidateData, rejectedData) {
             return GestureDetector(
@@ -1063,7 +1070,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                       ),
                       onPressed: () async {
                         setState(() => env.isPinned = !env.isPinned);
-                        _persistEnvironments();
+                        await _persistEnvironments();
                       },
                     ),
                   ],

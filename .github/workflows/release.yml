@@ -30,32 +30,38 @@ jobs:
     needs: [rust-core, flutter-windows, android-release]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
 
       - name: Download native core artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
         with:
           path: artifacts/native
           pattern: malphas_core-*
           merge-multiple: false
 
       - name: Download Flutter Windows app bundle
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
         with:
           name: malphas-app-windows
           path: artifacts/malphas-app-windows
 
       - name: Download Android AAB
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
         with:
           name: malphas-app-android-aab
           path: artifacts/malphas-app-android-aab
 
       - name: Download Android APK
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
         with:
           name: malphas-app-android-apk
           path: artifacts/malphas-app-android-apk
+
+      - name: Download CLI executable
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
+        with:
+          name: malphas-cli-ubuntu-latest
+          path: native-cli/
 
       - name: Prepare release assets
         run: |
@@ -75,8 +81,38 @@ jobs:
           cd ../../artifacts/malphas-app-android-apk
           cp app-release.apk ../../release/malphas-app-android.apk
 
+      - name: Generate and sign SHA256SUMS
+        shell: bash
+        env:
+          MALPHAS_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          set -e
+          cd release
+          sha256sum * > SHA256SUMS
+          cd ..
+
+          if [ -z "$MALPHAS_SIGNING_KEY" ]; then
+            echo "RELEASE_SIGNING_KEY secret is not set; SHA256SUMS will not be signed."
+            exit 0
+          fi
+
+          key="${MALPHAS_SIGNING_KEY#0x}"
+          key="${key#0X}"
+          if ! echo "$key" | grep -qxE '[0-9a-fA-F]{64}'; then
+            echo "Error: RELEASE_SIGNING_KEY must be a 64-character hex string (optional 0x/0X prefix)."
+            exit 1
+          fi
+
+          CLI=native-cli/malphas-cli
+          if [ ! -f "$CLI" ]; then
+            echo "Error: malphas-cli not found; cannot sign SHA256SUMS."
+            exit 1
+          fi
+          chmod +x "$CLI"
+          "$CLI" sign --signing-key-env MALPHAS_SIGNING_KEY release/SHA256SUMS
+
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@c95fe1489396fe8a9eb87c0abf8aa5b2ef267fda # v2.2.1
         with:
           files: release/*
           generate_release_notes: true

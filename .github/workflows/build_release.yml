@@ -9,23 +9,24 @@ on:
 jobs:
   rust-core:
     uses: ./.github/workflows/rust_ci.yml
+    secrets: inherit
 
   bundle-release:
     name: Bundle native release artifacts
     needs: rust-core
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
 
       - name: Download all native artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
         with:
           path: artifacts/
           pattern: malphas_core-*
           merge-multiple: false
 
       - name: Upload release bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: malphas-core-release-bundle
           path: artifacts/

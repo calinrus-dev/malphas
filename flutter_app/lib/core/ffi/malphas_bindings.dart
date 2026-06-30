@@ -6,7 +6,7 @@ import 'package:flutter/foundation.dart';
 
 import 'types.dart';
 
-/// Zero-copy FFI gateway to the Rust `malphas_core` v2.7.5 engine.
+/// Zero-copy FFI gateway to the Rust `malphas_core` v2.9.0 engine.
 ///
 /// The old arena-based entity setup API has been removed.  Systems now own all
 /// simulation state; Flutter only drives the vsync pulse and reads the front
@@ -31,7 +31,12 @@ class MalphasBindings extends ChangeNotifier {
   /// This is used by the engine manager hot-swap flow.  The old library handle
   /// is intentionally leaked because Dart's `DynamicLibrary` does not expose a
   /// close operation; the new handle becomes active immediately.
-  void reloadNativeLibrary(String path) {
+  ///
+  /// Public entry point kept for [EngineController.hotSwapEngine]; the actual
+  /// work is delegated to the private implementation below.
+  void reloadNativeLibrary(String path) => _reloadNativeLibrary(path);
+
+  void _reloadNativeLibrary(String path) {
     try {
       final newLib = DynamicLibrary.open(path);
       _lib = newLib;
@@ -40,6 +45,7 @@ class MalphasBindings extends ChangeNotifier {
       debugPrint('MalphasBindings: hot-swapped native library from $path');
     } catch (e) {
       debugPrint('MalphasBindings: failed to hot-swap native library: $e');
+      _nativeAvailable = false;
     }
   }
 
@@ -110,27 +116,27 @@ class MalphasBindings extends ChangeNotifier {
   // ---------------------------------------------------------------------------
   // Native function bindings.
   // ---------------------------------------------------------------------------
-  late final _InitEngine _initEngine;
-  late final _ShutdownEngine _shutdownEngine;
-  late final _PauseEngine _pauseEngine;
-  late final _TriggerEnginePulse _triggerEnginePulse;
-  late final _LoadMsp _loadMsp;
-  late final _RefreshMsp _refreshMsp;
-  late final _LoadSystem _loadSystem;
-  late final _GetBackIndex _getBackIndex;
-  late final _GetCommandsWritten _getCommandsWritten;
-  late final _GetMspEntityCount _getMspEntityCount;
-  late final _GetLoadedSystemCount _getLoadedSystemCount;
-  late final _MalphasAlloc _malphasAlloc;
-  late final _MalphasFree _malphasFree;
-  late final _VerifyEngineSignature _verifyEngineSignature;
-  late final _VerifyBinaryIntegrity _verifyBinaryIntegrity;
-  late final _ProcessInputEvent _processInputEvent;
-  late final _SetTrustAnchor _setTrustAnchor;
-  late final _GetU64 _getVmTickMicros;
-  late final _GetU64 _getPulseLatencyMicros;
-  late final _GetU64 _getHitTestsCount;
-  late final _GetU64 _getCommandsGeneratedCount;
+  late _InitEngine _initEngine;
+  late _ShutdownEngine _shutdownEngine;
+  late _PauseEngine _pauseEngine;
+  late _TriggerEnginePulse _triggerEnginePulse;
+  late _LoadMsp _loadMsp;
+  late _RefreshMsp _refreshMsp;
+  late _LoadSystem _loadSystem;
+  late _GetBackIndex _getBackIndex;
+  late _GetCommandsWritten _getCommandsWritten;
+  late _GetFrontBufferSnapshot _getFrontBufferSnapshot;
+  late _GetMspEntityCount _getMspEntityCount;
+  late _GetLoadedSystemCount _getLoadedSystemCount;
+  late _MalphasAlloc _malphasAlloc;
+  late _MalphasFree _malphasFree;
+  late _VerifyEngineSignature _verifyEngineSignature;
+  late _VerifyBinaryIntegrity _verifyBinaryIntegrity;
+  late _ProcessInputEvent _processInputEvent;
+  late _SetTrustAnchor _setTrustAnchor;
+  late _GetU64 _getVmTickMicros;
+  late _GetU64 _getPulseLatencyMicros;
+  late _GetU64 _getCommandsGeneratedCount;
 
   void _bindFunctions() {
     if (_lib == null) return;
@@ -155,6 +161,8 @@ class MalphasBindings extends ChangeNotifier {
     _getCommandsWritten =
         lib.lookupFunction<_GetCommandsWrittenNative, _GetCommandsWritten>(
             'get_commands_written');
+    _getFrontBufferSnapshot = lib.lookupFunction<_GetFrontBufferSnapshotNative,
+        _GetFrontBufferSnapshot>('get_front_buffer_snapshot');
     _getMspEntityCount =
         lib.lookupFunction<_GetMspEntityCountNative, _GetMspEntityCount>(
             'get_msp_entity_count');
@@ -179,8 +187,6 @@ class MalphasBindings extends ChangeNotifier {
         lib.lookupFunction<_GetU64Native, _GetU64>('get_vm_tick_micros');
     _getPulseLatencyMicros =
         lib.lookupFunction<_GetU64Native, _GetU64>('get_pulse_latency_micros');
-    _getHitTestsCount =
-        lib.lookupFunction<_GetU64Native, _GetU64>('get_hit_tests_count');
     _getCommandsGeneratedCount = lib
         .lookupFunction<_GetU64Native, _GetU64>('get_commands_generated_count');
   }
@@ -192,6 +198,9 @@ class MalphasBindings extends ChangeNotifier {
   ///
   /// Rust allocates and owns the 64-byte aligned bridge and command buffers;
   /// Dart only receives the pointer and must treat it as read-only.
+  /// ABI version expected by this Dart binding.  Must match the Rust core.
+  static const int _expectedAbiVersion = 0x02090000;
+
   int initEngine({int maxCommands = 2048}) {
     if (!_nativeAvailable || _lib == null) return -1;
 
@@ -200,6 +209,16 @@ class MalphasBindings extends ChangeNotifier {
     final bridgePtr = _initEngine(maxCommands);
     if (bridgePtr == nullptr) return -1;
     _bridge = bridgePtr.cast<MalphasDoubleBufferBridge>();
+
+    final abiVersion = _bridge!.ref.abiVersion;
+    if (abiVersion != _expectedAbiVersion) {
+      debugPrint(
+        'MalphasBindings: ABI mismatch (expected 0x${_expectedAbiVersion.toRadixString(16)}, got 0x${abiVersion.toRadixString(16)})',
+      );
+      shutdownEngine();
+      return -2;
+    }
+
     return 0;
   }
 
@@ -251,27 +270,37 @@ class MalphasBindings extends ChangeNotifier {
   // ---------------------------------------------------------------------------
   // Front buffer accessors used by PrimitiveCanvas (zero-copy).
   // ---------------------------------------------------------------------------
+  /// Atomically reads the current front buffer snapshot.
+  ///
+  /// Returns both the command pointer and count obtained in a single FFI call
+  /// so the painter cannot observe a torn buffer flip between reading the
+  /// count and the pointer.
+  ({Pointer<DartRenderCommand> commands, int count}) getFrontBufferSnapshot() {
+    if (_bridge == null) {
+      return (commands: nullptr, count: 0);
+    }
+    return using((arena) {
+      final frontIndexOut = arena<Uint8>();
+      final frontCountOut = arena<Uint32>();
+      final commands = _getFrontBufferSnapshot(
+        _bridge!,
+        frontIndexOut,
+        frontCountOut,
+      );
+      return (
+        commands: commands,
+        count: frontCountOut.value,
+      );
+    });
+  }
+
   Pointer<DartRenderCommand> get frontCommands {
-    if (_bridge == null) return nullptr;
-    final bridge = _bridge!.ref;
-    return bridge.atomicBackIndex == 0
-        ? bridge.bufferBCommands
-        : bridge.bufferACommands;
+    return getFrontBufferSnapshot().commands;
   }
 
   int get frontCount {
-    if (_bridge == null) return 0;
-    final bridge = _bridge!.ref;
-    return bridge.atomicBackIndex == 0
-        ? bridge.bufferBCommandCount
-        : bridge.bufferACommandCount;
+    return getFrontBufferSnapshot().count;
   }
-
-  /// Legacy alias for tests that previously read `commandCount`.
-  int get commandCount => frontCount;
-
-  /// Legacy alias for tests that previously read `commandsPointer`.
-  Pointer<DartRenderCommand> get commandsPointer => frontCommands;
 
   int get commandsWritten =>
       _bridge == null ? 0 : _getCommandsWritten(_bridge!);
@@ -327,7 +356,6 @@ class MalphasBindings extends ChangeNotifier {
 
   int get vmTickMicros => _nativeAvailable ? _getVmTickMicros() : 0;
   int get pulseLatencyMicros => _nativeAvailable ? _getPulseLatencyMicros() : 0;
-  int get hitTestsCount => _nativeAvailable ? _getHitTestsCount() : 0;
   int get commandsGeneratedCount =>
       _nativeAvailable ? _getCommandsGeneratedCount() : 0;
 
@@ -362,6 +390,17 @@ typedef _GetBackIndex = int Function(Pointer<MalphasDoubleBufferBridge>);
 typedef _GetCommandsWrittenNative = Uint32 Function(
     Pointer<MalphasDoubleBufferBridge>);
 typedef _GetCommandsWritten = int Function(Pointer<MalphasDoubleBufferBridge>);
+
+typedef _GetFrontBufferSnapshotNative = Pointer<DartRenderCommand> Function(
+  Pointer<MalphasDoubleBufferBridge>,
+  Pointer<Uint8>,
+  Pointer<Uint32>,
+);
+typedef _GetFrontBufferSnapshot = Pointer<DartRenderCommand> Function(
+  Pointer<MalphasDoubleBufferBridge>,
+  Pointer<Uint8>,
+  Pointer<Uint32>,
+);
 
 typedef _GetMspEntityCountNative = Uint32 Function();
 typedef _GetMspEntityCount = int Function();

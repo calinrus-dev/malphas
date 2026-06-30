@@ -30,16 +30,40 @@ class MalphasEnvironment {
         'packageIds': packageIds,
       };
 
-  factory MalphasEnvironment.fromJson(Map<String, dynamic> json) =>
-      MalphasEnvironment(
-        id: json['id'] as String,
-        name: json['name'] as String,
-        accentColor: Color(json['accentColor'] as int),
-        isPinned: json['isPinned'] as bool? ?? false,
-        engineId: json['engineId'] as String?,
-        packageIds: (json['packageIds'] as List<dynamic>?)
-                ?.map((e) => e as String)
-                .toList() ??
-            const [],
-      );
+  factory MalphasEnvironment.fromJson(Map<String, dynamic> json) {
+    final rawId = json['id'];
+    final rawName = json['name'];
+    final rawAccentColor = json['accentColor'];
+    final rawIsPinned = json['isPinned'];
+    final rawEngineId = json['engineId'];
+    final rawPackageIds = json['packageIds'];
+
+    int? parsedColor;
+    if (rawAccentColor is int) {
+      parsedColor = rawAccentColor;
+    } else if (rawAccentColor is String) {
+      parsedColor = int.tryParse(rawAccentColor);
+    }
+
+    List<String> parsedPackageIds;
+    if (rawPackageIds is List) {
+      parsedPackageIds = rawPackageIds.whereType<String>().toList();
+    } else {
+      parsedPackageIds = [];
+    }
+
+    return MalphasEnvironment(
+      id: rawId is String
+          ? rawId
+          : 'env_${DateTime.now().millisecondsSinceEpoch}',
+      name: rawName is String ? rawName : 'Unnamed Environment',
+      accentColor:
+          parsedColor != null ? Color(parsedColor) : const Color(0xffe0dcd3),
+      isPinned: rawIsPinned is bool
+          ? rawIsPinned
+          : (rawIsPinned?.toString().toLowerCase() == 'true'),
+      engineId: rawEngineId is String ? rawEngineId : null,
+      packageIds: parsedPackageIds,
+    );
+  }
 }

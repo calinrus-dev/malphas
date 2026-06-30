@@ -14,10 +14,10 @@ jobs:
     needs: android-libraries
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
 
       - name: Set up Flutter
-        uses: subosito/flutter-action@v2
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
           channel: stable
           cache: true
@@ -27,7 +27,7 @@ jobs:
         working-directory: flutter_app
 
       - name: Download signed Android libraries
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
         with:
           name: malphas-core-android
           path: flutter_app/android/app/src/main/jniLibs/
@@ -43,23 +43,55 @@ jobs:
             test -f "$sig" || { echo "Missing $sig"; exit 1; }
           done
 
+      - name: Download CLI executable
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
+        continue-on-error: true
+        with:
+          name: malphas-cli-ubuntu-latest
+          path: native-cli/
+
+      - name: Derive release trust anchor
+        shell: bash
+        env:
+          MALPHAS_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          if [ -z "$MALPHAS_SIGNING_KEY" ]; then
+            echo "PUBKEY=" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          CLI=native-cli/malphas-cli
+          if [ -f "$CLI.exe" ]; then
+            CLI="$CLI.exe"
+          elif [ -f native-cli/target/release/malphas-cli ]; then
+            CLI=native-cli/target/release/malphas-cli
+          elif [ -f native-cli/target/release/malphas-cli.exe ]; then
+            CLI=native-cli/target/release/malphas-cli.exe
+          fi
+          if [ ! -f "$CLI" ]; then
+            echo "CLI not found; cannot derive trust anchor"
+            echo "PUBKEY=" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          PUBKEY=$("$CLI" pubkey --signing-key-env MALPHAS_SIGNING_KEY)
+          echo "PUBKEY=$PUBKEY" >> "$GITHUB_ENV"
+
       - name: Build Android App Bundle
-        run: flutter build appbundle --release
+        run: flutter build appbundle --release --dart-define=MALPHAS_TRUST_ANCHOR="$PUBKEY"
         working-directory: flutter_app
 
       - name: Build Android APK
-        run: flutter build apk --release
+        run: flutter build apk --release --dart-define=MALPHAS_TRUST_ANCHOR="$PUBKEY"
         working-directory: flutter_app
 
       - name: Upload Android AAB
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: malphas-app-android-aab
           path: flutter_app/build/app/outputs/bundle/release/app-release.aab
           if-no-files-found: error
 
       - name: Upload Android APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: malphas-app-android-apk
           path: flutter_app/build/app/outputs/flutter-apk/app-release.apk

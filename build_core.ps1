@@ -69,7 +69,7 @@ if ($signingKey -and (Test-Path $cliSrc -PathType Leaf)) {
     $key = $signingKey -replace '^0x', '' -replace '^0X', ''
     if ($key -match '^[0-9a-fA-F]{64}$') {
         Write-Info "Signing native artifacts with MALPHAS_SIGNING_KEY..."
-        & $cliSrc sign $srcLib $key
+        & $cliSrc sign --signing-key-env MALPHAS_SIGNING_KEY $srcLib
         if ($LASTEXITCODE -ne 0) { Write-Warn "Failed to sign $srcLib" }
     } else {
         Write-Warn "MALPHAS_SIGNING_KEY is not a 64-character hex string; skipping signing."
@@ -130,9 +130,9 @@ if (Test-Path $sysSrc -PathType Leaf) {
     if ($signingKey -and (Test-Path $cliSrc -PathType Leaf)) {
         $key = $signingKey -replace '^0x', '' -replace '^0X', ''
         if ($key -match '^[0-9a-fA-F]{64}$') {
-            & $cliSrc sign $motorsMxc $key
+            & $cliSrc sign --signing-key-env MALPHAS_SIGNING_KEY $motorsMxc
             if ($LASTEXITCODE -ne 0) { Write-Warn "Failed to sign $motorsMxc" }
-            & $cliSrc sign $exampleMxc $key
+            & $cliSrc sign --signing-key-env MALPHAS_SIGNING_KEY $exampleMxc
             if ($LASTEXITCODE -ne 0) { Write-Warn "Failed to sign $exampleMxc" }
         }
     }

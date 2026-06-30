@@ -19,20 +19,27 @@ jobs:
     if: always() && (needs.rust-core.result == 'success' || needs.rust-core.result == 'skipped')
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
 
       - name: Download Windows native artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
         with:
           name: malphas_core-windows-latest
           path: native/
 
       - name: Download Windows engine signature
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
         continue-on-error: true
         with:
           name: malphas_core-sig-windows-latest
           path: native-sig/
+
+      - name: Download CLI executable
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
+        continue-on-error: true
+        with:
+          name: malphas-cli-windows-latest
+          path: native-cli/
 
       - name: Place native library and signature where MalphasBindings expects them
         shell: powershell
@@ -64,7 +71,7 @@ jobs:
           }
 
       - name: Download signed bouncing_demo system
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
         continue-on-error: true
         with:
           name: bouncing_demo-mxc-windows-latest
@@ -91,7 +98,7 @@ jobs:
           }
 
       - name: Set up Flutter
-        uses: subosito/flutter-action@v2
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
           channel: stable
           cache: true
@@ -100,12 +107,29 @@ jobs:
         run: flutter pub get
         working-directory: flutter_app
 
+      - name: Derive release trust anchor
+        shell: powershell
+        env:
+          MALPHAS_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          $cli = "native-cli/malphas-cli.exe"
+          if (-not (Test-Path $cli -PathType Leaf)) {
+            $cli = "native-cli/target/release/malphas-cli.exe"
+          }
+          $key = $env:MALPHAS_SIGNING_KEY
+          if ([string]::IsNullOrWhiteSpace($key) -or -not (Test-Path $cli -PathType Leaf)) {
+            Add-Content -Path $env:GITHUB_ENV -Value "PUBKEY="
+          } else {
+            $pubkey = & $cli pubkey --signing-key-env MALPHAS_SIGNING_KEY
+            Add-Content -Path $env:GITHUB_ENV -Value "PUBKEY=$pubkey"
+          }
+
       - name: Build Windows release
-        run: flutter build windows --release
+        run: flutter build windows --release --dart-define=MALPHAS_TRUST_ANCHOR=$env:PUBKEY
         working-directory: flutter_app
 
       - name: Upload Windows executable
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: malphas-app-windows
           path: flutter_app/build/windows/x64/runner/Release/
