@@ -41,6 +41,7 @@ jobs:
 
   rust-core:
     uses: ./.github/workflows/rust_ci.yml
+    secrets: inherit
 
   analyze-test:
     name: Flutter analyze and test
@@ -56,13 +57,13 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: malphas_core-ubuntu-latest
-          path: native/
+          path: flutter_app/native/
 
       - name: Download CLI executable
         uses: actions/download-artifact@v4
         with:
           name: malphas-cli-ubuntu-latest
-          path: native/
+          path: flutter_app/native/
 
       - name: Place native library and signature
         shell: bash
@@ -93,7 +94,8 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: malphas_core-sig-ubuntu-latest
-          path: native-sig/
+          path: flutter_app/native-sig/
+        if-no-files-found: ignore
 
       - name: Place engine signature
         shell: bash
@@ -101,16 +103,10 @@ jobs:
           mkdir -p motors
           if [ -f native-sig/libmalphas_core.so.sig ]; then
             SIG=native-sig/libmalphas_core.so.sig
-          elif [ -f native-sig/target/release/libmalphas_core.so.sig ]; then
-            SIG=native-sig/target/release/libmalphas_core.so.sig
           elif [ -f native-sig/malphas_core.dll.sig ]; then
             SIG=native-sig/malphas_core.dll.sig
-          elif [ -f native-sig/target/release/malphas_core.dll.sig ]; then
-            SIG=native-sig/target/release/malphas_core.dll.sig
           elif [ -f native-sig/libmalphas_core.dylib.sig ]; then
             SIG=native-sig/libmalphas_core.dylib.sig
-          elif [ -f native-sig/target/release/libmalphas_core.dylib.sig ]; then
-            SIG=native-sig/target/release/libmalphas_core.dylib.sig
           else
             echo "Engine signature not found; skipping signature placement."
             exit 0
@@ -120,26 +116,40 @@ jobs:
           cp "$SIG" motors/"$base"
           cp "$SIG" ../"$base"
 
-      - name: Download bouncing_demo system library
+      - name: Download signed bouncing_demo system
+        uses: actions/download-artifact@v4
+        with:
+          name: bouncing_demo-mxc-ubuntu-latest
+          path: flutter_app/mxc/
+        if-no-files-found: ignore
+
+      - name: Download bouncing_demo system library (unsigned fallback)
         uses: actions/download-artifact@v4
         with:
           name: bouncing_demo-ubuntu-latest
-          path: native-sys/
+          path: flutter_app/native-sys/
+        if-no-files-found: ignore
 
       - name: Place bouncing_demo system where tests expect it
         shell: bash
         run: |
-          if [ -f native-sys/libbouncing_demo.so ]; then
-            SYS=native-sys/libbouncing_demo.so
-          elif [ -f native-sys/target/release/libbouncing_demo.so ]; then
-            SYS=native-sys/target/release/libbouncing_demo.so
+          if [ -f mxc/bouncing_demo.mxc ]; then
+            cp mxc/bouncing_demo.mxc ../bouncing_demo.mxc
+            cp mxc/bouncing_demo.mxc ../examples/bouncing_demo/bouncing_demo.mxc
+            cp mxc/bouncing_demo.mxc motors/bouncing_demo.mxc
+            if [ -f mxc/bouncing_demo.mxc.sig ]; then
+              cp mxc/bouncing_demo.mxc.sig ../bouncing_demo.mxc.sig
+              cp mxc/bouncing_demo.mxc.sig ../examples/bouncing_demo/bouncing_demo.mxc.sig
+              cp mxc/bouncing_demo.mxc.sig motors/bouncing_demo.mxc.sig
+            fi
+          elif [ -f native-sys/libbouncing_demo.so ]; then
+            cp native-sys/libbouncing_demo.so ../bouncing_demo.mxc
+            cp native-sys/libbouncing_demo.so ../examples/bouncing_demo/bouncing_demo.mxc
+            cp native-sys/libbouncing_demo.so motors/bouncing_demo.mxc
           else
-            echo "Error: bouncing_demo system library not found"
+            echo "Error: bouncing_demo system not found"
             exit 1
           fi
-          cp "$SYS" ../bouncing_demo.mxc
-          cp "$SYS" ../examples/bouncing_demo/bouncing_demo.mxc
-          cp "$SYS" motors/bouncing_demo.mxc
 
       - name: Place CLI binary where MalphasPackageCompiler finds it
         shell: bash
@@ -184,6 +194,7 @@ jobs:
       - name: Run Flutter Tests (Native Headless)
         env:
           LD_LIBRARY_PATH: ${{ github.workspace }}/flutter_app/motors
+          MALPHAS_INSECURE_SKIP_VERIFY: 1
         run: |
           export LD_LIBRARY_PATH="${{ github.workspace }}/flutter_app/motors"
           xvfb-run -a flutter test

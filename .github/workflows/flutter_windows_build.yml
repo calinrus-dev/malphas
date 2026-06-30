@@ -11,6 +11,7 @@ jobs:
   rust-core:
     if: github.event_name != 'workflow_call'
     uses: ./.github/workflows/rust_ci.yml
+    secrets: inherit
 
   build-windows:
     name: Flutter Windows release build
@@ -31,6 +32,7 @@ jobs:
         with:
           name: malphas_core-sig-windows-latest
           path: native-sig/
+        if-no-files-found: ignore
 
       - name: Place native library and signature where MalphasBindings expects them
         shell: powershell
@@ -61,56 +63,31 @@ jobs:
             Write-Warning "Windows engine signature not found; building without signature."
           }
 
-      - name: Download bouncing_demo system library
+      - name: Download signed bouncing_demo system
         uses: actions/download-artifact@v4
         with:
-          name: bouncing_demo-windows-latest
-          path: native-sys/
+          name: bouncing_demo-mxc-windows-latest
+          path: mxc/
+        if-no-files-found: ignore
 
       - name: Place bouncing_demo system for the example
         shell: powershell
         run: |
-          $sys = "native-sys/bouncing_demo.dll"
-          if (-not (Test-Path $sys -PathType Leaf)) {
-            $sys = "native-sys/target/release/bouncing_demo.dll"
-          }
-          if (Test-Path $sys -PathType Leaf) {
-            Copy-Item $sys -Destination bouncing_demo.mxc -Force
-            Copy-Item $sys -Destination flutter_app/bouncing_demo.mxc -Force
-            Copy-Item $sys -Destination flutter_app/windows/runner/bouncing_demo.mxc -Force
-            Copy-Item $sys -Destination examples/bouncing_demo/bouncing_demo.mxc -Force
-          } else {
-            Write-Warning "bouncing_demo system not found; Windows example will not run."
-          }
-
-      - name: Sign bouncing_demo.mxc for Windows example
-        shell: powershell
-        env:
-          MALPHAS_SIGNING_KEY: ${{ secrets.TEST_SIGNING_KEY }}
-        run: |
-          $key = $env:MALPHAS_SIGNING_KEY
-          if (-not $key) {
-            Write-Warning "TEST_SIGNING_KEY secret not set; skipping .mxc signing."
-            exit 0
-          }
-          $key = $key -replace '^0x', '' -replace '^0X', ''
-          if ($key -notmatch '^[0-9a-fA-F]{64}$') {
-            Write-Error "TEST_SIGNING_KEY must be a 64-character hex string."
-            exit 1
-          }
-          $cli = "target/release/malphas-cli.exe"
-          if (-not (Test-Path $cli -PathType Leaf)) {
-            $cli = "flutter_app/motors/malphas-cli.exe"
-          }
-          if (-not (Test-Path $cli -PathType Leaf)) {
-            Write-Warning "malphas-cli executable not found; skipping .mxc signing."
-            exit 0
-          }
-          foreach ($mxc in @("bouncing_demo.mxc", "flutter_app/bouncing_demo.mxc", "flutter_app/windows/runner/bouncing_demo.mxc", "examples/bouncing_demo/bouncing_demo.mxc")) {
-            if (Test-Path $mxc -PathType Leaf) {
-              & $cli sign $mxc $key
-              if ($LASTEXITCODE -ne 0) { Write-Warn "Failed to sign $mxc" }
+          $mxc = "mxc/bouncing_demo.mxc"
+          if (Test-Path $mxc -PathType Leaf) {
+            Copy-Item $mxc -Destination bouncing_demo.mxc -Force
+            Copy-Item $mxc -Destination flutter_app/bouncing_demo.mxc -Force
+            Copy-Item $mxc -Destination flutter_app/windows/runner/bouncing_demo.mxc -Force
+            Copy-Item $mxc -Destination examples/bouncing_demo/bouncing_demo.mxc -Force
+            $sig = "mxc/bouncing_demo.mxc.sig"
+            if (Test-Path $sig -PathType Leaf) {
+              Copy-Item $sig -Destination bouncing_demo.mxc.sig -Force
+              Copy-Item $sig -Destination flutter_app/bouncing_demo.mxc.sig -Force
+              Copy-Item $sig -Destination flutter_app/windows/runner/bouncing_demo.mxc.sig -Force
+              Copy-Item $sig -Destination examples/bouncing_demo/bouncing_demo.mxc.sig -Force
             }
+          } else {
+            Write-Warning "Signed bouncing_demo.mxc not found; Windows example will not be packaged."
           }
 
       - name: Set up Flutter
