@@ -1,17 +1,19 @@
+import 'dart:convert';
 import 'dart:io';
+
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
+
+import '../../core/compiler/package_compiler.dart';
 import '../../core/ffi/malphas_bindings.dart';
-import '../../core/services/entity_bootstrap_service.dart';
 import '../../core/ui_primitives/primitive_canvas.dart';
-import '../hub/environment_model.dart';
-import '../package_manager/package_manager_screen.dart';
-import '../package_manager/package_controller.dart';
-import '../package_manager/models.dart';
 import '../engine_manager/engine_manager_screen.dart';
+import '../hub/environment_model.dart';
+import '../package_manager/package_controller.dart';
+import '../package_manager/package_manager_screen.dart';
 
 class WorkspaceScreen extends StatefulWidget {
   final MalphasEnvironment environment;
+
   const WorkspaceScreen({super.key, required this.environment});
 
   @override
@@ -20,301 +22,297 @@ class WorkspaceScreen extends StatefulWidget {
 
 class _WorkspaceScreenState extends State<WorkspaceScreen>
     with SingleTickerProviderStateMixin {
-  late final MalphasBindings bindings;
-  late final Ticker _ticker;
-  int _currentViewIndex = 0;
-  late final EntityBootstrapService _bootstrap;
-  String? _autoLoadError;
+  late final TabController _tabController;
+  final MalphasBindings _bindings = MalphasBindings();
+  final PackageController _packageController = PackageController();
+
+  bool _engineReady = false;
+  bool _isInstalling = false;
+  String? _lastError;
 
   @override
   void initState() {
     super.initState();
-    bindings = MalphasBindings();
-    _bootstrap = EntityBootstrapService(bindings);
-
-    _ticker = createTicker((elapsed) {
-      // Single-clock sync: one engine pulse per vsync from Flutter's Ticker.
-      bindings.tick();
-      // Repaint-driven visual refresh without high-frequency global re-layouts (Rule 5).
-    });
-    _ticker.start();
-
-    _autoLoadPackages();
-  }
-
-  /// Loads the environment's first package (or the default bouncing demo) into
-  /// the native core, configures the entities, and starts the simulation pulse.
-  Future<void> _autoLoadPackages() async {
-    try {
-      await PackageController().init();
-
-      final packageIds = widget.environment.packageIds;
-      final targetPackId =
-          packageIds.isNotEmpty ? packageIds.first : 'bouncing_demo';
-
-      final mhpFile = _resolveMhpFile(targetPackId);
-      if (mhpFile == null || !mhpFile.existsSync()) {
-        _showAutoLoadError('No compiled package found for "$targetPackId".');
-        return;
-      }
-
-      if (!bindings.isNativeAvailable) {
-        _showAutoLoadError('Native core is not available in this session.');
-        return;
-      }
-
-      bindings.pauseEngine(true);
-      try {
-        final loadResult = bindings.loadPack(mhpFile.path);
-        if (loadResult != 0) {
-          _showAutoLoadError('loadPack failed with code $loadResult.');
-          return;
-        }
-
-        final registry = PackageController();
-        final pack = registry.getAllPackages().firstWhere(
-              (p) => p.id == targetPackId,
-              orElse: () => MalphasPackage(
-                id: targetPackId,
-                name: targetPackId,
-                version: '1.0.0',
-                author: 'Unknown',
-                description: '',
-                objects: [],
-              ),
-            );
-
-        if (pack.objects.isNotEmpty) {
-          _bootstrap.configurePackageScene(pack);
-        } else {
-          _bootstrap.configureDefaultScene();
-        }
-
-        registry.preloadSkins(pack).then((_) {
-          if (mounted) setState(() {});
-        });
-      } finally {
-        bindings.pauseEngine(false);
-      }
-    } catch (e, stack) {
-      debugPrint('Workspace auto-load failed: $e');
-      debugPrint(stack.toString());
-      _showAutoLoadError('Auto-load failed: $e');
-    }
-  }
-
-  /// Searches the compiled package in `examples/` and `packages/`.
-  File? _resolveMhpFile(String packId) {
-    final workspace = PackageController().resolveWorkspaceRoot();
-    final candidates = [
-      File('$workspace/examples/bouncing_demo/$packId.mhp'),
-      File('$workspace/examples/$packId/$packId.mhp'),
-      File('$workspace/packages/$packId.mhp'),
-      File('$workspace/examples/$packId.mhp'),
-    ];
-    for (final candidate in candidates) {
-      if (candidate.existsSync()) return candidate;
-    }
-    return null;
-  }
-
-  void _showAutoLoadError(String message) {
-    debugPrint('Workspace auto-load: $message');
-    if (!mounted) return;
-    setState(() {
-      _autoLoadError = message;
-    });
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      final messenger = ScaffoldMessenger.maybeOf(context);
-      if (messenger == null) return;
-      messenger.showSnackBar(
-        SnackBar(
-          backgroundColor: const Color(0xff0d0d0d),
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-            side: const BorderSide(color: Color(0xff1b1b1b)),
-          ),
-          content: Text(
-            'AUTO-LOAD ERROR: $message',
-            style: const TextStyle(
-              fontFamily: 'Courier',
-              fontSize: 11,
-              color: Color(0xffe0dcd3),
-            ),
-          ),
-        ),
-      );
-    });
+    _tabController = TabController(length: 3, vsync: this);
+    _initEngine();
   }
 
   @override
   void dispose() {
-    _ticker.dispose();
-    // MalphasBindings is a process-wide singleton; do not dispose it here.
-    // Shared-memory teardown is handled at app shutdown.
+    _tabController.dispose();
+    _bindings.shutdownEngine();
     super.dispose();
+  }
+
+  Future<void> _initEngine() async {
+    if (!_bindings.isNativeAvailable) {
+      setState(() {
+        _lastError = 'Native motor is not available in this environment';
+      });
+      return;
+    }
+
+    final result = _bindings.initEngine();
+    if (result != 0) {
+      setState(() {
+        _lastError = 'Engine init failed (code $result)';
+      });
+      return;
+    }
+
+    setState(() => _engineReady = true);
+    await _autoLoadEnvironment();
+  }
+
+  Future<void> _autoLoadEnvironment() async {
+    final packIds = widget.environment.packageIds.isNotEmpty
+        ? widget.environment.packageIds
+        : const ['bouncing_demo'];
+
+    for (final packId in packIds) {
+      await _loadPackage(packId);
+    }
+  }
+
+  Future<void> _loadPackage(String packId) async {
+    final mspPath = _resolveMspPath(packId);
+    if (mspPath == null) {
+      setState(() {
+        _lastError = 'AUTO-LOAD ERROR: MSP not found for $packId';
+      });
+      return;
+    }
+
+    final loadResult = _bindings.loadMsp(mspPath);
+    if (loadResult != 0) {
+      setState(() {
+        _lastError = 'AUTO-LOAD ERROR: load_msp returned $loadResult';
+      });
+      return;
+    }
+
+    final systemPath = _resolveSystemPath(packId);
+    if (systemPath != null) {
+      _bindings.loadSystem(systemPath);
+    }
+  }
+
+  String? _resolveMspPath(String packId) {
+    final workspace = _packageController.resolveWorkspaceRoot();
+    final candidates = [
+      '$workspace/examples/$packId/$packId.msp',
+      '$workspace/packages/$packId.msp',
+    ];
+    for (final candidate in candidates) {
+      if (File(candidate).existsSync()) return candidate;
+    }
+    return null;
+  }
+
+  String? _resolveManifestPath(String packId) {
+    final workspace = _packageController.resolveWorkspaceRoot();
+    final candidates = [
+      '$workspace/examples/$packId/manifest.json',
+      '$workspace/packages/$packId.manifest.json',
+    ];
+    for (final candidate in candidates) {
+      if (File(candidate).existsSync()) return candidate;
+    }
+    return null;
+  }
+
+  String? _resolveSystemPath(String packId) {
+    final workspace = _packageController.resolveWorkspaceRoot();
+    final exts = Platform.isWindows
+        ? ['.mxc', '.dll']
+        : Platform.isMacOS
+            ? ['.mxc', '.dylib']
+            : ['.mxc', '.so'];
+
+    for (final ext in exts) {
+      final candidates = [
+        '$workspace/examples/$packId/$packId$ext',
+        '$workspace/packages/$packId$ext',
+        '$workspace/$packId$ext',
+        '$workspace/flutter_app/motors/$packId$ext',
+      ];
+      for (final candidate in candidates) {
+        if (File(candidate).existsSync()) return candidate;
+      }
+    }
+    return null;
+  }
+
+  Future<void> _installOrUpdateEnvironment() async {
+    setState(() {
+      _isInstalling = true;
+      _lastError = null;
+    });
+
+    try {
+      final compiler = MalphasPackageCompiler();
+      final packIds = widget.environment.packageIds.isNotEmpty
+          ? widget.environment.packageIds
+          : const ['bouncing_demo'];
+
+      for (final packId in packIds) {
+        final manifestPath = _resolveManifestPath(packId);
+        if (manifestPath == null) continue;
+
+        final manifestJson = jsonDecode(File(manifestPath).readAsStringSync())
+            as Map<String, dynamic>;
+        await compiler.compilePackage(manifestJson);
+
+        final mspPath = _resolveMspPath(packId);
+        if (mspPath != null) {
+          final refreshResult = _bindings.refreshMsp(mspPath);
+          if (refreshResult != 0) {
+            throw Exception(
+                'refresh_msp failed for $packId (code $refreshResult)');
+          }
+        }
+      }
+
+      _showSnackBar('Environment installed / updated');
+    } catch (e) {
+      setState(() {
+        _lastError = 'UPDATE ERROR: $e';
+      });
+    } finally {
+      setState(() => _isInstalling = false);
+    }
+  }
+
+  void _showSnackBar(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor: const Color(0xff0d0d0d),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: Color(0xff00ffcc)),
+        ),
+        content: Text(
+          message,
+          style: const TextStyle(
+            fontFamily: 'Courier',
+            color: Color(0xff00ffcc),
+            fontSize: 11,
+          ),
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
-      body: Stack(
+      appBar: AppBar(
+        title: Text(
+          widget.environment.name.toUpperCase(),
+          style: const TextStyle(
+            fontFamily: 'Georgia',
+            fontSize: 16,
+            color: Color(0xffe0dcd3),
+          ),
+        ),
+        backgroundColor: Colors.black,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios,
+              size: 14, color: Color(0xffe0dcd3)),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        bottom: TabBar(
+          controller: _tabController,
+          indicatorColor: const Color(0xffe0dcd3),
+          labelColor: const Color(0xffe0dcd3),
+          unselectedLabelColor: Colors.white38,
+          labelStyle: const TextStyle(
+            fontFamily: 'Courier',
+            fontSize: 10,
+            fontWeight: FontWeight.bold,
+          ),
+          tabs: const [
+            Tab(text: 'CANVAS'),
+            Tab(text: 'PACKS'),
+            Tab(text: 'ENGINES'),
+          ],
+        ),
+      ),
+      body: TabBarView(
+        controller: _tabController,
         children: [
-          Positioned.fill(
-            child: IndexedStack(
-              index: _currentViewIndex,
-              children: [
-                LayoutBuilder(
-                  builder: (context, constraints) {
-                    return GestureDetector(
-                      onTapDown: (details) {
-                        final localPos = details.localPosition;
-                        final double width = constraints.maxWidth;
-                        final double height = constraints.maxHeight;
-                        final double scale =
-                            (width < height ? width : height) / 1000.0;
-                        final double offsetX = (width - (1000.0 * scale)) / 2.0;
-                        final double offsetY =
-                            (height - (1000.0 * scale)) / 2.0;
-
-                        final double logicalX = (localPos.dx - offsetX) / scale;
-                        final double logicalY = (localPos.dy - offsetY) / scale;
-                        bindings.processInputEvent(0, logicalX, logicalY);
-                      },
-                      child: PrimitiveCanvas(
-                        bindings: bindings,
-                        repaintNotifier: bindings,
-                      ),
-                    );
-                  },
-                ),
-                PackageManagerPanel(
-                  environment: widget.environment,
-                  onRunLive: () {
-                    setState(() {
-                      _currentViewIndex = 0;
-                    });
-                  },
-                ),
-                const EngineManagerPanel(),
-              ],
-            ),
-          ),
-
-          // Top anti-overflow bar with horizontal scroll when tabs do not fit.
-          Positioned(
-            top: 40,
-            left: 16,
-            right: 16,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                IconButton(
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                  icon: const Icon(
-                    Icons.arrow_back_ios,
-                    size: 16,
-                    color: Colors.white,
-                  ),
-                  onPressed: () => Navigator.of(context).pop(),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    physics: const BouncingScrollPhysics(),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        _topTab('CANVAS', 0),
-                        const SizedBox(width: 6),
-                        _topTab('PACKS', 1),
-                        const SizedBox(width: 6),
-                        _topTab('ENGINES', 2),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          if (!bindings.isNativeAvailable && _currentViewIndex == 0)
-            Positioned(
-              top: 90,
-              left: 16,
-              right: 16,
-              child: Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.02),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.white10),
-                ),
-                child: const Text(
-                  'CHASIS FFI: PASIVE SIMULATION CORE MODE',
-                  style: TextStyle(
-                    fontFamily: 'Courier',
-                    fontSize: 9,
-                    color: Color(0xffe0dcd3),
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ),
-
-          if (_autoLoadError != null && _currentViewIndex == 0)
-            Positioned(
-              top: 90,
-              left: 16,
-              right: 16,
-              child: Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: const Color(0xff0d0d0d),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: const Color(0xff1b1b1b)),
-                ),
-                child: Text(
-                  'AUTO-LOAD ERROR: ${_autoLoadError!}',
-                  style: const TextStyle(
-                    fontFamily: 'Courier',
-                    fontSize: 11,
-                    color: Color(0xffe0dcd3),
-                  ),
-                ),
-              ),
-            ),
+          _buildCanvasTab(),
+          PackageManagerPanel(environment: widget.environment),
+          const EngineManagerPanel(),
         ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        backgroundColor: const Color(0xff0d0d0d),
+        foregroundColor: const Color(0xff00ffcc),
+        icon: _isInstalling
+            ? const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Color(0xff00ffcc),
+                ),
+              )
+            : const Icon(Icons.install_desktop, size: 18),
+        label: Text(
+          _isInstalling ? 'INSTALLING...' : 'INSTALL / UPDATE ENVIRONMENT',
+          style: const TextStyle(
+            fontFamily: 'Courier',
+            fontSize: 10,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        onPressed: _isInstalling ? null : _installOrUpdateEnvironment,
       ),
     );
   }
 
-  Widget _topTab(String label, int index) {
-    final isSel = _currentViewIndex == index;
-    return GestureDetector(
-      onTap: () => setState(() => _currentViewIndex = index),
+  Widget _buildCanvasTab() {
+    if (_lastError != null) {
+      return _buildErrorOverlay(_lastError!);
+    }
+    if (!_engineReady) {
+      return const Center(
+        child: CircularProgressIndicator(color: Color(0xffe0dcd3)),
+      );
+    }
+    return PrimitiveCanvas(bindings: _bindings);
+  }
+
+  Widget _buildErrorOverlay(String message) {
+    return Center(
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        margin: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-          color: isSel ? const Color(0xffe0dcd3) : const Color(0xff0d0d0d),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: isSel ? Colors.transparent : const Color(0xff1b1b1b),
-          ),
+          color: const Color(0xff0d0d0d),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: const Color(0xff1b1b1b)),
         ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontFamily: 'Arial',
-            fontSize: 10,
-            fontWeight: FontWeight.bold,
-            color: isSel ? Colors.black : const Color(0xffe0dcd3),
-          ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.error_outline, color: Colors.redAccent, size: 32),
+            const SizedBox(height: 12),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontFamily: 'Courier',
+                color: Colors.white70,
+                fontSize: 12,
+              ),
+            ),
+          ],
         ),
       ),
     );

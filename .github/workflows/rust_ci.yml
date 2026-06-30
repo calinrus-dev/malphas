@@ -88,3 +88,13 @@ jobs:
           name: malphas-cli-${{ matrix.os }}
           path: ${{ matrix.os == 'windows-latest' && 'target/release/malphas-cli.exe' || 'target/release/malphas-cli' }}
           if-no-files-found: error
+
+      - name: Upload bouncing_demo system library
+        uses: actions/upload-artifact@v4
+        with:
+          name: bouncing_demo-${{ matrix.os }}
+          path: |
+            target/release/bouncing_demo.dll
+            target/release/libbouncing_demo.so
+            target/release/libbouncing_demo.dylib
+          if-no-files-found: ignore

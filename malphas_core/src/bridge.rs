@@ -1,19 +1,15 @@
-// Engine lifecycle internals, pulse synchronisation, FFI pointer helpers,
-// and the 16-byte aligned allocator exposed to Dart.
-use std::ffi::c_void;
+// Engine lifecycle internals, pulse synchronisation, FFI pointer delegates,
+// and the 64-byte aligned allocator exposed to Dart.
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
-use crate::arena_layout::{
-    ARENA_HEADER_SIZE, ARENA_MAGIC, DEFAULT_ENTITIES_OFFSET, DEFAULT_STATIC_RESOURCES_OFFSET,
-    ENTITIES_COUNT, ENTITIES_OFFSET, STATIC_RESOURCES_OFFSET, STATIC_RESOURCES_SIZE,
-};
-use crate::input::INPUT_QUEUE;
+use crate::msp_loader::unload_msp;
 use crate::pipeline::{
-    process_engine_tick_internal, telemetry_now_micros, CoreCommandBuffer, DartRenderCommand,
-    MalphasDoubleBufferBridge, TextPayload, ARENA_ADDRESS, ARENA_SIZE, BRIDGE_ADDRESS,
-    ENGINE_PAUSED, ENGINE_RUNNING, LAST_PULSE_MICROS, MAX_COMMANDS_CAPACITY, RUNTIME,
+    process_engine_tick_internal, telemetry_now_micros, DartRenderCommand,
+    MalphasDoubleBufferBridge, TextPayload, BRIDGE_ADDRESS, ENGINE_PAUSED, ENGINE_RUNNING,
+    LAST_PULSE_MICROS, MAX_COMMANDS_CAPACITY,
 };
+use crate::system_host::clear_systems;
 
 /// Serialises `init_engine` re-initialisation so two FFI callers cannot race
 /// to spawn overlapping simulation threads.
@@ -49,16 +45,14 @@ fn is_aligned<T>(ptr: *const T) -> bool {
 
 pub(crate) fn init_engine_internal(
     bridge_ptr: *mut MalphasDoubleBufferBridge,
-    arena_ptr: *mut c_void,
-    arena_size: u32,
     max_commands: u32,
 ) -> i32 {
-    if bridge_ptr.is_null() || arena_ptr.is_null() {
+    if bridge_ptr.is_null() {
         return -1;
     }
-    // Both shared buffers must satisfy the 16-byte alignment required by the
-    // ARM64 ABI and by our #[repr(C, align(16))] structs.
-    if !is_aligned(bridge_ptr) || !(arena_ptr as usize).is_multiple_of(16) {
+    // The bridge must satisfy the 64-byte alignment required by the ARM64 ABI
+    // and by our #[repr(C, align(64))] structs.
+    if !is_aligned(bridge_ptr) {
         return -1;
     }
 
@@ -71,39 +65,17 @@ pub(crate) fn init_engine_internal(
         std::thread::yield_now();
     }
 
-    // 2. Drain stale inputs from a previous session.
-    if let Ok(mut queue) = INPUT_QUEUE.lock() {
-        queue.clear();
-    }
-
-    // 3. Publish new shared-memory handles.
+    // 2. Publish new shared-memory handles.
     BRIDGE_ADDRESS.store(bridge_ptr as usize, Ordering::SeqCst);
-    ARENA_ADDRESS.store(arena_ptr as usize, Ordering::SeqCst);
-    ARENA_SIZE.store(arena_size as usize, Ordering::SeqCst);
     MAX_COMMANDS_CAPACITY.store(max_commands, Ordering::SeqCst);
 
-    // 4. Initialise the Arena memory map header.
-    unsafe {
-        let arena_start = arena_ptr as *mut u8;
-        std::ptr::write_bytes(arena_start, 0, ARENA_HEADER_SIZE);
-
-        for (i, &byte) in ARENA_MAGIC.iter().enumerate() {
-            *arena_start.add(i) = byte;
-        }
-
-        *(arena_start.add(STATIC_RESOURCES_OFFSET) as *mut u32) = DEFAULT_STATIC_RESOURCES_OFFSET;
-        *(arena_start.add(STATIC_RESOURCES_SIZE) as *mut u32) = 0;
-        *(arena_start.add(ENTITIES_OFFSET) as *mut u32) = DEFAULT_ENTITIES_OFFSET;
-        *(arena_start.add(ENTITIES_COUNT) as *mut u32) = 0;
-    }
-
-    // 5. Create a fresh single-clock pulse channel for this session.
+    // 3. Create a fresh single-clock pulse channel for this session.
     let (pulse_tx, pulse_rx) = std::sync::mpsc::channel::<()>();
     if let Ok(mut guard) = PULSE_SENDER.lock() {
         *guard = Some(pulse_tx);
     }
 
-    // 6. Start the background simulation thread.  It no longer has its own
+    // 4. Start the background simulation thread.  It no longer has its own
     //    timer; Flutter drives every tick via `trigger_engine_pulse`.
     ENGINE_PAUSED.store(false, Ordering::SeqCst);
     ENGINE_RUNNING.store(true, Ordering::SeqCst);
@@ -152,16 +124,11 @@ pub(crate) fn shutdown_engine_internal() -> i32 {
         std::thread::yield_now();
     }
     BRIDGE_ADDRESS.store(0, Ordering::SeqCst);
-    ARENA_ADDRESS.store(0, Ordering::SeqCst);
 
     // By now the simulation thread has exited (ACTIVE_THREADS == 0), so no
-    // reader can observe the old runtime. Swap it out and drop it.
-    let old_ptr = RUNTIME.swap(std::ptr::null_mut(), Ordering::Acquire);
-    if !old_ptr.is_null() {
-        unsafe {
-            drop(Box::from_raw(old_ptr));
-        }
-    }
+    // reader can observe the old state.  Drop the mapped MSP and loaded systems.
+    unload_msp();
+    clear_systems();
     0
 }
 
@@ -201,20 +168,36 @@ pub(crate) fn trigger_engine_pulse_internal() -> i32 {
 // Portable FFI pointer delegates.  Dart must never perform pointer arithmetic
 // on the bridge layout or copy nested structs by value.
 // ---------------------------------------------------------------------------
-pub(crate) fn get_buffer_a_ptr(bridge: *mut MalphasDoubleBufferBridge) -> *mut CoreCommandBuffer {
+pub(crate) fn get_buffer_a_commands(
+    bridge: *mut MalphasDoubleBufferBridge,
+) -> *mut DartRenderCommand {
     if bridge.is_null() || !is_aligned(bridge) {
         return std::ptr::null_mut();
     }
-    // `addr_of_mut!` avoids creating an intermediate &mut to a struct that is
-    // also observed from Dart.
-    unsafe { std::ptr::addr_of_mut!((*bridge).buffer_a) }
+    unsafe { (*bridge).buffer_a_commands }
 }
 
-pub(crate) fn get_buffer_b_ptr(bridge: *mut MalphasDoubleBufferBridge) -> *mut CoreCommandBuffer {
+pub(crate) fn get_buffer_b_commands(
+    bridge: *mut MalphasDoubleBufferBridge,
+) -> *mut DartRenderCommand {
     if bridge.is_null() || !is_aligned(bridge) {
         return std::ptr::null_mut();
     }
-    unsafe { std::ptr::addr_of_mut!((*bridge).buffer_b) }
+    unsafe { (*bridge).buffer_b_commands }
+}
+
+pub(crate) fn get_buffer_a_command_count(bridge: *mut MalphasDoubleBufferBridge) -> u32 {
+    if bridge.is_null() || !is_aligned(bridge) {
+        return 0;
+    }
+    unsafe { (*bridge).buffer_a_command_count.load(Ordering::Acquire) }
+}
+
+pub(crate) fn get_buffer_b_command_count(bridge: *mut MalphasDoubleBufferBridge) -> u32 {
+    if bridge.is_null() || !is_aligned(bridge) {
+        return 0;
+    }
+    unsafe { (*bridge).buffer_b_command_count.load(Ordering::Acquire) }
 }
 
 pub(crate) fn get_back_index(bridge: *mut MalphasDoubleBufferBridge) -> u8 {
@@ -222,20 +205,6 @@ pub(crate) fn get_back_index(bridge: *mut MalphasDoubleBufferBridge) -> u8 {
         return 0;
     }
     unsafe { (*bridge).atomic_back_index.load(Ordering::Acquire) }
-}
-
-pub(crate) fn get_command_count(buffer: *const CoreCommandBuffer) -> u32 {
-    if buffer.is_null() || !is_aligned(buffer) {
-        return 0;
-    }
-    unsafe { (*buffer).command_count.load(Ordering::Acquire) }
-}
-
-pub(crate) fn get_commands_pointer(buffer: *const CoreCommandBuffer) -> *mut DartRenderCommand {
-    if buffer.is_null() || !is_aligned(buffer) {
-        return std::ptr::null_mut();
-    }
-    unsafe { (*buffer).commands }
 }
 
 pub(crate) fn get_commands_written(bridge: *mut MalphasDoubleBufferBridge) -> u32 {
@@ -246,8 +215,7 @@ pub(crate) fn get_commands_written(bridge: *mut MalphasDoubleBufferBridge) -> u3
 }
 
 /// Decodes the `TextPayload` pointer embedded in the `width`/`height` union
-/// fields of a text render command.  Dart must never perform this pointer
-/// arithmetic itself; it should call this helper instead.
+/// fields of a text render command.
 pub(crate) fn get_text_payload_pointer(command: *const DartRenderCommand) -> *const TextPayload {
     if command.is_null() || !is_aligned(command) {
         return std::ptr::null();
@@ -270,13 +238,13 @@ pub(crate) fn get_text_payload_pointer(command: *const DartRenderCommand) -> *co
 
 // ---------------------------------------------------------------------------
 // Aligned native allocator exposed to Dart.  All shared buffers must go
-// through this allocator to satisfy 16-byte alignment on ARM64.
+// through this allocator to satisfy 64-byte alignment.
 // ---------------------------------------------------------------------------
 pub(crate) fn malphas_alloc(size: usize) -> *mut u8 {
     if size == 0 {
         return std::ptr::null_mut();
     }
-    let layout = match std::alloc::Layout::from_size_align(size, 16) {
+    let layout = match std::alloc::Layout::from_size_align(size, 64) {
         Ok(l) => l,
         Err(_) => return std::ptr::null_mut(),
     };
@@ -287,7 +255,7 @@ pub(crate) fn malphas_free(ptr: *mut u8, size: usize) {
     if ptr.is_null() || size == 0 {
         return;
     }
-    let layout = match std::alloc::Layout::from_size_align(size, 16) {
+    let layout = match std::alloc::Layout::from_size_align(size, 64) {
         Ok(l) => l,
         Err(_) => return,
     };
@@ -308,9 +276,9 @@ mod tests {
         let ptr = malphas_alloc(size);
         assert!(!ptr.is_null());
         assert_eq!(
-            ptr as usize % 16,
+            ptr as usize % 64,
             0,
-            "Allocator must return 16-byte aligned memory"
+            "Allocator must return 64-byte aligned memory"
         );
         unsafe { std::ptr::write_bytes(ptr, 0xAB, size) };
         malphas_free(ptr, size);
@@ -321,15 +289,10 @@ mod tests {
         let bridge = Arc::new(std::sync::Mutex::new(unsafe {
             std::mem::zeroed::<crate::pipeline::MalphasDoubleBufferBridge>()
         }));
-        let mut arena = vec![0u8; 1024 * 1024];
         let bridge_ptr =
             &mut *bridge.lock().unwrap() as *mut crate::pipeline::MalphasDoubleBufferBridge;
-        let arena_ptr = arena.as_mut_ptr() as *mut c_void;
 
-        assert_eq!(
-            crate::init_engine(bridge_ptr, arena_ptr, arena.len() as u32, 2048),
-            0
-        );
+        assert_eq!(crate::init_engine(bridge_ptr, 2048), 0);
         std::thread::sleep(std::time::Duration::from_millis(20));
         assert!(ACTIVE_THREADS.load(Ordering::SeqCst) > 0);
 
@@ -348,24 +311,15 @@ mod tests {
     fn test_init_engine_rejects_misaligned_pointers() {
         let mut bridge =
             unsafe { std::mem::zeroed::<crate::pipeline::MalphasDoubleBufferBridge>() };
-        let mut arena = vec![0u8; 1024 * 1024];
         let bridge_ptr: *mut crate::pipeline::MalphasDoubleBufferBridge = &mut bridge;
-        let arena_ptr = arena.as_mut_ptr() as *mut c_void;
 
         // Misaligned bridge pointer must be rejected.
         assert_eq!(
-            unsafe {
-                crate::init_engine(bridge_ptr.byte_add(1), arena_ptr, arena.len() as u32, 2048)
-            },
+            unsafe { crate::init_engine(bridge_ptr.byte_add(1), 2048) },
             -1
         );
-        // Misaligned arena pointer must be rejected.
-        assert_eq!(
-            unsafe {
-                crate::init_engine(bridge_ptr, arena_ptr.byte_add(1), arena.len() as u32, 2048)
-            },
-            -1
-        );
+        // Null bridge pointer must be rejected.
+        assert_eq!(crate::init_engine(std::ptr::null_mut(), 2048), -1);
     }
 
     #[test]
@@ -375,19 +329,14 @@ mod tests {
         let bridge_ptr: *mut crate::pipeline::MalphasDoubleBufferBridge = &mut bridge;
         let misaligned_bridge = unsafe { bridge_ptr.byte_add(1) };
 
-        assert!(get_buffer_a_ptr(std::ptr::null_mut()).is_null());
-        assert!(get_buffer_a_ptr(misaligned_bridge).is_null());
-        assert!(get_buffer_b_ptr(misaligned_bridge).is_null());
+        assert!(get_buffer_a_commands(std::ptr::null_mut()).is_null());
+        assert!(get_buffer_a_commands(misaligned_bridge).is_null());
+        assert!(get_buffer_b_commands(misaligned_bridge).is_null());
+        assert_eq!(get_buffer_a_command_count(std::ptr::null_mut()), 0);
+        assert_eq!(get_buffer_a_command_count(misaligned_bridge), 0);
+        assert_eq!(get_buffer_b_command_count(misaligned_bridge), 0);
         assert_eq!(get_back_index(misaligned_bridge), 0);
         assert_eq!(get_commands_written(misaligned_bridge), 0);
-
-        let mut buffer = unsafe { std::mem::zeroed::<CoreCommandBuffer>() };
-        let buffer_ptr: *mut CoreCommandBuffer = &mut buffer;
-        let misaligned_buffer = unsafe { buffer_ptr.byte_add(1) };
-
-        assert_eq!(get_command_count(std::ptr::null()), 0);
-        assert_eq!(get_command_count(misaligned_buffer), 0);
-        assert!(get_commands_pointer(misaligned_buffer).is_null());
     }
 
     #[test]

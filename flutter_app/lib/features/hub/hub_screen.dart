@@ -777,7 +777,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
         crossAxisCount: 2,
         mainAxisSpacing: 14,
         crossAxisSpacing: 14,
-        childAspectRatio: 1.2,
+        childAspectRatio: 1.15,
       ),
       itemCount: sortedEnvs.length,
       itemBuilder: (context, index) {
@@ -801,9 +801,23 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                 decoration: BoxDecoration(
                   color: const Color(0xff0d0d0d),
                   borderRadius: BorderRadius.circular(24),
-                  border: Border.all(color: const Color(0xff1b1b1b)),
+                  border: Border.all(
+                    color: env.isPinned
+                        ? env.accentColor.withValues(alpha: 0.5)
+                        : const Color(0xff1b1b1b),
+                    width: env.isPinned ? 1.5 : 1.0,
+                  ),
+                  boxShadow: env.isPinned
+                      ? [
+                          BoxShadow(
+                            color: env.accentColor.withValues(alpha: 0.08),
+                            blurRadius: 16,
+                            spreadRadius: 2,
+                          )
+                        ]
+                      : [],
                 ),
-                padding: const EdgeInsets.all(18),
+                padding: const EdgeInsets.all(20),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -812,11 +826,37 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Container(
-                          width: 8,
-                          height: 8,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 4),
                           decoration: BoxDecoration(
-                            color: env.accentColor,
-                            shape: BoxShape.circle,
+                            color: env.accentColor.withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                                color: env.accentColor.withValues(alpha: 0.2),
+                                width: 0.8),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 6,
+                                height: 6,
+                                decoration: BoxDecoration(
+                                  color: env.accentColor,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                env.isPinned ? 'PINNED' : 'ACTIVE',
+                                style: TextStyle(
+                                  fontFamily: 'Courier',
+                                  fontSize: 8,
+                                  color: env.accentColor,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                         IconButton(
@@ -837,38 +877,59 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                         ),
                       ],
                     ),
-                    LongPressDraggable<int>(
-                      data: originalIndex,
-                      feedback: Material(
-                        color: Colors.transparent,
-                        child: Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: const Color(0xff161616),
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: const Color(0xff222222)),
-                          ),
-                          child: Text(
-                            env.name,
-                            style: const TextStyle(
-                              fontFamily: 'Georgia',
-                              fontSize: 14,
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xffe0dcd3),
+                    const SizedBox(height: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          LongPressDraggable<int>(
+                            data: originalIndex,
+                            feedback: Material(
+                              color: Colors.transparent,
+                              child: Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xff161616),
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(
+                                      color: const Color(0xff222222)),
+                                ),
+                                child: Text(
+                                  env.name,
+                                  style: const TextStyle(
+                                    fontFamily: 'Georgia',
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.bold,
+                                    color: Color(0xffe0dcd3),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            child: Text(
+                              env.name,
+                              style: const TextStyle(
+                                fontFamily: 'Georgia',
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xffe0dcd3),
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
-                        ),
-                      ),
-                      child: Text(
-                        env.name,
-                        style: const TextStyle(
-                          fontFamily: 'Georgia',
-                          fontSize: 15,
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xffe0dcd3),
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
+                          const SizedBox(height: 6),
+                          Text(
+                            env.packageIds.isEmpty
+                                ? '0 Packages Registered'
+                                : '${env.packageIds.length} Packages Configured',
+                            style: const TextStyle(
+                              fontFamily: 'Courier',
+                              fontSize: 9,
+                              color: Colors.white24,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
@@ -904,68 +965,100 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
               onLongPress: () => _showEnvironmentOptions(env),
               child: Container(
                 margin: const EdgeInsets.only(bottom: 12),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 18,
-                  vertical: 14,
-                ),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
                 decoration: BoxDecoration(
                   color: const Color(0xff0d0d0d),
                   borderRadius: BorderRadius.circular(24),
-                  border: Border.all(color: const Color(0xff1b1b1b)),
+                  border: Border.all(
+                    color: env.isPinned
+                        ? env.accentColor.withValues(alpha: 0.5)
+                        : const Color(0xff1b1b1b),
+                    width: env.isPinned ? 1.5 : 1.0,
+                  ),
+                  boxShadow: env.isPinned
+                      ? [
+                          BoxShadow(
+                            color: env.accentColor.withValues(alpha: 0.08),
+                            blurRadius: 16,
+                            spreadRadius: 2,
+                          )
+                        ]
+                      : [],
                 ),
                 child: Row(
                   children: [
                     Container(
-                      width: 8,
-                      height: 8,
+                      width: 10,
+                      height: 10,
                       decoration: BoxDecoration(
                         color: env.accentColor,
                         shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: env.accentColor.withValues(alpha: 0.4),
+                            blurRadius: 6,
+                            spreadRadius: 1,
+                          )
+                        ],
                       ),
                     ),
                     const SizedBox(width: 16),
                     Expanded(
-                      child: LongPressDraggable<int>(
-                        data: originalIndex,
-                        feedback: Material(
-                          color: Colors.transparent,
-                          child: Container(
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: const Color(0xff161616),
-                              borderRadius: BorderRadius.circular(16),
-                              border: Border.all(
-                                color: const Color(0xff222222),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          LongPressDraggable<int>(
+                            data: originalIndex,
+                            feedback: Material(
+                              color: Colors.transparent,
+                              child: Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xff161616),
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(
+                                      color: const Color(0xff222222)),
+                                ),
+                                child: Text(
+                                  env.name,
+                                  style: const TextStyle(
+                                    fontFamily: 'Georgia',
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.bold,
+                                    color: Color(0xffe0dcd3),
+                                  ),
+                                ),
                               ),
                             ),
                             child: Text(
                               env.name,
                               style: const TextStyle(
                                 fontFamily: 'Georgia',
-                                fontSize: 14,
+                                fontSize: 16,
                                 fontWeight: FontWeight.bold,
                                 color: Color(0xffe0dcd3),
                               ),
                             ),
                           ),
-                        ),
-                        child: Text(
-                          env.name,
-                          style: const TextStyle(
-                            fontFamily: 'Georgia',
-                            fontSize: 15,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xffe0dcd3),
+                          const SizedBox(height: 4),
+                          Text(
+                            env.packageIds.isEmpty
+                                ? '0 Packages Registered'
+                                : '${env.packageIds.length} Packages Configured • Active: ${env.engineId ?? "Default Core"}',
+                            style: const TextStyle(
+                              fontFamily: 'Courier',
+                              fontSize: 10,
+                              color: Colors.white30,
+                            ),
                           ),
-                        ),
+                        ],
                       ),
                     ),
                     IconButton(
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(),
                       icon: Icon(
                         env.isPinned ? Icons.push_pin : Icons.push_pin_outlined,
-                        size: 14,
+                        size: 16,
                         color: env.isPinned ? env.accentColor : Colors.white24,
                       ),
                       onPressed: () async {

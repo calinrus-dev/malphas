@@ -2,15 +2,17 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+/// Output of a `malphas-cli compile` invocation.
+///
+/// In v2.7.0 the CLI only produces the `.msp` Silver Platter.  The `.mxc`
+/// system library is a Rust `cdylib` built separately by Cargo.
 class CompileOutput {
-  final Uint8List mhpBytes;
   final Uint8List mspBytes;
-  CompileOutput(this.mhpBytes, this.mspBytes);
+  CompileOutput(this.mspBytes);
 }
 
 /// Compiles a Malphas package manifest by delegating to the native
-/// `malphas-cli` executable. The public API remains unchanged so existing
-/// callers do not need to be updated.
+/// `malphas-cli` executable.
 class MalphasPackageCompiler {
   static const String _exeName = 'malphas-cli';
   static const String _fontFileName = 'JetBrainsMono-Regular.ttf';
@@ -39,13 +41,10 @@ class MalphasPackageCompiler {
     // 3. Invoke the CLI with a defensive timeout and capture both stdout and
     // stderr so failures can be diagnosed without leaking temp directories.
     final result = await Process.run(
-            exePath,
-            [
-              'compile',
-              manifestFile.path,
-            ],
-            runInShell: false)
-        .timeout(
+      exePath,
+      ['compile', manifestFile.path],
+      runInShell: false,
+    ).timeout(
       const Duration(minutes: 2),
       onTimeout: () {
         throw Exception('malphas-cli compile timed out after 2 minutes');
@@ -59,26 +58,18 @@ class MalphasPackageCompiler {
       );
     }
 
-    // 4. Read the generated .mhp and .msp files.
-    final mhpFile = File('${tempDir.path}/$packId.mhp');
+    // 4. Read the generated .msp file.
     final mspFile = File('${tempDir.path}/$packId.msp');
-
-    if (!await mhpFile.exists()) {
-      await _bestEffortDelete(tempDir);
-      throw Exception('Expected compiled package not found: ${mhpFile.path}');
-    }
     if (!await mspFile.exists()) {
       await _bestEffortDelete(tempDir);
-      throw Exception('Expected compiled script not found: ${mspFile.path}');
+      throw Exception('Expected compiled package not found: ${mspFile.path}');
     }
-
-    final mhpBytes = await mhpFile.readAsBytes();
     final mspBytes = await mspFile.readAsBytes();
 
     // 5. Clean up the temporary manifest and generated binaries.
     await _bestEffortDelete(tempDir);
 
-    return CompileOutput(mhpBytes, mspBytes);
+    return CompileOutput(mspBytes);
   }
 
   /// Returns `true` if the native CLI executable can be located.
@@ -118,7 +109,6 @@ class MalphasPackageCompiler {
     if (Platform.isWindows) return true;
     try {
       final stat = await File(path).stat();
-      // S_IXUSR | S_IXGRP | S_IXOTH
       return stat.mode & 0x49 != 0;
     } catch (_) {
       return false;
@@ -137,9 +127,7 @@ class MalphasPackageCompiler {
           if (contents.contains('[workspace]')) {
             return current.path;
           }
-        } catch (_) {
-          // Ignore unreadable files and keep walking.
-        }
+        } catch (_) {}
       }
       final parent = current.parent;
       if (parent.path == current.path) break;
@@ -160,12 +148,10 @@ class MalphasPackageCompiler {
       if (candidate.existsSync()) return candidate;
     }
 
-    // Fallback: search upward from the current directory.
     var current = Directory.current;
     for (var i = 0; i < 8; i++) {
-      final candidate = File(
-        _join(current.path, 'assets', 'fonts', _fontFileName),
-      );
+      final candidate =
+          File(_join(current.path, 'assets', 'fonts', _fontFileName));
       if (candidate.existsSync()) return candidate;
       final parent = current.parent;
       if (parent.path == current.path) break;
@@ -209,17 +195,13 @@ class MalphasPackageCompiler {
           return found;
         }
       }
-    } catch (_) {
-      // PATH lookup is best-effort.
-    }
+    } catch (_) {}
     return null;
   }
 
   Future<void> _bestEffortDelete(FileSystemEntity entity) async {
     try {
       await entity.delete(recursive: entity is Directory);
-    } catch (_) {
-      // Ignore cleanup failures.
-    }
+    } catch (_) {}
   }
 }

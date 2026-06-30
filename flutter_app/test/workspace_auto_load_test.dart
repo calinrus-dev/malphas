@@ -39,9 +39,15 @@ void main() {
     await PackageController().init();
 
     final workspace = PackageController().resolveWorkspaceRoot();
-    final mhpFile = File('$workspace/examples/bouncing_demo/bouncing_demo.mhp');
-    if (!mhpFile.existsSync()) {
-      markTestSkipped('bouncing_demo.mhp not found at ${mhpFile.path}');
+    final mspFile = File('$workspace/examples/bouncing_demo/bouncing_demo.msp');
+    if (!mspFile.existsSync()) {
+      markTestSkipped('bouncing_demo.msp not found at ${mspFile.path}');
+      return;
+    }
+
+    final systemPath = _resolveSystemPath(workspace, 'bouncing_demo');
+    if (systemPath == null) {
+      markTestSkipped('bouncing_demo system (.mxc/.dll/.so/.dylib) not found');
       return;
     }
 
@@ -56,29 +62,45 @@ void main() {
       MaterialApp(home: WorkspaceScreen(environment: env)),
     );
 
-    // Dispose the widget at the end of the test so its Ticker is stopped and
-    // the test runner can move on to the next test.
     addTearDown(() async {
       await tester.pumpWidget(Container());
     });
 
-    // Give the async initState auto-load sequence a few frames to complete.
     await tester.pump(const Duration(milliseconds: 50));
     await tester.pump(const Duration(milliseconds: 100));
     await tester.pump(const Duration(milliseconds: 50));
 
-    // The native engine should now be producing render commands.
-    final buffer = bindings.commandBuffer;
-    expect(
-      buffer,
-      isNotNull,
-      reason: 'Command buffer should be allocated after auto-load',
-    );
-    final count = bindings.getCommandCount(buffer!);
+    // Pulse the engine a few times so the loaded system writes commands.
+    for (int i = 0; i < 10; i++) {
+      bindings.triggerEnginePulse();
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+
+    final count = bindings.commandCount;
     expect(
       count,
       greaterThan(0),
       reason: 'Engine should have generated at least one render command',
     );
   });
+}
+
+String? _resolveSystemPath(String workspace, String packId) {
+  final exts = Platform.isWindows
+      ? ['.mxc', '.dll']
+      : Platform.isMacOS
+          ? ['.mxc', '.dylib']
+          : ['.mxc', '.so'];
+  for (final ext in exts) {
+    final candidates = [
+      '$workspace/examples/$packId/$packId$ext',
+      '$workspace/packages/$packId$ext',
+      '$workspace/$packId$ext',
+      '$workspace/flutter_app/motors/$packId$ext',
+    ];
+    for (final candidate in candidates) {
+      if (File(candidate).existsSync()) return candidate;
+    }
+  }
+  return null;
 }

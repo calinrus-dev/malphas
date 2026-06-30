@@ -6,10 +6,9 @@ import 'dart:ffi';
 ///
 /// * 24 bytes, 4-byte aligned.
 /// * `commandType == 1` = rectangle (`x`, `y`, `width`, `height` are geometry).
-/// * `commandType == 2` = text.  The float fields form a logical union:
+/// * `commandType == 2` = text label.  The float fields form a logical union:
 ///   `x` holds the text length, `y` holds the text style/font size, and
-///   `width`/`height` hold the low/high 32 bits of a `Pointer<TextPayload>`
-///   to the Arena-resident text object.  The command array stays homogeneous.
+///   `width`/`height` hold the low/high 32 bits of a `Pointer<TextPayload>`.
 final class DartRenderCommand extends Struct {
   @Uint8()
   external int commandType;
@@ -18,8 +17,7 @@ final class DartRenderCommand extends Struct {
   external int layer;
 
   @Uint16()
-  external int
-      pad; // 2-byte alignment padding to align f32 fields to 4-byte boundaries
+  external int pad;
 
   @Float()
   external double x;
@@ -34,12 +32,13 @@ final class DartRenderCommand extends Struct {
   external double height;
 
   @Uint32()
-  external int colorRgba; // Direct native ARGB format (0xAARRGGBB)
+  external int colorRgba;
 }
 
 /// C-ABI mirror of the Rust `TextPayload`.
 ///
-/// The string bytes follow this 12-byte header immediately in Arena memory.
+/// Kept for ABI compatibility.  The string bytes follow this 12-byte header
+/// immediately in memory.
 final class TextPayload extends Struct {
   @Float()
   external double x;
@@ -51,50 +50,53 @@ final class TextPayload extends Struct {
   external double fontSize;
 }
 
-/// C-ABI mirror of the Rust `CoreCommandBuffer`.
-///
-/// * 16 bytes, 16-byte aligned.
-/// * `commandCount` is written by Rust with Release ordering and read by Dart
-///   with Acquire ordering; it is NOT a normal Dart field write.
-final class CoreCommandBuffer extends Struct {
-  @Uint32()
-  external int commandCount;
-
-  external Pointer<DartRenderCommand> commands;
-}
-
 /// C-ABI mirror of the Rust `MalphasDoubleBufferBridge`.
 ///
 /// * 64 bytes, 64-byte aligned.
-/// * The _padding fields mirror the trailing alignment bytes that Rust
-///   reserves for `#[repr(C, align(64))]`. They must not be read or written.
-/// * Dart never performs pointer arithmetic on this struct; it uses the Rust
-///   exported getter functions (`get_buffer_a_ptr`, `get_back_index`, etc.).
+/// * Fields are ordered exactly like the Rust `#[repr(C, align(64))]` struct.
+/// * `atomicBackIndex` is flipped by Rust with Release ordering; Dart reads it
+///   with Acquire ordering through the delegate functions.
 final class MalphasDoubleBufferBridge extends Struct {
-  external CoreCommandBuffer bufferA;
-  external CoreCommandBuffer bufferB;
+  @Uint32()
+  external int bufferACommandCount;
+
+  @Uint32()
+  external int _padA;
+
+  external Pointer<DartRenderCommand> bufferACommands;
+
+  @Uint32()
+  external int bufferBCommandCount;
+
+  @Uint32()
+  external int _padB;
+
+  external Pointer<DartRenderCommand> bufferBCommands;
 
   @Uint8()
   external int atomicBackIndex;
+
+  @Uint8()
+  external int _padding2;
+
+  @Uint8()
+  external int _padding3;
+
+  @Uint8()
+  external int _padding4;
 
   @Uint32()
   external int commandsWritten;
 
   @Uint32()
-  external int _padding0;
-
-  @Uint32()
-  external int _padding1;
-
-  @Uint32()
-  external int _padding2;
-
-  @Uint32()
-  external int _padding3;
-
-  @Uint32()
-  external int _padding4;
-
-  @Uint32()
   external int _padding5;
+
+  @Uint32()
+  external int _padding6;
+
+  @Uint64()
+  external int _padding7;
+
+  @Uint64()
+  external int _padding8;
 }

@@ -2,9 +2,27 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
-import 'models.dart';
+import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
+import '../../core/models/flat_models.dart';
 import '../../core/compiler/package_compiler.dart';
 import '../../core/services/app_state_persistence_service.dart';
+
+class _ParsedPackageResult {
+  final EntityPackage package;
+  final List<Entity> entities;
+  final List<EntityPayload> payloads;
+  final List<EntityTag> tags;
+  final List<EntityProperty> properties;
+
+  const _ParsedPackageResult({
+    required this.package,
+    required this.entities,
+    required this.payloads,
+    required this.tags,
+    required this.properties,
+  });
+}
 
 class PackageController extends ChangeNotifier {
   static final PackageController _instance = PackageController._internal();
@@ -13,15 +31,29 @@ class PackageController extends ChangeNotifier {
 
   static final Map<String, ui.Image> skinImages = {};
 
-  final List<MalphasPackage> _registry = [];
+  final List<EntityPackage> _registry = [];
+  final List<Entity> _entities = [];
+  final List<EntityPayload> _payloads = [];
+  final List<EntityTag> _tags = [];
+  final List<EntityProperty> _properties = [];
+
   final AppStatePersistenceService _persistence = AppStatePersistenceService();
   bool _initialized = false;
   String? _workspaceRootOverride;
+
+  List<Entity> get entities => List.unmodifiable(_entities);
+  List<EntityPayload> get payloads => List.unmodifiable(_payloads);
+  List<EntityTag> get tags => List.unmodifiable(_tags);
+  List<EntityProperty> get properties => List.unmodifiable(_properties);
 
   /// Clears the in-memory registry and resets the initialization flag.
   /// Intended for tests; do not call in production.
   void reset() {
     _registry.clear();
+    _entities.clear();
+    _payloads.clear();
+    _tags.clear();
+    _properties.clear();
     _initialized = false;
     notifyListeners();
   }
@@ -34,6 +66,13 @@ class PackageController extends ChangeNotifier {
 
   void clearWorkspaceRootOverride() {
     _workspaceRootOverride = null;
+  }
+
+  Future<void> updateWorkspaceRoot(String? path) async {
+    _workspaceRootOverride = path;
+    _persistence.saveWorkspaceRootOverride(path);
+    _initialized = false;
+    await init();
   }
 
   /// Resolves the repository root. If the current working directory is
@@ -63,59 +102,128 @@ class PackageController extends ChangeNotifier {
     if (_initialized) return;
 
     try {
+      final savedOverride = _persistence.loadWorkspaceRootOverride();
+      if (savedOverride != null && savedOverride.isNotEmpty) {
+        _workspaceRootOverride = savedOverride;
+      } else if (Platform.isAndroid || Platform.isIOS) {
+        final docDir = await getApplicationDocumentsDirectory();
+        _workspaceRootOverride = docDir.path;
+      }
+
       final workspace = resolveWorkspaceRoot();
       final packagesDir = Directory('$workspace/packages');
       if (!packagesDir.existsSync()) {
         packagesDir.createSync(recursive: true);
       }
 
-      // If the bouncing_demo manifest exists but the compiled package does not,
-      // compile it on demand using the native CLI.
+      if (Platform.isAndroid || Platform.isIOS) {
+        final demoMsp = File('${packagesDir.path}/bouncing_demo.msp');
+        final demoMxc = File('${packagesDir.path}/bouncing_demo.mxc');
+        final demoMeta =
+            File('${packagesDir.path}/bouncing_demo.manifest.json');
+
+        if (!demoMsp.existsSync() ||
+            !demoMxc.existsSync() ||
+            !demoMeta.existsSync()) {
+          try {
+            final mspBytes =
+                await rootBundle.load('assets/packages/bouncing_demo.msp');
+            await demoMsp.writeAsBytes(mspBytes.buffer
+                .asUint8List(mspBytes.offsetInBytes, mspBytes.lengthInBytes));
+
+            final mxcBytes =
+                await rootBundle.load('assets/packages/bouncing_demo.mxc');
+            await demoMxc.writeAsBytes(mxcBytes.buffer
+                .asUint8List(mxcBytes.offsetInBytes, mxcBytes.lengthInBytes));
+
+            final metaBytes = await rootBundle
+                .load('assets/packages/bouncing_demo.manifest.json');
+            await demoMeta.writeAsBytes(metaBytes.buffer
+                .asUint8List(metaBytes.offsetInBytes, metaBytes.lengthInBytes));
+          } catch (e) {
+            debugPrint('Error unpacking bouncing_demo assets: $e');
+          }
+        }
+      }
+
       await _ensureBouncingDemoCompiled(workspace);
 
       // Restore previously loaded package ids so `isLoaded` state survives
       // across app launches.
       final persistedIds = _persistence.loadRegistryIds();
 
-      // Scan examples/**/*.mhp
+      // Scan examples/**/*.msp
       final examplesDir = Directory('$workspace/examples');
       if (examplesDir.existsSync()) {
         for (final entity in examplesDir.listSync(recursive: true)) {
-          if (entity is File && entity.path.toLowerCase().endsWith('.mhp')) {
-            final pack = _parseMhpPackage(entity);
-            if (pack != null) {
-              _registry.removeWhere((p) => p.id == pack.id);
-              if (persistedIds.contains(pack.id)) {
-                pack.isLoaded = true;
-              }
-              _registry.add(pack);
+          if (entity is File && entity.path.toLowerCase().endsWith('.msp')) {
+            final result = _parseMspPackage(entity);
+            if (result != null) {
+              final isLoaded = persistedIds.contains(result.package.id);
+              final pack = EntityPackage(
+                result.package.id,
+                result.package.name,
+                result.package.version,
+                result.package.author,
+                result.package.description,
+                result.package.coverImagePath,
+                isLoaded,
+              );
+              _registerPackageData(pack, result.entities, result.payloads,
+                  result.tags, result.properties);
             }
           }
         }
       }
 
-      // Scan packages/*.mhp
+      // Scan packages/*.msp
       for (final file in packagesDir.listSync()) {
-        if (file is File && file.path.toLowerCase().endsWith('.mhp')) {
-          final pack = _parseMhpPackage(file);
-          if (pack != null) {
-            _registry.removeWhere((p) => p.id == pack.id);
-            if (persistedIds.contains(pack.id)) {
-              pack.isLoaded = true;
-            }
-            _registry.add(pack);
+        if (file is File && file.path.toLowerCase().endsWith('.msp')) {
+          final result = _parseMspPackage(file);
+          if (result != null) {
+            final isLoaded = persistedIds.contains(result.package.id);
+            final pack = EntityPackage(
+              result.package.id,
+              result.package.name,
+              result.package.version,
+              result.package.author,
+              result.package.description,
+              result.package.coverImagePath,
+              isLoaded,
+            );
+            _registerPackageData(pack, result.entities, result.payloads,
+                result.tags, result.properties);
           }
         }
       }
 
       notifyListeners();
-      // Only mark initialized after all work completes so a failure leaves the
-      // controller in a retryable state.
       _initialized = true;
     } catch (e) {
       _initialized = false;
       rethrow;
     }
+  }
+
+  void _registerPackageData(
+    EntityPackage pack,
+    List<Entity> packEntities,
+    List<EntityPayload> packPayloads,
+    List<EntityTag> packTags,
+    List<EntityProperty> packProperties,
+  ) {
+    _registry.removeWhere((p) => p.id == pack.id);
+    _entities.removeWhere((e) => e.packageId == pack.id);
+    final entIds = packEntities.map((e) => e.id).toSet();
+    _payloads.removeWhere((p) => entIds.contains(p.entityId));
+    _tags.removeWhere((t) => entIds.contains(t.entityId));
+    _properties.removeWhere((prop) => entIds.contains(prop.entityId));
+
+    _registry.add(pack);
+    _entities.addAll(packEntities);
+    _payloads.addAll(packPayloads);
+    _tags.addAll(packTags);
+    _properties.addAll(packProperties);
   }
 
   void _persistRegistry() {
@@ -124,18 +232,17 @@ class PackageController extends ChangeNotifier {
     );
   }
 
-  /// Parses a valid MLPH binary and returns a [MalphasPackage] using the same
-  /// header layout the existing scanner relied on.
-  MalphasPackage? _parseMhpPackage(File file) {
+  /// Parses a valid MLPS binary and returns a [_ParsedPackageResult] containing relational tables.
+  _ParsedPackageResult? _parseMspPackage(File file) {
     try {
       final bytes = file.readAsBytesSync();
-      if (bytes.length < 112) return null;
+      if (bytes.length < 128) return null;
 
-      // Verify magic header: 'MLPH'
+      // Verify magic header: 'MLPS'
       if (bytes[0] != 0x4D ||
           bytes[1] != 0x4C ||
           bytes[2] != 0x50 ||
-          bytes[3] != 0x48) {
+          bytes[3] != 0x53) {
         return null;
       }
 
@@ -146,26 +253,31 @@ class PackageController extends ChangeNotifier {
       final packIdBytes = bytes.sublist(48, 64);
       final packId = utf8.decode(packIdBytes.takeWhile((b) => b != 0).toList());
 
-      final objectsCount = data.getUint32(80, Endian.little);
-      final objectsTableOffset = data.getUint32(76, Endian.little);
+      final entitiesCount = data.getUint32(80, Endian.little);
+      final entitiesTableOffset = data.getUint32(76, Endian.little);
 
-      final List<MalphasObject> parsedObjects = [];
-      for (int i = 0; i < objectsCount; i++) {
-        final entryOffset = objectsTableOffset + (i * 32);
-        if (entryOffset + 32 > bytes.length) break;
+      final List<Entity> parsedEntities = [];
+      final List<EntityTag> parsedTags = [];
+      final List<EntityPayload> parsedPayloads = [];
+      final List<EntityProperty> parsedProperties = [];
 
-        final objId = data.getUint32(entryOffset, Endian.little);
+      for (int i = 0; i < entitiesCount; i++) {
+        final entryOffset = entitiesTableOffset + (i * 64);
+        if (entryOffset + 64 > bytes.length) break;
 
-        parsedObjects.add(
-          MalphasObject(
-            id: 'vox_obj_$objId',
-            name: 'Voxel_Object_$objId',
-            category: 'Compiled Archetype',
-            properties: {'ID': '$objId'},
-            tags: [const MalphasTag(name: 'Zero-Copy', isPublic: true)],
-            skins: [],
+        final entId = data.getUint32(entryOffset, Endian.little);
+
+        parsedEntities.add(
+          Entity(
+            entId,
+            packId,
+            'Voxel_Entity_$entId',
+            'Compiled Archetype',
+            0,
           ),
         );
+        parsedTags.add(EntityTag(entId, 'Zero-Copy', true));
+        parsedProperties.add(EntityProperty(entId, 'ID', '$entId'));
       }
 
       final manifestCandidates = [
@@ -184,7 +296,7 @@ class PackageController extends ChangeNotifier {
         try {
           final manifestJson = jsonDecode(manifestFile.readAsStringSync())
               as Map<String, dynamic>;
-          final name = manifestJson['name'] as String? ?? 'MHP Pack ($packId)';
+          final name = manifestJson['name'] as String? ?? 'MSP Pack ($packId)';
           final manifestVersion =
               manifestJson['version'] as String? ?? 'v$version.0.0';
           final author =
@@ -192,93 +304,127 @@ class PackageController extends ChangeNotifier {
           final description = manifestJson['description'] as String? ??
               'Zero-copy binary structure with aligned headers.';
 
-          final List<MalphasObject> richObjects = [];
-          if (manifestJson['objects'] is List) {
-            for (var objJson in manifestJson['objects']) {
-              final idVal = objJson['object_id'] ?? objJson['id'];
-              final nameVal = objJson['name'] as String? ?? 'Object $idVal';
-              final categoryVal =
-                  objJson['category'] as String? ?? 'Compiled Archetype';
-              final props = Map<String, dynamic>.from(
-                  objJson['properties'] as Map? ?? {});
-              final propsStr = props.map((k, v) => MapEntry(k, v.toString()));
+          final List<Entity> richEntities = [];
+          final List<EntityTag> richTags = [];
+          final List<EntityPayload> richPayloads = [];
+          final List<EntityProperty> richProperties = [];
 
-              final tagsList = <MalphasTag>[];
-              if (objJson['tags'] is List) {
-                for (var t in objJson['tags']) {
+          final manifestEntities =
+              manifestJson['entities'] ?? manifestJson['objects'];
+          if (manifestEntities is List) {
+            for (var entJson in manifestEntities) {
+              final idVal =
+                  entJson['entity_id'] ?? entJson['object_id'] ?? entJson['id'];
+              final intId =
+                  idVal is int ? idVal : (int.tryParse(idVal.toString()) ?? 1);
+              final nameVal = entJson['name'] as String? ?? 'Entity $intId';
+              final categoryVal =
+                  entJson['category'] as String? ?? 'Compiled Archetype';
+
+              final props = Map<String, dynamic>.from(
+                  entJson['properties'] as Map? ?? {});
+              props.forEach((k, v) {
+                richProperties.add(EntityProperty(intId, k, v.toString()));
+              });
+
+              if (entJson['tags'] is List) {
+                for (var t in entJson['tags']) {
                   if (t is String) {
-                    tagsList.add(MalphasTag(name: t, isPublic: true));
+                    richTags.add(EntityTag(intId, t, true));
                   } else if (t is Map) {
-                    tagsList.add(MalphasTag(
-                        name: t['name'] as String,
-                        isPublic: t['isPublic'] as bool? ?? true));
+                    richTags.add(EntityTag(intId, t['name'] as String,
+                        t['isPublic'] as bool? ?? true));
                   }
                 }
               } else {
-                tagsList
-                    .add(const MalphasTag(name: 'Zero-Copy', isPublic: true));
+                richTags.add(EntityTag(intId, 'Zero-Copy', true));
               }
 
-              final skinsList = <MalphasSkin>[];
-              if (objJson['skins'] is List) {
-                for (var s in objJson['skins']) {
-                  skinsList.add(MalphasSkin(
-                    id: s['id'] as String? ?? 'none',
-                    name: s['name'] as String? ?? 'None',
-                    assetPath: s['assetPath'] as String? ?? 'none',
-                    version: s['version'] as String? ?? '1.0',
+              final manifestPayloads = entJson['payloads'] ?? entJson['skins'];
+              int activePayloadId = 0;
+              if (manifestPayloads is List) {
+                for (int pIdx = 0; pIdx < manifestPayloads.length; pIdx++) {
+                  final s = manifestPayloads[pIdx];
+                  final payloadId = pIdx + 1;
+                  richPayloads.add(EntityPayload(
+                    payloadId,
+                    intId,
+                    s['name'] as String? ?? 'Payload $payloadId',
+                    s['assetPath'] as String? ?? 'none',
+                    s['version'] as String? ?? '1.0',
                   ));
+                  if (s['assetPath'] != null &&
+                      s['assetPath'] != 'none' &&
+                      activePayloadId == 0) {
+                    activePayloadId = payloadId;
+                  }
                 }
               }
 
-              richObjects.add(MalphasObject(
-                id: idVal.toString(),
-                name: nameVal,
-                category: categoryVal,
-                properties: propsStr,
-                tags: tagsList,
-                skins: skinsList,
+              richEntities.add(Entity(
+                intId,
+                packId,
+                nameVal,
+                categoryVal,
+                activePayloadId,
               ));
             }
           }
 
-          return MalphasPackage(
-            id: packId,
-            name: name,
-            version: manifestVersion,
-            author: author,
-            description: description,
-            objects: richObjects.isNotEmpty ? richObjects : parsedObjects,
+          final pack = EntityPackage(
+            packId,
+            name,
+            manifestVersion,
+            author,
+            description,
+            manifestJson['coverImagePath'] as String?,
+            false,
+          );
+
+          return _ParsedPackageResult(
+            package: pack,
+            entities: richEntities.isNotEmpty ? richEntities : parsedEntities,
+            payloads: richPayloads,
+            tags: richTags.isNotEmpty ? richTags : parsedTags,
+            properties:
+                richProperties.isNotEmpty ? richProperties : parsedProperties,
           );
         } catch (_) {
           // Fallback if manifest is malformed
         }
       }
 
-      return MalphasPackage(
-        id: packId,
-        name: 'MHP Pack ($packId)',
-        version: 'v$version.0.0',
-        author: 'Compiled Artifact',
-        description: 'Zero-copy binary structure with aligned headers.',
-        objects: parsedObjects,
+      final pack = EntityPackage(
+        packId,
+        'MSP Pack ($packId)',
+        'v$version.0.0',
+        'Compiled Artifact',
+        'Zero-copy binary structure with aligned headers.',
+        null,
+        false,
+      );
+
+      return _ParsedPackageResult(
+        package: pack,
+        entities: parsedEntities,
+        payloads: parsedPayloads,
+        tags: parsedTags,
+        properties: parsedProperties,
       );
     } catch (e) {
-      // Silent skip for individual malformed files.
       return null;
     }
   }
 
   /// Compiles `examples/bouncing_demo/manifest.json` if the manifest is present
-  /// but its `.mhp` artifact is missing. Guards against a missing CLI and never
-  /// fails silently.
+  /// but its `.msp` artifact is missing.
   Future<void> _ensureBouncingDemoCompiled(String workspace) async {
     final manifestFile = File(
       '$workspace/examples/bouncing_demo/manifest.json',
     );
-    final mhpFile = File('$workspace/examples/bouncing_demo/bouncing_demo.mhp');
+    final mspFile = File('$workspace/examples/bouncing_demo/bouncing_demo.msp');
 
-    if (!manifestFile.existsSync() || mhpFile.existsSync()) {
+    if (!manifestFile.existsSync() || mspFile.existsSync()) {
       return;
     }
 
@@ -294,27 +440,34 @@ class PackageController extends ChangeNotifier {
     final output = await compiler.compilePackage(manifest);
 
     final packId = manifest['pack_id'] as String? ?? 'bouncing_demo';
-    final mspFile = File('$workspace/examples/bouncing_demo/$packId.msp');
 
     File(
-      '$workspace/examples/bouncing_demo/$packId.mhp',
-    ).writeAsBytesSync(output.mhpBytes);
-    mspFile.writeAsBytesSync(output.mspBytes);
+      '$workspace/examples/bouncing_demo/$packId.msp',
+    ).writeAsBytesSync(output.mspBytes);
   }
 
-  List<MalphasPackage> getAllPackages() => List.unmodifiable(_registry);
-  List<MalphasPackage> getActivePackages() =>
+  List<EntityPackage> getAllPackages() => List.unmodifiable(_registry);
+  List<EntityPackage> getActivePackages() =>
       List.unmodifiable(_registry.where((p) => p.isLoaded));
 
   void setPackageLoaded(String id, {required bool loaded}) {
     final index = _registry.indexWhere((p) => p.id == id);
     if (index == -1) return;
-    _registry[index].isLoaded = loaded;
+    final p = _registry[index];
+    _registry[index] = EntityPackage(
+      p.id,
+      p.name,
+      p.version,
+      p.author,
+      p.description,
+      p.coverImagePath,
+      loaded,
+    );
     _persistRegistry();
     notifyListeners();
   }
 
-  void injectPackage(MalphasPackage pack) {
+  void injectPackage(EntityPackage pack) {
     _registry.add(pack);
     _persistRegistry();
     notifyListeners();
@@ -322,36 +475,54 @@ class PackageController extends ChangeNotifier {
 
   void deletePackage(String id) {
     _registry.removeWhere((p) => p.id == id);
+    _entities.removeWhere((e) => e.packageId == id);
     _persistRegistry();
     notifyListeners();
   }
 
+  void updateEntityActivePayload(int entityId, int activePayloadId) {
+    final index = _entities.indexWhere((e) => e.id == entityId);
+    if (index != -1) {
+      final e = _entities[index];
+      _entities[index] = Entity(
+        e.id,
+        e.packageId,
+        e.name,
+        e.category,
+        activePayloadId,
+      );
+      notifyListeners();
+    }
+  }
+
   /// Preloads skins/sprites for the active package into unmanaged C++ memory (ui.Image).
-  /// Safely disposes and clears any previously loaded skins first to prevent memory leaks.
-  Future<void> preloadSkins(MalphasPackage pack) async {
+  Future<void> preloadSkins(EntityPackage pack) async {
     await disposeSkins();
 
-    for (final obj in pack.objects) {
-      for (final skin in obj.skins) {
-        final path = skin.assetPath;
-        if (path.isEmpty || path == 'none') continue;
-        if (skinImages.containsKey(path)) continue;
+    final packEntities =
+        _entities.where((e) => e.packageId == pack.id).map((e) => e.id).toSet();
+    final packPayloads =
+        _payloads.where((p) => packEntities.contains(p.entityId));
 
-        try {
-          File file = File(path);
-          if (!file.existsSync()) {
-            final ws = resolveWorkspaceRoot();
-            file = File('$ws/$path');
-          }
-          if (file.existsSync()) {
-            final bytes = await file.readAsBytes();
-            final codec = await ui.instantiateImageCodec(bytes);
-            final frame = await codec.getNextFrame();
-            skinImages[path] = frame.image;
-          }
-        } catch (_) {
-          // Skip individual failed loads
+    for (final payload in packPayloads) {
+      final path = payload.assetPath;
+      if (path.isEmpty || path == 'none') continue;
+      if (skinImages.containsKey(path)) continue;
+
+      try {
+        File file = File(path);
+        if (!file.existsSync()) {
+          final ws = resolveWorkspaceRoot();
+          file = File('$ws/$path');
         }
+        if (file.existsSync()) {
+          final bytes = await file.readAsBytes();
+          final codec = await ui.instantiateImageCodec(bytes);
+          final frame = await codec.getNextFrame();
+          skinImages[path] = frame.image;
+        }
+      } catch (_) {
+        // Skip individual failed loads
       }
     }
   }
@@ -377,7 +548,10 @@ class PackageController extends ChangeNotifier {
     required String description,
     required int canvasWidth,
     required int canvasHeight,
-    required List<MalphasObject> objects,
+    required List<Entity> entities,
+    required List<EntityPayload> payloads,
+    required List<EntityTag> tags,
+    required List<EntityProperty> properties,
   }) async {
     final workspace = resolveWorkspaceRoot();
     final packagesDir = Directory('$workspace/packages');
@@ -390,46 +564,36 @@ class PackageController extends ChangeNotifier {
       spritesDir.createSync(recursive: true);
     }
 
-    final List<MalphasObject> processedObjects = [];
-    for (final obj in objects) {
-      final List<MalphasSkin> processedSkins = [];
-      for (final skin in obj.skins) {
-        final srcPath = skin.assetPath;
-        if (srcPath.isNotEmpty && srcPath != 'none') {
-          try {
-            File srcFile = File(srcPath);
-            if (!srcFile.existsSync()) {
-              final ws = resolveWorkspaceRoot();
-              srcFile = File('$ws/$srcPath');
-            }
-            if (srcFile.existsSync()) {
-              final filename = srcFile.uri.pathSegments.last;
-              final destFile = File('${spritesDir.path}/$filename');
-              await srcFile.copy(destFile.path);
-              processedSkins.add(MalphasSkin(
-                id: skin.id,
-                name: skin.name,
-                assetPath: 'packages/$packId/sprites/$filename',
-                version: skin.version,
-              ));
-            } else {
-              processedSkins.add(skin);
-            }
-          } catch (_) {
-            processedSkins.add(skin);
+    final List<EntityPayload> processedPayloads = [];
+    for (final s in payloads) {
+      final srcPath = s.assetPath;
+      if (srcPath.isNotEmpty && srcPath != 'none') {
+        try {
+          File srcFile = File(srcPath);
+          if (!srcFile.existsSync()) {
+            final ws = resolveWorkspaceRoot();
+            srcFile = File('$ws/$srcPath');
           }
-        } else {
-          processedSkins.add(skin);
+          if (srcFile.existsSync()) {
+            final filename = srcFile.uri.pathSegments.last;
+            final destFile = File('${spritesDir.path}/$filename');
+            await srcFile.copy(destFile.path);
+            processedPayloads.add(EntityPayload(
+              s.id,
+              s.entityId,
+              s.name,
+              'packages/$packId/sprites/$filename',
+              s.version,
+            ));
+          } else {
+            processedPayloads.add(s);
+          }
+        } catch (_) {
+          processedPayloads.add(s);
         }
+      } else {
+        processedPayloads.add(s);
       }
-      processedObjects.add(MalphasObject(
-        id: obj.id,
-        name: obj.name,
-        category: obj.category,
-        properties: obj.properties,
-        tags: obj.tags,
-        skins: processedSkins,
-      ));
     }
 
     // 1. Build the full rich manifest JSON map
@@ -441,18 +605,38 @@ class PackageController extends ChangeNotifier {
       'description': description,
       'canvas_width': canvasWidth,
       'canvas_height': canvasHeight,
-      'objects': processedObjects
-          .map((obj) => {
-                'object_id': int.tryParse(obj.id) ?? 1,
-                'name': obj.name,
-                'category': obj.category,
-                'tags': obj.tags
-                    .map((t) => {'name': t.name, 'isPublic': t.isPublic})
-                    .toList(),
-                'skins': obj.skins.map((s) => s.toJson()).toList(),
-                'properties': obj.properties,
-              })
-          .toList(),
+      'entities': entities.map((ent) {
+        final entProps = properties
+            .where((p) => p.entityId == ent.id)
+            .fold<Map<String, String>>({}, (acc, p) {
+          acc[p.key] = p.value;
+          return acc;
+        });
+
+        final entTags = tags
+            .where((t) => t.entityId == ent.id)
+            .map((t) => {'name': t.name, 'isPublic': t.isPublic})
+            .toList();
+
+        final entPayloads = processedPayloads
+            .where((p) => p.entityId == ent.id)
+            .map((p) => {
+                  'id': p.id,
+                  'name': p.name,
+                  'assetPath': p.assetPath,
+                  'version': p.version,
+                })
+            .toList();
+
+        return {
+          'entity_id': ent.id,
+          'name': ent.name,
+          'category': ent.category,
+          'tags': entTags,
+          'payloads': entPayloads,
+          'properties': entProps,
+        };
+      }).toList(),
     };
 
     // 2. Build the stripped minimal manifest for malphas-cli
@@ -460,12 +644,18 @@ class PackageController extends ChangeNotifier {
       'pack_id': packId,
       'canvas_width': canvasWidth,
       'canvas_height': canvasHeight,
-      'objects': processedObjects
-          .map((obj) => {
-                'object_id': int.tryParse(obj.id) ?? 1,
-                'properties': obj.properties,
-              })
-          .toList(),
+      'entities': entities.map((ent) {
+        final entProps = properties
+            .where((p) => p.entityId == ent.id)
+            .fold<Map<String, String>>({}, (acc, p) {
+          acc[p.key] = p.value;
+          return acc;
+        });
+        return {
+          'entity_id': ent.id,
+          'properties': entProps,
+        };
+      }).toList(),
     };
 
     // 3. Compile using MalphasPackageCompiler
@@ -473,11 +663,9 @@ class PackageController extends ChangeNotifier {
     final output = await compiler.compilePackage(strippedManifest);
 
     // 4. Save files to packages/
-    final mhpFile = File('${packagesDir.path}/$packId.mhp');
     final mspFile = File('${packagesDir.path}/$packId.msp');
     final manifestFile = File('${packagesDir.path}/$packId.manifest.json');
 
-    await mhpFile.writeAsBytes(output.mhpBytes);
     await mspFile.writeAsBytes(output.mspBytes);
     await manifestFile.writeAsString(jsonEncode(richManifest));
 

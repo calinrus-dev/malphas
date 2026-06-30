@@ -22,7 +22,7 @@ pull request must complete.
 | Path | Purpose |
 |------|---------|
 | `malphas_core/` | Rust `cdylib` with the C-ABI exports, VM, bridge, and pipeline. |
-| `malphas_cli/` | Rust executable that compiles `manifest.json` into `.mhp`/`.msp` and signs files. |
+| `malphas_cli/` | Rust executable that compiles `manifest.json` into `.msp`/`.mxc` and signs files. |
 | `flutter_app/` | Flutter frontend, FFI bindings, and UI screens. |
 | `examples/` | Canonical packages (e.g., `bouncing_demo`) used by tests and the UI. |
 | `build.sh` / `build_core.ps1` | Cross-platform native build scripts kept in parity. |

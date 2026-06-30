@@ -15,3 +15,5 @@ arc-swap = "1.7.1"
 ed25519-dalek = { version = "2.1.1", features = ["rand_core"] }
 rand_core = { version = "0.6.4", features = ["getrandom"] }
 hex = "0.4.3"
+memmap2 = "0.9"
+libloading = "0.8"

@@ -5,7 +5,7 @@ import '../../features/hub/environment_model.dart';
 /// Persists lightweight app state (environments and the package registry ids)
 /// as JSON files in the application documents directory.
 ///
-/// Heavy binary data (compiled .mhp/.msp packs and engine motors) stays on
+/// Heavy binary data (compiled .msp/.mxc packs and engine motors) stays on
 /// disk where it already lives; only the references that the UI needs to
 /// restore its state are saved here.
 class AppStatePersistenceService {
@@ -86,6 +86,31 @@ class AppStatePersistenceService {
       return jsonList.map((e) => e as String).toList();
     } catch (e) {
       return [];
+    }
+  }
+
+  /// Saves the custom workspace root override.
+  void saveWorkspaceRootOverride(String? path) {
+    final file = _stateFile('workspace_root');
+    if (path == null) {
+      if (file.existsSync()) {
+        try {
+          file.deleteSync();
+        } catch (_) {}
+      }
+    } else {
+      file.writeAsStringSync(path);
+    }
+  }
+
+  /// Loads the custom workspace root override.
+  String? loadWorkspaceRootOverride() {
+    try {
+      final file = _stateFile('workspace_root');
+      if (!file.existsSync()) return null;
+      return file.readAsStringSync().trim();
+    } catch (_) {
+      return null;
     }
   }
 }

@@ -1,22 +1,29 @@
+// Malphas Core v2.7.0 — Data-Oriented Design memory router.
+//
 // This crate is a C-ABI boundary; pointer arguments are validated inside each
 // function before they are dereferenced, so the not_unsafe_ptr_arg_deref lint
 // is not useful here.
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
 
-pub mod arena_layout;
 pub mod bridge;
 pub mod crypto;
 pub mod input;
+pub mod msp_loader;
 pub mod pipeline;
-pub mod vm;
+pub mod system_host;
 
-use std::ffi::c_void;
+// The VM bytecode interpreter was deprecated in v2.7.0.  The module is kept
+// empty so existing imports do not break during the migration.
+pub mod vm {}
+
 use std::os::raw::c_char;
 
 use crate::bridge::{
-    get_back_index as get_back_index_internal, get_buffer_a_ptr as get_buffer_a_ptr_internal,
-    get_buffer_b_ptr as get_buffer_b_ptr_internal, get_command_count as get_command_count_internal,
-    get_commands_pointer as get_commands_pointer_internal,
+    get_back_index as get_back_index_internal,
+    get_buffer_a_command_count as get_buffer_a_command_count_internal,
+    get_buffer_a_commands as get_buffer_a_commands_internal,
+    get_buffer_b_command_count as get_buffer_b_command_count_internal,
+    get_buffer_b_commands as get_buffer_b_commands_internal,
     get_commands_written as get_commands_written_internal,
     get_text_payload_pointer as get_text_payload_pointer_internal, init_engine_internal,
     malphas_alloc as malphas_alloc_internal, malphas_free as malphas_free_internal,
@@ -28,14 +35,18 @@ use crate::crypto::{
     verify_engine_signature as verify_engine_signature_internal,
 };
 use crate::input::process_input_event as process_input_event_internal;
+use crate::msp_loader::{
+    get_msp_entity_count_internal, get_msp_lookup_table_internal,
+    load_msp_file as load_msp_file_internal, refresh_msp_file as refresh_msp_file_internal,
+};
 use crate::pipeline::{
     get_commands_generated_count_internal, get_hit_tests_count_internal,
-    get_pulse_latency_micros_internal, get_vm_tick_micros_internal,
-    load_resource_pack as load_resource_pack_internal,
-    load_resource_pack_raw as load_resource_pack_raw_internal, process_engine_tick_sync,
-    set_entities_count as set_entities_count_internal, set_entity as set_entity_internal,
-    write_arena_bytes as write_arena_bytes_internal, CoreCommandBuffer, DartRenderCommand,
+    get_pulse_latency_micros_internal, get_vm_tick_micros_internal, DartRenderCommand,
     MalphasDoubleBufferBridge, TextPayload,
+};
+use crate::system_host::{
+    get_loaded_system_count_internal, load_system_file as load_system_file_internal,
+    tick_loaded_systems as tick_loaded_systems_internal,
 };
 
 // ---------------------------------------------------------------------------
@@ -44,11 +55,9 @@ use crate::pipeline::{
 #[no_mangle]
 pub extern "C" fn init_engine(
     bridge_ptr: *mut MalphasDoubleBufferBridge,
-    arena_ptr: *mut c_void,
-    arena_size: u32,
     max_commands: u32,
 ) -> i32 {
-    init_engine_internal(bridge_ptr, arena_ptr, arena_size, max_commands)
+    init_engine_internal(bridge_ptr, max_commands)
 }
 
 #[no_mangle]
@@ -67,6 +76,61 @@ pub extern "C" fn trigger_engine_pulse() -> i32 {
 }
 
 // ---------------------------------------------------------------------------
+// MSP (Malphas Source Pack) loading.
+// ---------------------------------------------------------------------------
+#[no_mangle]
+pub extern "C" fn load_msp(filepath: *const c_char) -> i32 {
+    load_msp_file_internal(filepath)
+}
+
+#[no_mangle]
+pub extern "C" fn refresh_msp(filepath: *const c_char) -> i32 {
+    refresh_msp_file_internal(filepath)
+}
+
+#[no_mangle]
+pub extern "C" fn get_msp_lookup_table() -> *const *const u8 {
+    get_msp_lookup_table_internal()
+}
+
+#[no_mangle]
+pub extern "C" fn get_msp_entity_count() -> u32 {
+    get_msp_entity_count_internal()
+}
+
+// ---------------------------------------------------------------------------
+// System (.mxc) loading and tick dispatch.
+// ---------------------------------------------------------------------------
+#[no_mangle]
+pub extern "C" fn load_system(filepath: *const c_char) -> i32 {
+    load_system_file_internal(filepath)
+}
+
+#[no_mangle]
+pub extern "C" fn get_loaded_system_count() -> u32 {
+    get_loaded_system_count_internal()
+}
+
+#[no_mangle]
+pub extern "C" fn tick_systems(
+    lookup_table: *const *const u8,
+    entity_count: u32,
+    dt_micros: u64,
+    render_buffer: *mut DartRenderCommand,
+    render_capacity: u32,
+    render_count: *mut u32,
+) {
+    tick_loaded_systems_internal(
+        lookup_table,
+        entity_count,
+        dt_micros,
+        render_buffer,
+        render_capacity,
+        render_count,
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Input event queue.
 // ---------------------------------------------------------------------------
 #[no_mangle]
@@ -78,32 +142,32 @@ pub extern "C" fn process_input_event(event_type: i32, x: f32, y: f32) -> i32 {
 // Portable FFI pointer delegates.
 // ---------------------------------------------------------------------------
 #[no_mangle]
-pub extern "C" fn get_buffer_a_ptr(
+pub extern "C" fn get_buffer_a_commands(
     bridge: *mut MalphasDoubleBufferBridge,
-) -> *mut CoreCommandBuffer {
-    get_buffer_a_ptr_internal(bridge)
+) -> *mut DartRenderCommand {
+    get_buffer_a_commands_internal(bridge)
 }
 
 #[no_mangle]
-pub extern "C" fn get_buffer_b_ptr(
+pub extern "C" fn get_buffer_b_commands(
     bridge: *mut MalphasDoubleBufferBridge,
-) -> *mut CoreCommandBuffer {
-    get_buffer_b_ptr_internal(bridge)
+) -> *mut DartRenderCommand {
+    get_buffer_b_commands_internal(bridge)
+}
+
+#[no_mangle]
+pub extern "C" fn get_buffer_a_command_count(bridge: *mut MalphasDoubleBufferBridge) -> u32 {
+    get_buffer_a_command_count_internal(bridge)
+}
+
+#[no_mangle]
+pub extern "C" fn get_buffer_b_command_count(bridge: *mut MalphasDoubleBufferBridge) -> u32 {
+    get_buffer_b_command_count_internal(bridge)
 }
 
 #[no_mangle]
 pub extern "C" fn get_back_index(bridge: *mut MalphasDoubleBufferBridge) -> u8 {
     get_back_index_internal(bridge)
-}
-
-#[no_mangle]
-pub extern "C" fn get_command_count(buffer: *const CoreCommandBuffer) -> u32 {
-    get_command_count_internal(buffer)
-}
-
-#[no_mangle]
-pub extern "C" fn get_commands_pointer(buffer: *const CoreCommandBuffer) -> *mut DartRenderCommand {
-    get_commands_pointer_internal(buffer)
 }
 
 #[no_mangle]
@@ -180,73 +244,9 @@ pub extern "C" fn extract_zip_package(zip_path: *const c_char, output_dir: *cons
 }
 
 // ---------------------------------------------------------------------------
-// Resource pack loading.
-// ---------------------------------------------------------------------------
-#[no_mangle]
-pub extern "C" fn load_resource_pack_raw(ptr: *const u8, size: u32) -> i32 {
-    load_resource_pack_raw_internal(ptr, size)
-}
-
-#[no_mangle]
-pub extern "C" fn load_resource_pack(filepath: *const c_char) -> i32 {
-    load_resource_pack_internal(filepath)
-}
-
-// ---------------------------------------------------------------------------
-// Safe Arena helpers for Dart-side entity setup.
-// ---------------------------------------------------------------------------
-#[no_mangle]
-pub extern "C" fn set_entities_count(count: u32) -> i32 {
-    set_entities_count_internal(count)
-}
-
-#[no_mangle]
-pub extern "C" fn write_arena_bytes(offset: u32, ptr: *const u8, len: u32) -> i32 {
-    write_arena_bytes_internal(offset, ptr, len)
-}
-
-#[allow(clippy::too_many_arguments)]
-#[no_mangle]
-pub extern "C" fn set_entity(
-    entity_id: u32,
-    command_type: u8,
-    layer: u8,
-    x: f32,
-    y: f32,
-    width: f32,
-    height: f32,
-    color_rgba: u32,
-    speed_x: f32,
-    speed_y: f32,
-    min_x: f32,
-    max_x: f32,
-    min_y: f32,
-    max_y: f32,
-    str_offset: u32,
-) -> i32 {
-    set_entity_internal(
-        entity_id,
-        command_type,
-        layer,
-        x,
-        y,
-        width,
-        height,
-        color_rgba,
-        speed_x,
-        speed_y,
-        min_x,
-        max_x,
-        min_y,
-        max_y,
-        str_offset,
-    )
-}
-
-// ---------------------------------------------------------------------------
 // Synchronous tick fallback.
 // ---------------------------------------------------------------------------
 #[no_mangle]
 pub extern "C" fn process_engine_tick(dt_micros: u64) -> i32 {
-    process_engine_tick_sync(dt_micros)
+    crate::pipeline::process_engine_tick_sync(dt_micros)
 }

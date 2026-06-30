@@ -14,7 +14,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: PrimitiveCanvas(bindings: bindings, repaintNotifier: bindings),
+          body: PrimitiveCanvas(bindings: bindings),
         ),
       ),
     );
@@ -22,7 +22,7 @@ void main() {
     await tester.pump();
 
     // The canvas should exist and not crash even when the native core is
-    // unavailable; in that case it renders the fallback simulation buffer.
+    // unavailable.
     expect(find.byType(PrimitiveCanvas), findsOneWidget);
     expect(
       find.descendant(
@@ -33,7 +33,7 @@ void main() {
     );
   });
 
-  testWidgets('PrimitiveCanvas rebuilds when repaintNotifier fires', (
+  testWidgets('PrimitiveCanvas repaints when the bindings notifier fires', (
     WidgetTester tester,
   ) async {
     final bindings = MalphasBindings();
@@ -41,7 +41,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: PrimitiveCanvas(bindings: bindings, repaintNotifier: bindings),
+          body: PrimitiveCanvas(bindings: bindings),
         ),
       ),
     );

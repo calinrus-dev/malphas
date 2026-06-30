@@ -1,846 +1,424 @@
-import 'dart:ffi' as dffi;
+import 'dart:ffi';
 import 'dart:io';
-import 'dart:ui' as ui;
+
+import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
-import 'package:ffi/ffi.dart' as ffi;
-import 'arena_layout.dart';
+
 import 'types.dart';
 
-/// Immutable snapshot of the native engine telemetry counters.
+/// Zero-copy FFI gateway to the Rust `malphas_core` v2.7.0 engine.
 ///
-/// All durations are in microseconds.  A zero value means either that the
-/// metric has not yet been sampled (e.g. the engine has not ticked) or that
-/// the counter is legitimately zero.
-class TelemetrySnapshot {
-  final int vmTickMicros;
-  final int pulseLatencyMicros;
-  final int hitTestsCount;
-  final int commandsGeneratedCount;
-
-  const TelemetrySnapshot({
-    required this.vmTickMicros,
-    required this.pulseLatencyMicros,
-    required this.hitTestsCount,
-    required this.commandsGeneratedCount,
-  });
-
-  @override
-  String toString() {
-    return 'TelemetrySnapshot(vmTickMicros: $vmTickMicros, '
-        'pulseLatencyMicros: $pulseLatencyMicros, '
-        'hitTestsCount: $hitTestsCount, '
-        'commandsGeneratedCount: $commandsGeneratedCount)';
-  }
-}
-
-/// Singleton FFI gateway to the Rust `malphas_core` cdylib.
-///
-/// Design rules enforced here:
-/// * All shared-memory buffers (bridge, command arrays, arena) are allocated
-///   through the Rust-aligned allocator (`malphas_alloc` / `malphas_free`)
-///   with 16-byte alignment; `ffi.calloc` is never used for shared memory.
-/// * Dart never performs pointer arithmetic on `MalphasDoubleBufferBridge` or
-///   copies nested structs by value.  All buffer pointers come from Rust
-///   getters (`get_buffer_a_ptr`, `get_buffer_b_ptr`, etc.).
-/// * Input events are pushed to a Rust MPSC-style Mutex queue; Dart never
-///   writes directly into the Arena for events.
+/// The old arena-based entity setup API has been removed.  Systems now own all
+/// simulation state; Flutter only drives the vsync pulse and reads the front
+/// buffer of the shared double-buffer bridge.
 class MalphasBindings extends ChangeNotifier {
-  static const int maxCommandBufferCapacity = 2048;
-  static const int _arenaSize = 16 * 1024 * 1024; // 16 MB
-
-  static MalphasBindings _instance = MalphasBindings._internal();
+  static final MalphasBindings _instance = MalphasBindings._internal();
   factory MalphasBindings() => _instance;
-
-  /// Resets the singleton to a fresh engine instance.
-  ///
-  /// This is intended for tests only. It shuts down the native engine, frees
-  /// shared memory, and creates a new binding instance so each test starts from
-  /// a clean state.
-  static void reset() {
-    _instance.dispose();
-    _instance = MalphasBindings._internal();
-  }
-
-  late dffi.DynamicLibrary _nativeLib;
-
-  late final int Function(
-    dffi.Pointer<MalphasDoubleBufferBridge>,
-    dffi.Pointer<dffi.Void>,
-    int,
-    int,
-  ) initEngine;
-  late final int Function() shutdownEngine;
-  late final int Function(int, double, double) processInputEvent;
-  late final int Function() triggerEnginePulse;
-  late final int Function(int) processEngineTick;
-  late final int Function(dffi.Pointer<ffi.Utf8>) loadResourcePack;
-  late final dffi.Pointer<dffi.Uint8> Function(int) malphasAlloc;
-  late final void Function(dffi.Pointer<dffi.Uint8>, int) malphasFree;
-  late final int Function(dffi.Pointer<dffi.Uint8>, int) loadResourcePackRaw;
-  late final int Function(dffi.Pointer<ffi.Utf8>, dffi.Pointer<ffi.Utf8>)
-      verifyBinaryIntegrity;
-  late final int Function(
-    dffi.Pointer<ffi.Utf8>,
-    dffi.Pointer<ffi.Utf8>,
-    dffi.Pointer<ffi.Utf8>,
-  ) verifyEngineSignature;
-  late final int Function(dffi.Pointer<ffi.Utf8>, dffi.Pointer<ffi.Utf8>)
-      extractZipPackage;
-  late final int Function(int) _pauseEngine;
-
-  // Portable pointer delegates exposed from Rust.
-  late final dffi.Pointer<CoreCommandBuffer> Function(
-    dffi.Pointer<MalphasDoubleBufferBridge>,
-  ) getBufferAPtr;
-  late final dffi.Pointer<CoreCommandBuffer> Function(
-    dffi.Pointer<MalphasDoubleBufferBridge>,
-  ) getBufferBPtr;
-  late final int Function(dffi.Pointer<MalphasDoubleBufferBridge>) getBackIndex;
-  late final int Function(dffi.Pointer<CoreCommandBuffer>) getCommandCount;
-  late final dffi.Pointer<DartRenderCommand> Function(
-    dffi.Pointer<CoreCommandBuffer>,
-  ) getCommandsPointer;
-  late final int Function(dffi.Pointer<MalphasDoubleBufferBridge>)
-      getCommandsWritten;
-  late final dffi.Pointer<TextPayload> Function(dffi.Pointer<DartRenderCommand>)
-      getTextPayloadPointer;
-
-  // Telemetry getters for MALPHAS REINFORCED v2.2 Phase 5.
-  late final int Function() getVmTickMicros;
-  late final int Function() getPulseLatencyMicros;
-  late final int Function() getHitTestsCount;
-  late final int Function() getCommandsGeneratedCount;
-
-  // Safe Arena setup helpers (Rust holds the write lock).
-  late final int Function(int) setEntitiesCount;
-  late final int Function(int, dffi.Pointer<dffi.Uint8>, int) writeArenaBytes;
-  late final int Function(
-    int entityId,
-    int commandType,
-    int layer,
-    double x,
-    double y,
-    double width,
-    double height,
-    int colorRgba,
-    double speedX,
-    double speedY,
-    double minX,
-    double maxX,
-    double minY,
-    double maxY,
-    int strOffset,
-  ) setEntity;
-
-  dffi.Pointer<MalphasDoubleBufferBridge>? _doubleBufferBridge = dffi.nullptr;
-  dffi.Pointer<CoreCommandBuffer>? _bufferAPtr = dffi.nullptr;
-  dffi.Pointer<CoreCommandBuffer>? _bufferBPtr = dffi.nullptr;
-  dffi.Pointer<dffi.Void>? _arena = dffi.nullptr;
-
-  bool isNativeAvailable = false;
-  SnapshotCommandBuffer? _simulatedBuffer;
-
-  ui.Image? fontAtlasImage;
-
-  static void cleanupTempLibraries() {
-    try {
-      final workspace = Directory.current.path;
-      final motorsDir = Directory('$workspace/motors');
-      if (motorsDir.existsSync()) {
-        for (final file in motorsDir.listSync()) {
-          if (file is File) {
-            final name = file.uri.pathSegments.last;
-            if (name.startsWith('malphas_core_temp_') &&
-                (name.endsWith('.dll') ||
-                    name.endsWith('.so') ||
-                    name.endsWith('.dylib'))) {
-              try {
-                file.deleteSync();
-              } catch (_) {
-                // File is locked by the running process; skip it.
-              }
-            }
-          }
-        }
-      }
-    } catch (_) {
-      // Silent catch.
-    }
-  }
-
   MalphasBindings._internal() {
-    _initializeBridge();
+    _loadLibrary();
   }
 
-  void _initializeBridge() {
-    try {
-      _nativeLib = _openNativeLibrary(null);
-      _bindAllFunctions();
-      _initializeSharedMemory();
-      isNativeAvailable = true;
-    } catch (e, stack) {
-      isNativeAvailable = false;
-      _simulatedBuffer = SnapshotCommandBuffer();
-      debugPrint('Error initializing Malphas native FFI bridge: $e\n$stack');
-    }
-  }
+  static const int _bridgeSize = 64;
+  static const int _commandSize = 24;
 
-  dffi.DynamicLibrary _openNativeLibrary(String? explicitSourcePath) {
-    final workspace = Directory.current.path;
-    final motorsDir = Directory('$workspace/motors');
-    if (!motorsDir.existsSync()) {
-      motorsDir.createSync(recursive: true);
-    }
+  DynamicLibrary? _lib;
+  Pointer<MalphasDoubleBufferBridge>? _bridge;
+  Pointer<DartRenderCommand>? _bufferA;
+  Pointer<DartRenderCommand>? _bufferB;
+  int _maxCommands = 0;
 
-    cleanupTempLibraries();
+  bool _nativeAvailable = false;
+  bool get isNativeAvailable => _nativeAvailable;
 
-    String originalName;
-    String ext;
-    if (Platform.isWindows) {
-      originalName = 'malphas_core.dll';
-      ext = '.dll';
-    } else if (Platform.isMacOS) {
-      originalName = 'libmalphas_core.dylib';
-      ext = '.dylib';
-    } else {
-      originalName = 'libmalphas_core.so';
-      ext = '.so';
-    }
+  Pointer<MalphasDoubleBufferBridge>? get bridge => _bridge;
 
-    File originalFile;
-    if (explicitSourcePath != null) {
-      originalFile = File(explicitSourcePath);
-      if (!originalFile.existsSync()) {
-        throw Exception(
-          'Explicit native library not found: $explicitSourcePath',
-        );
-      }
-    } else {
-      originalFile = File('$workspace/$originalName');
-      if (!originalFile.existsSync()) {
-        originalFile = File(
-          '$workspace/malphas_core/target/release/$originalName',
-        );
-      }
-      if (!originalFile.existsSync()) {
-        // Let DynamicLibrary.open try the platform search path.
-        return dffi.DynamicLibrary.open(originalName);
-      }
-    }
-
-    final tempPath =
-        '${motorsDir.path}/malphas_core_temp_${DateTime.now().millisecondsSinceEpoch}$ext';
-    originalFile.copySync(tempPath);
-    return dffi.DynamicLibrary.open(tempPath);
-  }
-
-  void _bindAllFunctions() {
-    initEngine = _nativeLib
-        .lookup<
-            dffi.NativeFunction<
-                dffi.Int32 Function(
-                  dffi.Pointer<MalphasDoubleBufferBridge>,
-                  dffi.Pointer<dffi.Void>,
-                  dffi.Uint32,
-                  dffi.Uint32,
-                )>>('init_engine')
-        .asFunction();
-    shutdownEngine = _nativeLib
-        .lookup<dffi.NativeFunction<dffi.Int32 Function()>>('shutdown_engine')
-        .asFunction();
-    _pauseEngine = _nativeLib
-        .lookup<dffi.NativeFunction<dffi.Int32 Function(dffi.Int32)>>(
-          'pause_engine',
-        )
-        .asFunction();
-    processInputEvent = _nativeLib
-        .lookup<
-            dffi.NativeFunction<
-                dffi.Int32 Function(
-                    dffi.Int32, dffi.Float, dffi.Float)>>('process_input_event')
-        .asFunction();
-    triggerEnginePulse = _nativeLib
-        .lookup<dffi.NativeFunction<dffi.Int32 Function()>>(
-          'trigger_engine_pulse',
-        )
-        .asFunction();
-    processEngineTick = _nativeLib
-        .lookup<dffi.NativeFunction<dffi.Int32 Function(dffi.Uint64)>>(
-          'process_engine_tick',
-        )
-        .asFunction();
-    loadResourcePack = _nativeLib
-        .lookup<
-                dffi
-                .NativeFunction<dffi.Int32 Function(dffi.Pointer<ffi.Utf8>)>>(
-            'load_resource_pack')
-        .asFunction();
-    malphasAlloc = _nativeLib
-        .lookup<
-            dffi.NativeFunction<
-                dffi.Pointer<dffi.Uint8> Function(
-                    dffi.IntPtr)>>('malphas_alloc')
-        .asFunction();
-    malphasFree = _nativeLib
-        .lookup<
-            dffi.NativeFunction<
-                dffi.Void Function(
-                    dffi.Pointer<dffi.Uint8>, dffi.IntPtr)>>('malphas_free')
-        .asFunction();
-    loadResourcePackRaw = _nativeLib
-        .lookup<
-            dffi.NativeFunction<
-                dffi.Int32 Function(dffi.Pointer<dffi.Uint8>,
-                    dffi.Uint32)>>('load_resource_pack_raw')
-        .asFunction();
-    verifyBinaryIntegrity = _nativeLib
-        .lookup<
-            dffi.NativeFunction<
-                dffi.Int32 Function(dffi.Pointer<ffi.Utf8>,
-                    dffi.Pointer<ffi.Utf8>)>>('verify_binary_integrity')
-        .asFunction();
-    verifyEngineSignature = _nativeLib
-        .lookup<
-            dffi.NativeFunction<
-                dffi.Int32 Function(
-                  dffi.Pointer<ffi.Utf8>,
-                  dffi.Pointer<ffi.Utf8>,
-                  dffi.Pointer<ffi.Utf8>,
-                )>>('verify_engine_signature')
-        .asFunction();
-    extractZipPackage = _nativeLib
-        .lookup<
-            dffi.NativeFunction<
-                dffi.Int32 Function(dffi.Pointer<ffi.Utf8>,
-                    dffi.Pointer<ffi.Utf8>)>>('extract_zip_package')
-        .asFunction();
-
-    getBufferAPtr = _nativeLib
-        .lookup<
-            dffi.NativeFunction<
-                dffi.Pointer<CoreCommandBuffer> Function(
-                  dffi.Pointer<MalphasDoubleBufferBridge>,
-                )>>('get_buffer_a_ptr')
-        .asFunction();
-    getBufferBPtr = _nativeLib
-        .lookup<
-            dffi.NativeFunction<
-                dffi.Pointer<CoreCommandBuffer> Function(
-                  dffi.Pointer<MalphasDoubleBufferBridge>,
-                )>>('get_buffer_b_ptr')
-        .asFunction();
-    getBackIndex = _nativeLib
-        .lookup<
-            dffi.NativeFunction<
-                dffi.Uint8 Function(
-                    dffi.Pointer<MalphasDoubleBufferBridge>)>>('get_back_index')
-        .asFunction();
-    getCommandCount = _nativeLib
-        .lookup<
-            dffi.NativeFunction<
-                dffi.Uint32 Function(
-                    dffi.Pointer<CoreCommandBuffer>)>>('get_command_count')
-        .asFunction();
-    getCommandsPointer = _nativeLib
-        .lookup<
-            dffi.NativeFunction<
-                dffi.Pointer<DartRenderCommand> Function(
-                  dffi.Pointer<CoreCommandBuffer>,
-                )>>('get_commands_pointer')
-        .asFunction();
-    getCommandsWritten = _nativeLib
-        .lookup<
-                dffi.NativeFunction<
-                    dffi.Uint32 Function(
-                        dffi.Pointer<MalphasDoubleBufferBridge>)>>(
-            'get_commands_written')
-        .asFunction();
-    getTextPayloadPointer = _nativeLib
-        .lookup<
-                dffi.NativeFunction<
-                    dffi.Pointer<TextPayload> Function(
-                        dffi.Pointer<DartRenderCommand>)>>(
-            'get_text_payload_pointer')
-        .asFunction();
-
-    getVmTickMicros = _nativeLib
-        .lookup<dffi.NativeFunction<dffi.Uint64 Function()>>(
-          'get_vm_tick_micros',
-        )
-        .asFunction();
-    getPulseLatencyMicros = _nativeLib
-        .lookup<dffi.NativeFunction<dffi.Uint64 Function()>>(
-          'get_pulse_latency_micros',
-        )
-        .asFunction();
-    getHitTestsCount = _nativeLib
-        .lookup<dffi.NativeFunction<dffi.Uint64 Function()>>(
-          'get_hit_tests_count',
-        )
-        .asFunction();
-    getCommandsGeneratedCount = _nativeLib
-        .lookup<dffi.NativeFunction<dffi.Uint64 Function()>>(
-          'get_commands_generated_count',
-        )
-        .asFunction();
-
-    setEntitiesCount = _nativeLib
-        .lookup<dffi.NativeFunction<dffi.Int32 Function(dffi.Uint32)>>(
-          'set_entities_count',
-        )
-        .asFunction();
-    writeArenaBytes = _nativeLib
-        .lookup<
-            dffi.NativeFunction<
-                dffi.Int32 Function(
-                  dffi.Uint32,
-                  dffi.Pointer<dffi.Uint8>,
-                  dffi.Uint32,
-                )>>('write_arena_bytes')
-        .asFunction();
-    setEntity = _nativeLib
-        .lookup<
-            dffi.NativeFunction<
-                dffi.Int32 Function(
-                  dffi.Uint32, // entity_id
-                  dffi.Uint8, // command_type
-                  dffi.Uint8, // layer
-                  dffi.Float, // x
-                  dffi.Float, // y
-                  dffi.Float, // width
-                  dffi.Float, // height
-                  dffi.Uint32, // color_rgba
-                  dffi.Float, // speed_x
-                  dffi.Float, // speed_y
-                  dffi.Float, // min_x
-                  dffi.Float, // max_x
-                  dffi.Float, // min_y
-                  dffi.Float, // max_y
-                  dffi.Uint32, // str_offset
-                )>>('set_entity')
-        .asFunction();
-  }
-
-  void _initializeSharedMemory() {
-    // Allocate the bridge and command arrays through the Rust allocator so we
-    // are guaranteed 16-byte alignment on all architectures.
-    final bridgeSize = dffi.sizeOf<MalphasDoubleBufferBridge>();
-    _doubleBufferBridge = malphasAlloc(
-      bridgeSize,
-    ).cast<MalphasDoubleBufferBridge>();
-    if (_doubleBufferBridge == dffi.nullptr) {
-      throw Exception('Failed to allocate double-buffer bridge');
-    }
-
-    final commandBufferSize =
-        maxCommandBufferCapacity * dffi.sizeOf<DartRenderCommand>();
-    final commandsA = malphasAlloc(commandBufferSize).cast<DartRenderCommand>();
-    final commandsB = malphasAlloc(commandBufferSize).cast<DartRenderCommand>();
-    if (commandsA == dffi.nullptr || commandsB == dffi.nullptr) {
-      throw Exception('Failed to allocate command buffers');
-    }
-
-    _bufferAPtr = getBufferAPtr(_doubleBufferBridge!);
-    _bufferBPtr = getBufferBPtr(_doubleBufferBridge!);
-
-    _doubleBufferBridge!.ref.atomicBackIndex = 0;
-    _doubleBufferBridge!.ref.commandsWritten = 0;
-
-    _bufferAPtr!.ref.commandCount = 0;
-    _bufferAPtr!.ref.commands = commandsA;
-
-    _bufferBPtr!.ref.commandCount = 0;
-    _bufferBPtr!.ref.commands = commandsB;
-
-    _arena = malphasAlloc(_arenaSize).cast<dffi.Void>();
-    if (_arena == dffi.nullptr) {
-      throw Exception('Failed to allocate arena');
-    }
-
-    final initResult = initEngine(
-      _doubleBufferBridge!,
-      _arena!,
-      _arenaSize,
-      maxCommandBufferCapacity,
-    );
-    _checkFfiResult(initResult, 'init_engine');
-  }
-
-  void _checkFfiResult(int result, String operation) {
-    if (result < 0) {
-      throw Exception('FFI operation "$operation" failed with code $result');
-    }
-  }
-
-  /// Hot-swaps the native library by path.  This shuts the engine down,
-  /// releases shared-memory handles, deletes any unlocked temp binaries, copies
-  /// the requested binary to a unique filename (bypassing the Dart/Windows DLL
-  /// cache), rebinds every FFI function, and reinitialises shared memory.
-  void reloadNativeLibrary(String sourcePath) {
-    _checkFfiResult(shutdownEngine(), 'shutdown_engine');
-    _freeSharedMemory();
-    cleanupTempLibraries();
-
-    _nativeLib = _openNativeLibrary(sourcePath);
-    _bindAllFunctions();
-    _initializeSharedMemory();
-  }
-
-  /// Returns the buffer that Flutter should read from (the *front* buffer).
-  /// The Rust engine writes into the back buffer selected by `atomicBackIndex`;
-  /// the opposite buffer is therefore immutable for the duration of this frame.
-  dffi.Pointer<CoreCommandBuffer>? get commandBuffer {
-    if (!isNativeAvailable) {
-      return _simulatedBuffer?.buffer ?? dffi.nullptr;
-    }
-    if (_doubleBufferBridge == null || _doubleBufferBridge == dffi.nullptr) {
-      return dffi.nullptr;
-    }
-    final backIndex = getBackIndex(_doubleBufferBridge!);
-    return (backIndex == 0) ? _bufferBPtr : _bufferAPtr;
-  }
-
-  dffi.Pointer<dffi.Void> get arena => _arena ?? dffi.nullptr;
-  int get arenaSize => _arenaSize;
-  SnapshotCommandBuffer? get simulatedBuffer => _simulatedBuffer;
-
-  void checkAndLoadFontAtlas() {
-    if (!isNativeAvailable || _arena == null || _arena == dffi.nullptr) return;
-
-    final arenaUint32 = _arena!.cast<dffi.Uint32>();
-    final packSize = arenaUint32[ArenaLayout.staticResourcesSize ~/ 4];
-    if (packSize == 0) {
-      fontAtlasImage = null;
-      return;
-    }
-
-    final atlasOffset = arenaUint32[ArenaLayout.fontAtlasOffset ~/ 4];
-    const int atlasWidth = 512;
-    const int atlasHeight = 512;
-    const int atlasBytes = atlasWidth * atlasHeight;
-
-    // Validate that the atlas region is fully inside the Arena before reading
-    // or passing it to the decoder.
-    if (atlasOffset < 0 ||
-        atlasOffset > _arenaSize - atlasBytes ||
-        packSize < 0 ||
-        packSize > _arenaSize) {
-      debugPrint(
-        'Font atlas region out of bounds: '
-        'offset=$atlasOffset, packSize=$packSize, arenaSize=$_arenaSize',
-      );
-      fontAtlasImage = null;
-      return;
-    }
-
-    final rawA8 = _arena!.cast<dffi.Uint8>() + atlasOffset;
-    final Uint8List rgbaBytes = Uint8List(atlasBytes * 4);
-
-    for (int i = 0; i < atlasBytes; i++) {
-      final alpha = rawA8[i];
-      rgbaBytes[i * 4] = 255;
-      rgbaBytes[i * 4 + 1] = 255;
-      rgbaBytes[i * 4 + 2] = 255;
-      rgbaBytes[i * 4 + 3] = alpha;
-    }
-
-    ui.decodeImageFromPixels(
-      rgbaBytes,
-      atlasWidth,
-      atlasHeight,
-      ui.PixelFormat.rgba8888,
-      (ui.Image img) {
-        fontAtlasImage = img;
-        notifyListeners();
-      },
-    );
-  }
-
-  /// Reads the current telemetry counters from the native engine.
+  /// Reloads the native core from a new binary path.
   ///
-  /// Returns a zero-filled snapshot when the native library is unavailable,
-  /// so callers can safely call this every frame without branching.
-  TelemetrySnapshot readTelemetry() {
-    if (!isNativeAvailable) {
-      return const TelemetrySnapshot(
-        vmTickMicros: 0,
-        pulseLatencyMicros: 0,
-        hitTestsCount: 0,
-        commandsGeneratedCount: 0,
-      );
-    }
-    return TelemetrySnapshot(
-      vmTickMicros: getVmTickMicros(),
-      pulseLatencyMicros: getPulseLatencyMicros(),
-      hitTestsCount: getHitTestsCount(),
-      commandsGeneratedCount: getCommandsGeneratedCount(),
-    );
-  }
-
-  int tick() {
-    int count = 0;
-    if (!isNativeAvailable) {
-      if (_simulatedBuffer != null) {
-        _simulatedBuffer!.executeSimulation();
-        count = _simulatedBuffer!.buffer!.ref.commandCount;
-      }
-    } else {
-      // Single-clock sync: Flutter's Ticker is the only clock source.  Wake
-      // the Rust simulation thread once per vsync; it will process the tick
-      // asynchronously on its own core while we read the latest front buffer.
-      _checkFfiResult(triggerEnginePulse(), 'trigger_engine_pulse');
-      final backIndex = getBackIndex(_doubleBufferBridge!);
-      final frontBuffer = (backIndex == 0) ? _bufferBPtr! : _bufferAPtr!;
-      count = getCommandCount(frontBuffer);
-    }
-    notifyListeners();
-    return count;
-  }
-
-  int loadPack(String path) {
-    if (!isNativeAvailable) return -1;
-    final file = File(path);
-    if (!file.existsSync()) return -2;
-
-    final bytes = file.readAsBytesSync();
-    final size = bytes.length;
-
-    final ptr = malphasAlloc(size);
-    if (ptr == dffi.nullptr) return -3;
-
+  /// This is used by the engine manager hot-swap flow.  The old library handle
+  /// is intentionally leaked because Dart's `DynamicLibrary` does not expose a
+  /// close operation; the new handle becomes active immediately.
+  void reloadNativeLibrary(String path) {
     try {
-      ptr.asTypedList(size).setAll(0, bytes);
-      final res = loadResourcePackRaw(ptr, size);
-      _checkFfiResult(res, 'load_resource_pack_raw');
-      checkAndLoadFontAtlas();
-      return res;
-    } finally {
-      malphasFree(ptr, size);
+      final newLib = DynamicLibrary.open(path);
+      _lib = newLib;
+      _nativeAvailable = true;
+      _bindFunctions();
+      debugPrint('MalphasBindings: hot-swapped native library from $path');
+    } catch (e) {
+      debugPrint('MalphasBindings: failed to hot-swap native library: $e');
     }
   }
 
-  int verifyBinary(String filepath, String expectedSha) {
-    if (!isNativeAvailable) return 0;
-    final fPtr = filepath.toNativeUtf8();
-    final sPtr = expectedSha.toNativeUtf8();
-    try {
-      return verifyBinaryIntegrity(fPtr, sPtr);
-    } finally {
-      ffi.calloc.free(fPtr);
-      ffi.calloc.free(sPtr);
-    }
-  }
-
-  int verifyEngine(String filepath, String signatureHex, String publicKeyHex) {
-    if (!isNativeAvailable) return 0;
-    final fPtr = filepath.toNativeUtf8();
-    final sPtr = signatureHex.toNativeUtf8();
-    final pPtr = publicKeyHex.toNativeUtf8();
-    try {
-      return verifyEngineSignature(fPtr, sPtr, pPtr);
-    } finally {
-      ffi.calloc.free(fPtr);
-      ffi.calloc.free(sPtr);
-      ffi.calloc.free(pPtr);
-    }
-  }
-
-  int extractZip(String zipPath, String outputDir) {
-    if (!isNativeAvailable) return 0;
-    final zPtr = zipPath.toNativeUtf8();
-    final oPtr = outputDir.toNativeUtf8();
-    try {
-      return extractZipPackage(zPtr, oPtr);
-    } finally {
-      ffi.calloc.free(zPtr);
-      ffi.calloc.free(oPtr);
-    }
-  }
-
-  int pauseEngine(bool paused) => _pauseEngine(paused ? 1 : 0);
-
-  void sendInputEvent(int eventType, double x, double y) {
-    _checkFfiResult(processInputEvent(eventType, x, y), 'process_input_event');
-  }
-
-  void setEntityCount(int count) {
-    _checkFfiResult(setEntitiesCount(count), 'set_entities_count');
-  }
-
-  /// Safe entity initialisation.  Rust holds the Arena write lock for the
-  /// duration of the call, so it cannot race the simulation tick.
-  void configureEntity({
-    required int entityId,
-    required int commandType,
-    required int layer,
-    required double x,
-    required double y,
-    required double width,
-    required double height,
-    required int colorRgba,
-    required double speedX,
-    required double speedY,
-    required double minX,
-    required double maxX,
-    required double minY,
-    required double maxY,
-    int strOffset = 0,
-  }) {
-    final result = setEntity(
-      entityId,
-      commandType,
-      layer,
-      x,
-      y,
-      width,
-      height,
-      colorRgba,
-      speedX,
-      speedY,
-      minX,
-      maxX,
-      minY,
-      maxY,
-      strOffset,
-    );
-    _checkFfiResult(result, 'set_entity');
-  }
-
-  /// Safe Arena byte write.  The engine must be paused while performing
-  /// multi-write setup to avoid torn state.
-  void writeArenaString(int offset, Uint8List bytes) {
-    if (!isNativeAvailable) return;
-    final ptr = ffi.calloc<dffi.Uint8>(bytes.length);
-    try {
-      ptr.asTypedList(bytes.length).setAll(0, bytes);
-      _checkFfiResult(
-        writeArenaBytes(offset, ptr, bytes.length),
-        'write_arena_bytes',
-      );
-    } finally {
-      ffi.calloc.free(ptr);
-    }
-  }
-
-  /// Writes a [TextPayload] header followed by the string bytes into the Arena.
-  /// The written offset is the pointer passed to `setEntity` as `strOffset`.
-  void writeArenaText(
-    int offset,
-    double x,
-    double y,
-    double fontSize,
-    Uint8List bytes,
-  ) {
-    if (!isNativeAvailable) return;
-    final payloadSize = dffi.sizeOf<TextPayload>();
-    final totalSize = payloadSize + bytes.length;
-    final ptr = ffi.calloc<dffi.Uint8>(totalSize);
-    try {
-      final payload = ptr.cast<TextPayload>().ref;
-      payload.x = x;
-      payload.y = y;
-      payload.fontSize = fontSize;
-      final stringPtr = ptr + payloadSize;
-      stringPtr.asTypedList(bytes.length).setAll(0, bytes);
-      _checkFfiResult(
-        writeArenaBytes(offset, ptr, totalSize),
-        'write_arena_bytes',
-      );
-    } finally {
-      ffi.calloc.free(ptr);
-    }
-  }
-
-  /// Frees every shared-memory buffer through the Rust allocator.  Must only
-  /// be called after `shutdownEngine()` has returned and the simulation thread
-  /// has exited, otherwise the engine could dereference freed memory.
-  void _freeSharedMemory() {
-    if (_doubleBufferBridge != null && _doubleBufferBridge != dffi.nullptr) {
-      if (_bufferAPtr != null && _bufferAPtr != dffi.nullptr) {
-        final commandsA = getCommandsPointer(_bufferAPtr!);
-        if (commandsA != dffi.nullptr) {
-          malphasFree(
-            commandsA.cast(),
-            maxCommandBufferCapacity * dffi.sizeOf<DartRenderCommand>(),
-          );
-        }
-      }
-      if (_bufferBPtr != null && _bufferBPtr != dffi.nullptr) {
-        final commandsB = getCommandsPointer(_bufferBPtr!);
-        if (commandsB != dffi.nullptr) {
-          malphasFree(
-            commandsB.cast(),
-            maxCommandBufferCapacity * dffi.sizeOf<DartRenderCommand>(),
-          );
-        }
-      }
-      malphasFree(
-        _doubleBufferBridge!.cast(),
-        dffi.sizeOf<MalphasDoubleBufferBridge>(),
-      );
-    }
-    if (_arena != null && _arena != dffi.nullptr) {
-      malphasFree(_arena!.cast<dffi.Uint8>(), _arenaSize);
-    }
-    _doubleBufferBridge = dffi.nullptr;
-    _bufferAPtr = dffi.nullptr;
-    _bufferBPtr = dffi.nullptr;
-    _arena = dffi.nullptr;
-  }
-
-  @override
-  void dispose() {
-    if (isNativeAvailable) {
+  // ---------------------------------------------------------------------------
+  // Library loading.
+  // ---------------------------------------------------------------------------
+  void _loadLibrary() {
+    final candidates = _libraryCandidates();
+    for (final path in candidates) {
       try {
-        final result = shutdownEngine();
-        if (result >= 0) {
-          _freeSharedMemory();
-        } else {
-          debugPrint(
-            'MalphasBindings.dispose: shutdown_engine failed with code $result; '
-            'shared memory not freed',
-          );
-        }
+        _lib = DynamicLibrary.open(path);
+        _nativeAvailable = true;
+        _bindFunctions();
+        debugPrint('MalphasBindings: loaded native library from $path');
+        return;
       } catch (e) {
-        debugPrint('MalphasBindings.dispose error: $e');
+        debugPrint('MalphasBindings: failed to load $path ($e)');
       }
     }
-    _simulatedBuffer?.dispose();
-    _simulatedBuffer = null;
-    fontAtlasImage?.dispose();
-    fontAtlasImage = null;
-    super.dispose();
-  }
-}
-
-/// Fallback command buffer used when the native library cannot be loaded.
-class SnapshotCommandBuffer {
-  dffi.Pointer<CoreCommandBuffer>? buffer;
-
-  SnapshotCommandBuffer() {
-    buffer = ffi.calloc<CoreCommandBuffer>();
-    buffer!.ref.commandCount = 0;
-    buffer!.ref.commands = ffi.calloc<DartRenderCommand>(2);
+    _nativeAvailable = false;
+    debugPrint('MalphasBindings: no native library available');
   }
 
-  void dispose() {
-    if (buffer != null) {
-      final commands = buffer!.ref.commands;
-      if (commands != dffi.nullptr) {
-        ffi.calloc.free(commands);
-      }
-      ffi.calloc.free(buffer!);
-      buffer = null;
+  List<String> _libraryCandidates() {
+    final String binaryName;
+    if (Platform.isWindows) {
+      binaryName = 'malphas_core.dll';
+    } else if (Platform.isMacOS) {
+      binaryName = 'libmalphas_core.dylib';
+    } else if (Platform.isAndroid) {
+      // On Android the library is bundled under jniLibs and loaded by name.
+      return ['libmalphas_core.so'];
+    } else if (Platform.isIOS) {
+      // iOS frameworks are loaded by name.
+      return ['malphas_core.framework/malphas_core', 'libmalphas_core.dylib'];
+    } else {
+      binaryName = 'libmalphas_core.so';
     }
+
+    final workspace = _findWorkspaceRoot();
+    return [
+      if (workspace != null) '$workspace/flutter_app/motors/$binaryName',
+      if (workspace != null) '$workspace/target/release/$binaryName',
+      if (workspace != null)
+        '$workspace/malphas_core/target/release/$binaryName',
+      if (workspace != null) '$workspace/$binaryName',
+      binaryName,
+    ];
   }
 
-  void executeSimulation() {
-    buffer!.ref.commandCount = 1;
-    buffer!.ref.commands[0].commandType = 1;
-    buffer!.ref.commands[0].x = 250;
-    buffer!.ref.commands[0].y = 250;
-    buffer!.ref.commands[0].width = 500;
-    buffer!.ref.commands[0].height = 500;
-    buffer!.ref.commands[0].colorRgba = 0xFF1A1B1C;
+  String? _findWorkspaceRoot() {
+    var current = Directory.current;
+    for (var i = 0; i < 8; i++) {
+      final cargoToml = File('${current.path}/Cargo.toml');
+      if (cargoToml.existsSync()) {
+        try {
+          final contents = cargoToml.readAsStringSync();
+          if (contents.contains('[workspace]')) return current.path;
+        } catch (_) {}
+      }
+      final parent = current.parent;
+      if (parent.path == current.path) break;
+      current = parent;
+    }
+    return null;
   }
+
+  // ---------------------------------------------------------------------------
+  // Native function bindings.
+  // ---------------------------------------------------------------------------
+  late final _InitEngine _initEngine;
+  late final _ShutdownEngine _shutdownEngine;
+  late final _PauseEngine _pauseEngine;
+  late final _TriggerEnginePulse _triggerEnginePulse;
+  late final _LoadMsp _loadMsp;
+  late final _RefreshMsp _refreshMsp;
+  late final _LoadSystem _loadSystem;
+  late final _GetBufferCommandCount _getBufferACommandCount;
+  late final _GetBufferCommandCount _getBufferBCommandCount;
+  late final _GetBackIndex _getBackIndex;
+  late final _GetCommandsWritten _getCommandsWritten;
+  late final _GetMspEntityCount _getMspEntityCount;
+  late final _GetLoadedSystemCount _getLoadedSystemCount;
+  late final _MalphasAlloc _malphasAlloc;
+  late final _MalphasFree _malphasFree;
+  late final _VerifyEngineSignature _verifyEngineSignature;
+  late final _VerifyBinaryIntegrity _verifyBinaryIntegrity;
+  late final _ProcessInputEvent _processInputEvent;
+  late final _GetU64 _getVmTickMicros;
+  late final _GetU64 _getPulseLatencyMicros;
+  late final _GetU64 _getHitTestsCount;
+  late final _GetU64 _getCommandsGeneratedCount;
+
+  void _bindFunctions() {
+    if (_lib == null) return;
+    final lib = _lib!;
+
+    _initEngine =
+        lib.lookupFunction<_InitEngineNative, _InitEngine>('init_engine');
+    _shutdownEngine =
+        lib.lookupFunction<_ShutdownEngineNative, _ShutdownEngine>(
+            'shutdown_engine');
+    _pauseEngine =
+        lib.lookupFunction<_PauseEngineNative, _PauseEngine>('pause_engine');
+    _triggerEnginePulse =
+        lib.lookupFunction<_TriggerEnginePulseNative, _TriggerEnginePulse>(
+            'trigger_engine_pulse');
+    _loadMsp = lib.lookupFunction<_LoadMspNative, _LoadMsp>('load_msp');
+    _refreshMsp = lib.lookupFunction<_LoadMspNative, _LoadMsp>('refresh_msp');
+    _loadSystem =
+        lib.lookupFunction<_LoadMspNative, _LoadSystem>('load_system');
+    _getBufferACommandCount = lib.lookupFunction<_GetBufferCommandCountNative,
+        _GetBufferCommandCount>('get_buffer_a_command_count');
+    _getBufferBCommandCount = lib.lookupFunction<_GetBufferCommandCountNative,
+        _GetBufferCommandCount>('get_buffer_b_command_count');
+    _getBackIndex = lib
+        .lookupFunction<_GetBackIndexNative, _GetBackIndex>('get_back_index');
+    _getCommandsWritten =
+        lib.lookupFunction<_GetCommandsWrittenNative, _GetCommandsWritten>(
+            'get_commands_written');
+    _getMspEntityCount =
+        lib.lookupFunction<_GetMspEntityCountNative, _GetMspEntityCount>(
+            'get_msp_entity_count');
+    _getLoadedSystemCount =
+        lib.lookupFunction<_GetLoadedSystemCountNative, _GetLoadedSystemCount>(
+            'get_loaded_system_count');
+    _malphasAlloc =
+        lib.lookupFunction<_MalphasAllocNative, _MalphasAlloc>('malphas_alloc');
+    _malphasFree =
+        lib.lookupFunction<_MalphasFreeNative, _MalphasFree>('malphas_free');
+    _verifyEngineSignature = lib.lookupFunction<_VerifyEngineSignatureNative,
+        _VerifyEngineSignature>('verify_engine_signature');
+    _verifyBinaryIntegrity = lib.lookupFunction<_VerifyBinaryIntegrityNative,
+        _VerifyBinaryIntegrity>('verify_binary_integrity');
+    _processInputEvent =
+        lib.lookupFunction<_ProcessInputEventNative, _ProcessInputEvent>(
+            'process_input_event');
+    _getVmTickMicros =
+        lib.lookupFunction<_GetU64Native, _GetU64>('get_vm_tick_micros');
+    _getPulseLatencyMicros =
+        lib.lookupFunction<_GetU64Native, _GetU64>('get_pulse_latency_micros');
+    _getHitTestsCount =
+        lib.lookupFunction<_GetU64Native, _GetU64>('get_hit_tests_count');
+    _getCommandsGeneratedCount = lib
+        .lookupFunction<_GetU64Native, _GetU64>('get_commands_generated_count');
+  }
+
+  // ---------------------------------------------------------------------------
+  // Engine lifecycle.
+  // ---------------------------------------------------------------------------
+  /// Initialises the engine with a freshly allocated 64-byte aligned bridge and
+  /// two command buffers.  Returns `0` on success or a negative error code.
+  int initEngine({int maxCommands = 2048}) {
+    if (!_nativeAvailable || _lib == null) return -1;
+
+    shutdownEngine();
+
+    final bridgePtr = _malphasAlloc(_bridgeSize);
+    if (bridgePtr == nullptr) return -1;
+    _bridge = bridgePtr.cast<MalphasDoubleBufferBridge>();
+
+    final commandBytes = maxCommands * _commandSize;
+    final bufferAPtr = _malphasAlloc(commandBytes);
+    final bufferBPtr = _malphasAlloc(commandBytes);
+    if (bufferAPtr == nullptr || bufferBPtr == nullptr) {
+      shutdownEngine();
+      return -1;
+    }
+    _bufferA = bufferAPtr.cast<DartRenderCommand>();
+    _bufferB = bufferBPtr.cast<DartRenderCommand>();
+    _maxCommands = maxCommands;
+
+    final bridge = _bridge!.ref;
+    bridge.bufferACommandCount = 0;
+    bridge.bufferBCommandCount = 0;
+    bridge.bufferACommands = _bufferA!;
+    bridge.bufferBCommands = _bufferB!;
+    bridge.atomicBackIndex = 0;
+    bridge.commandsWritten = 0;
+
+    return _initEngine(_bridge!, maxCommands);
+  }
+
+  /// Tears down the engine thread and releases the bridge/command buffers.
+  int shutdownEngine() {
+    if (!_nativeAvailable || _bridge == null) return 0;
+    final result = _shutdownEngine();
+
+    if (_bufferA != null) {
+      _malphasFree(_bufferA!.cast<Uint8>(), _maxCommands * _commandSize);
+      _bufferA = null;
+    }
+    if (_bufferB != null) {
+      _malphasFree(_bufferB!.cast<Uint8>(), _maxCommands * _commandSize);
+      _bufferB = null;
+    }
+    if (_bridge != null) {
+      _malphasFree(_bridge!.cast<Uint8>(), _bridgeSize);
+      _bridge = null;
+    }
+    _maxCommands = 0;
+    return result;
+  }
+
+  int pauseEngine(bool paused) =>
+      _nativeAvailable ? _pauseEngine(paused ? 1 : 0) : 0;
+
+  /// Sends one vsync pulse to the engine worker thread.
+  int triggerEnginePulse() {
+    if (!_nativeAvailable) return -1;
+    return _triggerEnginePulse();
+  }
+
+  // ---------------------------------------------------------------------------
+  // MSP / system loading.
+  // ---------------------------------------------------------------------------
+  int loadMsp(String path) {
+    if (!_nativeAvailable) return -1;
+    return using((arena) {
+      final cPath = path.toNativeUtf8(allocator: arena);
+      return _loadMsp(cPath);
+    });
+  }
+
+  /// Hot-swaps the mapped MSP without unloading loaded `.mxc` systems.
+  int refreshMsp(String path) {
+    if (!_nativeAvailable) return -1;
+    return using((arena) {
+      final cPath = path.toNativeUtf8(allocator: arena);
+      return _refreshMsp(cPath);
+    });
+  }
+
+  int loadSystem(String path) {
+    if (!_nativeAvailable) return -1;
+    return using((arena) {
+      final cPath = path.toNativeUtf8(allocator: arena);
+      return _loadSystem(cPath);
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Front buffer accessors used by PrimitiveCanvas (zero-copy).
+  // ---------------------------------------------------------------------------
+  Pointer<DartRenderCommand> get frontCommands {
+    if (_bridge == null) return nullptr;
+    final backIndex = _getBackIndex(_bridge!);
+    return backIndex == 0 ? _bufferB! : _bufferA!;
+  }
+
+  int get frontCount {
+    if (_bridge == null) return 0;
+    final backIndex = _getBackIndex(_bridge!);
+    return backIndex == 0
+        ? _getBufferBCommandCount(_bridge!)
+        : _getBufferACommandCount(_bridge!);
+  }
+
+  /// Legacy alias for tests that previously read `commandCount`.
+  int get commandCount => frontCount;
+
+  /// Legacy alias for tests that previously read `commandsPointer`.
+  Pointer<DartRenderCommand> get commandsPointer => frontCommands;
+
+  int get commandsWritten =>
+      _bridge == null ? 0 : _getCommandsWritten(_bridge!);
+
+  int get backIndex => _bridge == null ? 0 : _getBackIndex(_bridge!);
+
+  // ---------------------------------------------------------------------------
+  // Aligned allocator.
+  // ---------------------------------------------------------------------------
+  Pointer<Uint8> malphasAlloc(int size) => _malphasAlloc(size);
+  void malphasFree(Pointer<Uint8> ptr, int size) => _malphasFree(ptr, size);
+
+  // ---------------------------------------------------------------------------
+  // Integrity / signatures.
+  // ---------------------------------------------------------------------------
+  int verifyEngineSignature(
+      String path, String signatureHex, String publicKeyHex) {
+    if (!_nativeAvailable) return -1;
+    return using((arena) {
+      final cPath = path.toNativeUtf8(allocator: arena);
+      final cSig = signatureHex.toNativeUtf8(allocator: arena);
+      final cKey = publicKeyHex.toNativeUtf8(allocator: arena);
+      return _verifyEngineSignature(cPath, cSig, cKey);
+    });
+  }
+
+  int verifyBinaryIntegrity(String path, String expectedSha) {
+    if (!_nativeAvailable) return -1;
+    return using((arena) {
+      final cPath = path.toNativeUtf8(allocator: arena);
+      final cSha = expectedSha.toNativeUtf8(allocator: arena);
+      return _verifyBinaryIntegrity(cPath, cSha);
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Input / telemetry.
+  // ---------------------------------------------------------------------------
+  int processInputEvent(int type, double x, double y) {
+    if (!_nativeAvailable) return -1;
+    return _processInputEvent(type, x, y);
+  }
+
+  int get vmTickMicros => _nativeAvailable ? _getVmTickMicros() : 0;
+  int get pulseLatencyMicros => _nativeAvailable ? _getPulseLatencyMicros() : 0;
+  int get hitTestsCount => _nativeAvailable ? _getHitTestsCount() : 0;
+  int get commandsGeneratedCount =>
+      _nativeAvailable ? _getCommandsGeneratedCount() : 0;
+
+  int getMspEntityCount() => _nativeAvailable ? _getMspEntityCount() : 0;
+  int getLoadedSystemCount() => _nativeAvailable ? _getLoadedSystemCount() : 0;
 }
+
+// ---------------------------------------------------------------------------
+// Native / Dart function type definitions.
+// ---------------------------------------------------------------------------
+typedef _InitEngineNative = Int32 Function(
+    Pointer<MalphasDoubleBufferBridge>, Uint32);
+typedef _InitEngine = int Function(Pointer<MalphasDoubleBufferBridge>, int);
+
+typedef _ShutdownEngineNative = Int32 Function();
+typedef _ShutdownEngine = int Function();
+
+typedef _PauseEngineNative = Int32 Function(Int32);
+typedef _PauseEngine = int Function(int);
+
+typedef _TriggerEnginePulseNative = Int32 Function();
+typedef _TriggerEnginePulse = int Function();
+
+typedef _LoadMspNative = Int32 Function(Pointer<Utf8>);
+typedef _LoadMsp = int Function(Pointer<Utf8>);
+typedef _LoadSystem = int Function(Pointer<Utf8>);
+typedef _RefreshMsp = int Function(Pointer<Utf8>);
+
+typedef _GetBufferCommandCountNative = Uint32 Function(
+    Pointer<MalphasDoubleBufferBridge>);
+typedef _GetBufferCommandCount = int Function(
+    Pointer<MalphasDoubleBufferBridge>);
+
+typedef _GetBackIndexNative = Uint8 Function(
+    Pointer<MalphasDoubleBufferBridge>);
+typedef _GetBackIndex = int Function(Pointer<MalphasDoubleBufferBridge>);
+
+typedef _GetCommandsWrittenNative = Uint32 Function(
+    Pointer<MalphasDoubleBufferBridge>);
+typedef _GetCommandsWritten = int Function(Pointer<MalphasDoubleBufferBridge>);
+
+typedef _GetMspEntityCountNative = Uint32 Function();
+typedef _GetMspEntityCount = int Function();
+
+typedef _GetLoadedSystemCountNative = Uint32 Function();
+typedef _GetLoadedSystemCount = int Function();
+
+typedef _MalphasAllocNative = Pointer<Uint8> Function(IntPtr);
+typedef _MalphasAlloc = Pointer<Uint8> Function(int);
+
+typedef _MalphasFreeNative = Void Function(Pointer<Uint8>, IntPtr);
+typedef _MalphasFree = void Function(Pointer<Uint8>, int);
+
+typedef _VerifyEngineSignatureNative = Int32 Function(
+    Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>);
+typedef _VerifyEngineSignature = int Function(
+    Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>);
+
+typedef _VerifyBinaryIntegrityNative = Int32 Function(
+    Pointer<Utf8>, Pointer<Utf8>);
+typedef _VerifyBinaryIntegrity = int Function(Pointer<Utf8>, Pointer<Utf8>);
+
+typedef _ProcessInputEventNative = Int32 Function(Int32, Float, Float);
+typedef _ProcessInputEvent = int Function(int, double, double);
+
+typedef _GetU64Native = Uint64 Function();
+typedef _GetU64 = int Function();

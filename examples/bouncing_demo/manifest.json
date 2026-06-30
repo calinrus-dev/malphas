@@ -1,15 +1,15 @@
 {
   "pack_id": "bouncing_demo",
-  "canvas_width": 1000,
-  "canvas_height": 1000,
-  "objects": [
+  "entities": [
     {
-      "object_id": 1,
-      "properties": {"kind": "rectangle"}
+      "entity_id": 0,
+      "tag_mask": 1,
+      "payload_file": "entity_0.bin"
     },
     {
-      "object_id": 2,
-      "properties": {"kind": "text"}
+      "entity_id": 1,
+      "tag_mask": 2,
+      "payload_file": "entity_1.bin"
     }
   ]
 }

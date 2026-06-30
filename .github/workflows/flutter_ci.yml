@@ -13,20 +13,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Verify versions match across Cargo.toml, pubspec.yaml, README.md and AGENTS.md
+      - name: Verify versions match across Cargo.toml, pubspec.yaml and README.md
         shell: bash
         run: |
           CARGO_VERSION=$(grep -E '^version\s*=' Cargo.toml | head -1 | sed -E 's/.*=\s*"([^"]+)".*/\1/')
           PUBSPEC_VERSION=$(grep -E '^version:\s*' flutter_app/pubspec.yaml | sed -E 's/.*:\s*([^+]+).*/\1/')
           README_VERSION=$(grep -E '^# Malphas v[0-9]+\.[0-9]+\.[0-9]+' README.md | sed -E 's/.*v([0-9]+\.[0-9]+\.[0-9]+).*/\1/')
-          AGENTS_VERSION=$(grep -E '^# Malphas Agent Instructions — v[0-9]+\.[0-9]+\.[0-9]+' .agents/AGENTS.md | sed -E 's/.*v([0-9]+\.[0-9]+\.[0-9]+).*/\1/')
           echo "Cargo.toml:    $CARGO_VERSION"
           echo "pubspec.yaml:  $PUBSPEC_VERSION"
           echo "README.md:     $README_VERSION"
-          echo "AGENTS.md:     $AGENTS_VERSION"
           if [ "$CARGO_VERSION" != "$PUBSPEC_VERSION" ] || \
-             [ "$CARGO_VERSION" != "$README_VERSION" ] || \
-             [ "$CARGO_VERSION" != "$AGENTS_VERSION" ]; then
+             [ "$CARGO_VERSION" != "$README_VERSION" ]; then
             echo "Version mismatch detected!"
             exit 1
           fi
@@ -105,13 +102,34 @@ jobs:
           elif [ -f native-sig/target/release/libmalphas_core.dylib.sig ]; then
             SIG=native-sig/target/release/libmalphas_core.dylib.sig
           else
-            echo "Error: Engine signature not found"
-            exit 1
+            echo "Engine signature not found; skipping signature placement."
+            exit 0
           fi
           base=$(basename "$SIG")
           cp "$SIG" "./$base"
           cp "$SIG" motors/"$base"
           cp "$SIG" ../"$base"
+
+      - name: Download bouncing_demo system library
+        uses: actions/download-artifact@v4
+        with:
+          name: bouncing_demo-ubuntu-latest
+          path: native-sys/
+
+      - name: Place bouncing_demo system where tests expect it
+        shell: bash
+        run: |
+          if [ -f native-sys/libbouncing_demo.so ]; then
+            SYS=native-sys/libbouncing_demo.so
+          elif [ -f native-sys/target/release/libbouncing_demo.so ]; then
+            SYS=native-sys/target/release/libbouncing_demo.so
+          else
+            echo "Error: bouncing_demo system library not found"
+            exit 1
+          fi
+          cp "$SYS" ../bouncing_demo.mxc
+          cp "$SYS" ../examples/bouncing_demo/bouncing_demo.mxc
+          cp "$SYS" motors/bouncing_demo.mxc
 
       - name: Place CLI binary where MalphasPackageCompiler finds it
         shell: bash

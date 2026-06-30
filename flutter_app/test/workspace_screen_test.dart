@@ -17,8 +17,6 @@ void main() {
     AppStatePersistenceService().setDocumentsDirectoryOverride(
       persistenceDir.path,
     );
-    // Start each test with a clean package registry so the auto-load behavior
-    // is deterministic.
     PackageController().reset();
   });
 
@@ -45,7 +43,6 @@ void main() {
     addTearDown(() async {
       await tester.pumpWidget(Container());
     });
-    // Let the async initState auto-load sequence fail and rebuild with the error overlay.
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
     await tester.pump(const Duration(milliseconds: 100));
@@ -89,9 +86,9 @@ void main() {
     await PackageController().init();
 
     final workspace = PackageController().resolveWorkspaceRoot();
-    final mhpFile = File('$workspace/examples/bouncing_demo/bouncing_demo.mhp');
-    if (!mhpFile.existsSync()) {
-      markTestSkipped('bouncing_demo.mhp not found');
+    final mspFile = File('$workspace/examples/bouncing_demo/bouncing_demo.msp');
+    if (!mspFile.existsSync()) {
+      markTestSkipped('bouncing_demo.msp not found');
       return;
     }
 

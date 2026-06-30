@@ -1,300 +1,138 @@
-import 'dart:collection';
-import 'dart:ffi' as dffi;
-import 'dart:ui' as ui;
+import 'dart:ffi' as ffi;
 import 'package:flutter/material.dart';
-import '../ffi/arena_layout.dart';
+import 'package:flutter/scheduler.dart';
+
 import '../ffi/malphas_bindings.dart';
 import '../ffi/types.dart';
-import '../../features/package_manager/package_controller.dart';
-import '../../features/package_manager/models.dart';
 
-/// A pure synchronous rasterizer backed by the native command buffer.
+/// Zero-copy native render target.
 ///
-/// Wrapped in a [RepaintBoundary] so the 120 Hz paint phase is isolated from
-/// the rest of the widget tree and cannot trigger accidental re-layouts.
-class PrimitiveCanvas extends StatelessWidget {
+/// The painter reads [MalphasBindings.frontCommands] directly from the shared
+/// double-buffer bridge on every vsync.  No command list is copied into Dart
+/// memory; the only data moved is the handful of fields read by the GPU-bound
+/// [Canvas] operations.
+class PrimitiveCanvas extends StatefulWidget {
   final MalphasBindings bindings;
-  final Listenable repaintNotifier;
 
   const PrimitiveCanvas({
     super.key,
     required this.bindings,
-    required this.repaintNotifier,
   });
 
   @override
+  State<PrimitiveCanvas> createState() => _PrimitiveCanvasState();
+}
+
+class _PrimitiveCanvasState extends State<PrimitiveCanvas>
+    with SingleTickerProviderStateMixin {
+  late final Ticker _ticker;
+  late final ValueNotifier<int> _frame;
+
+  @override
+  void initState() {
+    super.initState();
+    _frame = ValueNotifier<int>(0);
+    _ticker = createTicker(_onTick);
+    _ticker.start();
+  }
+
+  void _onTick(Duration elapsed) {
+    // Drive the Rust simulation thread once per vsync and bump the frame
+    // notifier so the CustomPaint repaints without rebuilding the widget.
+    widget.bindings.triggerEnginePulse();
+    _frame.value++;
+  }
+
+  @override
+  void dispose() {
+    _ticker.dispose();
+    _frame.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return RepaintBoundary(
-      child: CustomPaint(
-        painter: EnginePainter(bindings, repaint: repaintNotifier),
-        child: const SizedBox.expand(),
+    return CustomPaint(
+      painter: _PrimitivePainter(
+        bindings: widget.bindings,
+        repaint: _frame,
       ),
+      size: Size.infinite,
     );
   }
 }
 
-class EnginePainter extends CustomPainter {
-  final MalphasBindings bindings;
+class _PrimitivePainter extends CustomPainter {
+  static const double _logicalWidth = 1000.0;
+  static const double _logicalHeight = 1000.0;
 
-  EnginePainter(this.bindings, {required Listenable repaint})
-      : super(repaint: repaint);
+  final MalphasBindings _bindings;
 
-  /// Set to `true` to render a small frame-time overlay in the top-left corner.
-  /// Disabled by default to avoid any overhead in production builds.
-  static bool debugShowFrameTime = false;
-
-  static final Paint _backgroundPaint = Paint()
-    ..color = const Color(0xff000000);
-
-  /// Bounded LRU cache of [Paint] objects keyed by the 32-bit native color.
-  /// Two independent caches are kept so that text-specific properties
-  /// (e.g. [FilterQuality.low]) never leak into rectangle paints.
-  final _PaintCache _rectPaints = _PaintCache();
-  final _PaintCache _textPaints = _PaintCache(filterQualityLow: true);
-
-  final Stopwatch _frameTimer = Stopwatch();
-  int _lastFrameMicros = 0;
+  _PrimitivePainter({
+    required MalphasBindings bindings,
+    required Listenable repaint,
+  })  : _bindings = bindings,
+        super(repaint: repaint);
 
   @override
   void paint(Canvas canvas, Size size) {
-    _frameTimer.reset();
-    _frameTimer.start();
-
+    // Clear the frame.
     canvas.drawRect(
-      Rect.fromLTWH(0, 0, size.width, size.height),
-      _backgroundPaint,
+      Offset.zero & size,
+      Paint()..color = const Color(0xff0a0a0a),
     );
 
-    final bufferPtr = bindings.commandBuffer;
-    if (bufferPtr == null || bufferPtr == dffi.nullptr) {
-      _stopAndMaybeDrawOverlay(canvas);
-      return;
-    }
+    final commands = _bindings.frontCommands;
+    final count = _bindings.frontCount;
+    if (commands == ffi.nullptr || count <= 0) return;
 
-    final count = bindings.getCommandCount(bufferPtr);
-    final commands = bindings.getCommandsPointer(bufferPtr);
-    if (commands == dffi.nullptr || count <= 0) {
-      _stopAndMaybeDrawOverlay(canvas);
-      return;
-    }
+    final scaleX = size.width / _logicalWidth;
+    final scaleY = size.height / _logicalHeight;
 
-    // Bidirectional normalization over immutable virtual matrix 1000x1000 with letterboxing
-    final double scale =
-        (size.width < size.height ? size.width : size.height) / 1000.0;
-    final double offsetX = (size.width - (1000.0 * scale)) / 2.0;
-    final double offsetY = (size.height - (1000.0 * scale)) / 2.0;
-
-    canvas.save();
-    canvas.translate(offsetX, offsetY);
-
-    // Zero-Copy DMA using typed lists directly on the FFI memory
-    final uint32View = commands.cast<dffi.Uint32>().asTypedList(count * 6);
-    final float32View = commands.cast<dffi.Float>().asTypedList(count * 6);
-
-    final activePack = PackageController().getAllPackages().firstWhere(
-          (p) => p.isLoaded,
-          orElse: () => MalphasPackage(
-              id: 'dummy',
-              name: 'dummy',
-              version: '1.0',
-              author: '',
-              description: '',
-              objects: []),
-        );
-
-    int i = 0;
-    while (i < count) {
-      final offset = i * 6;
-      final rawHeader = uint32View[offset];
-      final commandType = rawHeader & 0xFF;
-      final colorRgba = uint32View[offset + 5];
-
-      switch (commandType) {
-        case 1: // Solid Rectangle or Custom Skin
-          final x = float32View[offset + 1] * scale;
-          final y = float32View[offset + 2] * scale;
-          final w = float32View[offset + 3] * scale;
-          final h = float32View[offset + 4] * scale;
-
-          final int entityId = (rawHeader >> 16) & 0xFFFF;
-          ui.Image? skinImage;
-          if (entityId < activePack.objects.length) {
-            final obj = activePack.objects[entityId];
-            if (obj.skins.isNotEmpty) {
-              final skin = obj.currentSkin;
-              skinImage = PackageController.skinImages[skin.assetPath];
-            }
-          }
-
-          if (skinImage != null) {
-            canvas.drawImageRect(
-              skinImage,
-              Rect.fromLTWH(0, 0, skinImage.width.toDouble(),
-                  skinImage.height.toDouble()),
-              Rect.fromLTWH(x, y, w, h),
-              Paint()..filterQuality = ui.FilterQuality.low,
-            );
-          } else {
-            final paint = _rectPaints.getPaint(colorRgba);
-            canvas.drawRect(Rect.fromLTWH(x, y, w, h), paint);
-          }
-          i += 1;
-          break;
-        case 2: // Union text command
-          final paint = _textPaints.getPaint(colorRgba);
-          final int low = uint32View[offset + 3];
-          final int high = uint32View[offset + 4];
-          final int addr = (high << 32) | (low & 0xFFFFFFFF);
-
-          if (addr != 0) {
-            final payloadPtr = dffi.Pointer<TextPayload>.fromAddress(addr);
-            final maxChars = float32View[offset + 1].toInt();
-            _renderTextFromFonts(canvas, maxChars, payloadPtr, scale, paint);
-          }
-          i += 1;
-          break;
-        default:
-          i += 1;
-          break;
+    for (int i = 0; i < count; i++) {
+      final cmd = commands[i];
+      if (cmd.commandType == 1) {
+        _drawRectangle(canvas, cmd, scaleX, scaleY);
+      } else if (cmd.commandType == 2) {
+        _drawTextFallback(canvas, cmd, scaleX, scaleY);
       }
     }
-
-    canvas.restore();
-
-    _stopAndMaybeDrawOverlay(canvas);
   }
 
-  void _stopAndMaybeDrawOverlay(Canvas canvas) {
-    _frameTimer.stop();
-    _lastFrameMicros = _frameTimer.elapsedMicroseconds;
-    if (debugShowFrameTime) {
-      _drawFrameTimeOverlay(canvas);
-    }
-  }
-
-  void _drawFrameTimeOverlay(Canvas canvas) {
-    final ms = _lastFrameMicros / 1000.0;
-    final telemetry = bindings.readTelemetry();
-
-    final builder = ui.ParagraphBuilder(
-      ui.ParagraphStyle(textAlign: TextAlign.left, fontSize: 14),
-    )
-      ..pushStyle(ui.TextStyle(color: Colors.white))
-      ..addText('frame ${ms.toStringAsFixed(2)} ms\n')
-      ..addText('vm ${telemetry.vmTickMicros} us\n')
-      ..addText('pulse ${telemetry.pulseLatencyMicros} us\n')
-      ..addText('hits ${telemetry.hitTestsCount}\n')
-      ..addText('cmds ${telemetry.commandsGeneratedCount}');
-
-    final paragraph = builder.build()
-      ..layout(const ui.ParagraphConstraints(width: 160));
-
-    canvas.drawParagraph(paragraph, const Offset(8, 8));
-  }
-
-  void _renderTextFromFonts(
+  void _drawRectangle(
     Canvas canvas,
-    int maxChars,
-    dffi.Pointer<TextPayload> payloadPtr,
-    double scale,
-    Paint paint,
+    DartRenderCommand cmd,
+    double scaleX,
+    double scaleY,
   ) {
-    final atlasImage = bindings.fontAtlasImage;
-    if (atlasImage == null || payloadPtr == dffi.nullptr) return;
+    final rect = Rect.fromLTWH(
+      cmd.x * scaleX,
+      cmd.y * scaleY,
+      cmd.width * scaleX,
+      cmd.height * scaleY,
+    );
+    final paint = Paint()
+      ..color = Color(cmd.colorRgba)
+      ..style = PaintingStyle.fill;
+    canvas.drawRect(rect, paint);
+  }
 
-    final arenaStart = bindings.arena;
-    if (arenaStart == dffi.nullptr) return;
-
-    final payload = payloadPtr.ref;
-    final fontSize = payload.fontSize > 0 ? payload.fontSize : 32.0;
-    final fontScale = fontSize / 32.0;
-
-    double currentX = payload.x * scale;
-    final double startY = payload.y * scale;
-
-    final arenaUint32 = arenaStart.cast<dffi.Uint32>();
-    final metricsOffset = arenaUint32[ArenaLayout.fontMetricsOffset ~/ 4];
-
-    // Reject obviously invalid font metrics tables before indexing.
-    if (metricsOffset < 0 || metricsOffset >= bindings.arenaSize) return;
-    const int metricsEntrySize = 16;
-
-    final stringStart =
-        payloadPtr.cast<dffi.Uint8>() + dffi.sizeOf<TextPayload>();
-
-    int charIdx = 0;
-    while (charIdx < maxChars) {
-      final charCode = stringStart[charIdx];
-      if (charCode == 0) break; // null-terminator
-
-      final glyphOffset = metricsOffset + (charCode * 16);
-      // Bounds-check the 16-byte metrics entry before reading.
-      if (glyphOffset < 0 ||
-          glyphOffset + metricsEntrySize > bindings.arenaSize) {
-        break;
-      }
-      final metricsData =
-          (arenaStart.cast<dffi.Uint8>() + glyphOffset).cast<dffi.Uint16>();
-
-      final int gx = metricsData[1];
-      final int gy = metricsData[2];
-      final int gw = metricsData[3];
-      final int gh = metricsData[4];
-      final int gXOffset = metricsData.cast<dffi.Int16>()[5];
-      final int gAdvance = metricsData[6];
-
-      if (gw > 0 && gh > 0) {
-        final srcRect = Rect.fromLTWH(
-          gx.toDouble(),
-          gy.toDouble(),
-          gw.toDouble(),
-          gh.toDouble(),
-        );
-
-        final destRect = Rect.fromLTWH(
-          currentX + (gXOffset * fontScale * scale),
-          startY,
-          gw * fontScale * scale,
-          gh * fontScale * scale,
-        );
-
-        canvas.drawImageRect(atlasImage, srcRect, destRect, paint);
-      }
-
-      currentX += gAdvance * fontScale * scale;
-      charIdx++;
-    }
+  void _drawTextFallback(
+    Canvas canvas,
+    DartRenderCommand cmd,
+    double scaleX,
+    double scaleY,
+  ) {
+    // Systems are responsible for text content in v2.7.0.  Without an arena
+    // atlas we render a small placeholder marker so text commands are still
+    // visible during development.
+    final center = Offset(cmd.x * scaleX, cmd.y * scaleY);
+    final paint = Paint()
+      ..color = Color(cmd.colorRgba)
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(center, 3.0, paint);
   }
 
   @override
-  bool shouldRepaint(covariant EnginePainter oldDelegate) => false;
-}
-
-/// Bounded LRU cache of [Paint] objects keyed by a 32-bit color.
-///
-/// The cache is intentionally simple: it uses a [LinkedHashMap] iteration
-/// order to evict the least-recently used entry once [maxSize] is exceeded.
-class _PaintCache {
-  static const int maxSize = 128;
-
-  final Map<int, Paint> _cache = <int, Paint>{};
-  final bool _filterQualityLow;
-
-  _PaintCache({bool filterQualityLow = false})
-      : _filterQualityLow = filterQualityLow;
-
-  Paint getPaint(int colorRgba) {
-    Paint? paint = _cache.remove(colorRgba);
-    if (paint == null) {
-      paint = Paint()..color = Color(colorRgba);
-      if (_filterQualityLow) {
-        paint.filterQuality = FilterQuality.low;
-      }
-      if (_cache.length >= maxSize) {
-        _cache.remove(_cache.keys.first);
-      }
-    }
-    _cache[colorRgba] = paint;
-    return paint;
-  }
+  bool shouldRepaint(covariant _PrimitivePainter oldDelegate) => true;
 }

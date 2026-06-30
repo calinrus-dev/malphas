@@ -40,6 +40,9 @@ try {
 
     cargo build --release --package malphas_cli
     if ($LASTEXITCODE -ne 0) { throw "cargo build malphas_cli failed with exit code $LASTEXITCODE" }
+
+    cargo build --release --package bouncing_demo
+    if ($LASTEXITCODE -ne 0) { throw "cargo build bouncing_demo failed with exit code $LASTEXITCODE" }
 } finally {
     Pop-Location
 }
@@ -89,6 +92,27 @@ if (Test-Path $cliSrc -PathType Leaf) {
     Write-Info "Copying CLI executable to motors/..."
     Copy-Item -Path $cliSrc -Destination $motorsDir -Force
     Write-Ok "Copied CLI: $(Join-Path $motorsDir $cliName)"
+}
+
+# Copy the example bouncing_demo system (.mxc) into motors/ and the workspace root
+$sysName = 'bouncing_demo.dll'
+$sysSrc = Join-Path (Join-Path $root 'target/release') $sysName
+if (Test-Path $sysSrc -PathType Leaf) {
+    Write-Info "Copying bouncing_demo system to motors/..."
+    Copy-Item -Path $sysSrc -Destination (Join-Path $motorsDir $sysName) -Force
+    Write-Ok "Copied system: $(Join-Path $motorsDir $sysName)"
+
+    $rootSys = Join-Path $root $sysName
+    Copy-Item -Path $sysSrc -Destination $rootSys -Force
+    Write-Ok "Copied system: $rootSys"
+
+    # Also copy as .mxc so the workspace loader can treat it as a system file.
+    $exampleMxc = Join-Path $root 'examples/bouncing_demo/bouncing_demo.mxc'
+    $motorsMxc = Join-Path $motorsDir 'bouncing_demo.mxc'
+    Copy-Item -Path $sysSrc -Destination $exampleMxc -Force -ErrorAction SilentlyContinue
+    Write-Ok "Copied system .mxc: $exampleMxc"
+    Copy-Item -Path $sysSrc -Destination $motorsMxc -Force -ErrorAction SilentlyContinue
+    Write-Ok "Copied system .mxc: $motorsMxc"
 }
 
 # Copy a non-timestamped copy of the library and signature to the workspace root

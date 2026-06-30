@@ -48,12 +48,13 @@ TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 STAMPED_NAME="malphas_core_${TIMESTAMP}.${EXT}"
 STAMPED_PATH="$MOTORS_DIR/$STAMPED_NAME"
 
-# Build the Rust core and CLI from the workspace root in release mode
+# Build the Rust core, CLI, and example system from the workspace root in release mode
 info "Building Rust workspace in release mode..."
 (
     cd "$ROOT"
     cargo build --release --package malphas_core
     cargo build --release --package malphas_cli
+    cargo build --release --package bouncing_demo
 )
 
 if [ ! -f "$SRC_LIB" ]; then
@@ -104,6 +105,26 @@ if [ -f "$CLI_SRC" ]; then
     info "Copying CLI executable to motors/..."
     cp -f "$CLI_SRC" "$MOTORS_DIR/"
     ok "Copied CLI: $MOTORS_DIR/$(basename "$CLI_SRC")"
+fi
+
+# Copy the example bouncing_demo system (.mxc) into motors/ and the workspace root
+case "$PLATFORM" in
+    windows) SYS_NAME="bouncing_demo.dll" ;;
+    linux)   SYS_NAME="libbouncing_demo.so" ;;
+    macos)   SYS_NAME="libbouncing_demo.dylib" ;;
+esac
+SYS_SRC="$ROOT/target/release/$SYS_NAME"
+if [ -f "$SYS_SRC" ]; then
+    info "Copying bouncing_demo system to motors/..."
+    cp -f "$SYS_SRC" "$MOTORS_DIR/$SYS_NAME"
+    ok "Copied system: $MOTORS_DIR/$SYS_NAME"
+    cp -f "$SYS_SRC" "$ROOT/$SYS_NAME"
+    ok "Copied system: $ROOT/$SYS_NAME"
+
+    # Also copy as .mxc so the workspace loader can treat it as a system file.
+    cp -f "$SYS_SRC" "$ROOT/examples/bouncing_demo/bouncing_demo.mxc" || true
+    cp -f "$SYS_SRC" "$MOTORS_DIR/bouncing_demo.mxc" || true
+    ok "Copied system .mxc: $ROOT/examples/bouncing_demo/bouncing_demo.mxc"
 fi
 
 # Copy a non-timestamped copy of the library and signature to the workspace root

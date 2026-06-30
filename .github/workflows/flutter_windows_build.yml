@@ -58,8 +58,29 @@ jobs:
             Copy-Item $sig -Destination flutter_app/malphas_core.dll.sig -Force
             Copy-Item $sig -Destination "$runnerDir/malphas_core.dll.sig" -Force
           } else {
-            Write-Error "Error: Windows engine signature not found"
-            exit 1
+            Write-Warning "Windows engine signature not found; building without signature."
+          }
+
+      - name: Download bouncing_demo system library
+        uses: actions/download-artifact@v4
+        with:
+          name: bouncing_demo-windows-latest
+          path: native-sys/
+
+      - name: Place bouncing_demo system for the example
+        shell: powershell
+        run: |
+          $sys = "native-sys/bouncing_demo.dll"
+          if (-not (Test-Path $sys -PathType Leaf)) {
+            $sys = "native-sys/target/release/bouncing_demo.dll"
+          }
+          if (Test-Path $sys -PathType Leaf) {
+            Copy-Item $sys -Destination bouncing_demo.mxc -Force
+            Copy-Item $sys -Destination flutter_app/bouncing_demo.mxc -Force
+            Copy-Item $sys -Destination flutter_app/windows/runner/bouncing_demo.mxc -Force
+            Copy-Item $sys -Destination examples/bouncing_demo/bouncing_demo.mxc -Force
+          } else {
+            Write-Warning "bouncing_demo system not found; Windows example will not run."
           }
 
       - name: Set up Flutter

@@ -1,9 +1,9 @@
 [workspace]
-members = ["malphas_core", "malphas_cli"]
+members = ["malphas_core", "malphas_cli", "systems/bouncing_demo"]
 resolver = "2"
 
 [workspace.package]
-version = "2.6.0"
+version = "2.7.0"
 edition = "2021"
 authors = ["Calin Rus"]
 

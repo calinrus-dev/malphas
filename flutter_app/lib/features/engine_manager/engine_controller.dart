@@ -68,6 +68,12 @@ class EngineController extends ChangeNotifier {
     final index = engines.indexWhere((e) => e.id == id);
     if (index == -1) return;
 
+    if (id == 'embedded_native_core') {
+      engines[index].status = EngineStatus.active;
+      notifyListeners();
+      return;
+    }
+
     final engine = engines[index];
 
     // Resolve workspace root directory dynamically
@@ -110,7 +116,7 @@ class EngineController extends ChangeNotifier {
     }
 
     final signatureHex = sigFile.readAsStringSync().trim();
-    final result = _bindings.verifyEngine(
+    final result = _bindings.verifyEngineSignature(
       targetPath,
       signatureHex,
       _enginePublicKeyHex,
@@ -128,6 +134,25 @@ class EngineController extends ChangeNotifier {
   /// [engines] with one entry per discovered file. The original fallback entry
   /// is kept only when no binary is found.
   void scanAvailableEngines([String? workspace]) {
+    if (Platform.isAndroid || Platform.isIOS) {
+      engines.clear();
+      engines.add(
+        MalphasEngine(
+          id: 'embedded_native_core',
+          name: 'Embedded Native Core',
+          version: 'v2.7.0',
+          runtime: NativeRuntime.rust,
+          binaryName: _defaultBinaryName(),
+          sha256: 'Embedded (OS Verified)',
+          allocatedMemoryBytes: 8388608,
+          status: EngineStatus.active,
+        ),
+      );
+      activeEngineId = 'embedded_native_core';
+      notifyListeners();
+      return;
+    }
+
     final root = workspace ?? Directory.current.path;
     final discovered = <String>{};
 

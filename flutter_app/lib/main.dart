@@ -6,7 +6,7 @@ import 'features/package_manager/package_controller.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialize the package registry. It will scan compiled .mhp packs on disk
+  // Initialize the package registry. It will scan compiled .msp packs on disk
   // and restore the previously loaded state from JSON persisted in the app
   // documents directory.
   await PackageController().init();
