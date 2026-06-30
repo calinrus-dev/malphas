@@ -88,4 +88,29 @@ class AppStatePersistenceService {
       return [];
     }
   }
+
+  /// Saves the custom workspace root override.
+  void saveWorkspaceRootOverride(String? path) {
+    final file = _stateFile('workspace_root');
+    if (path == null) {
+      if (file.existsSync()) {
+        try {
+          file.deleteSync();
+        } catch (_) {}
+      }
+    } else {
+      file.writeAsStringSync(path);
+    }
+  }
+
+  /// Loads the custom workspace root override.
+  String? loadWorkspaceRootOverride() {
+    try {
+      final file = _stateFile('workspace_root');
+      if (!file.existsSync()) return null;
+      return file.readAsStringSync().trim();
+    } catch (_) {
+      return null;
+    }
+  }
 }

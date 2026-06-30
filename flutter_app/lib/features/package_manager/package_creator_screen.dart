@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/ffi/malphas_bindings.dart';
 import '../../core/services/entity_bootstrap_service.dart';
 import '../hub/environment_model.dart';
-import 'models.dart';
+import '../../core/models/flat_models.dart';
 import 'package_controller.dart';
 
 class PackageCreatorScreen extends StatefulWidget {
@@ -28,7 +28,10 @@ class _PackageCreatorScreenState extends State<PackageCreatorScreen> {
   final _widthController = TextEditingController(text: '1000');
   final _heightController = TextEditingController(text: '1000');
 
-  final List<MalphasObject> _objects = [];
+  final List<Entity> _objects = [];
+  final List<EntityPayload> _payloads = [];
+  final List<EntityTag> _tags = [];
+  final List<EntityProperty> _properties = [];
   bool _isCompiling = false;
 
   @override
@@ -47,48 +50,58 @@ class _PackageCreatorScreenState extends State<PackageCreatorScreen> {
     final nextId = _objects.length + 1;
     setState(() {
       _objects.add(
-        MalphasObject(
-          id: '$nextId',
-          name: 'Entity $nextId',
-          category: 'Dynamic Sprite',
-          properties: {
-            'kind': 'rectangle',
-            'x': '${100.0 + (nextId * 40.0)}',
-            'y': '${100.0 + (nextId * 40.0)}',
-            'width': '80.0',
-            'height': '80.0',
-            'speedX': '${3.0 + nextId}',
-            'speedY': '${2.0 + nextId}',
-            'color': '0xFF00FFCC',
-          },
-          tags: [const MalphasTag(name: 'Interactive', isPublic: true)],
-          skins: [],
+        Entity(
+          nextId,
+          '',
+          'Entity $nextId',
+          'Dynamic Sprite',
+          0,
         ),
       );
+      _tags.add(EntityTag(nextId, 'Interactive', true));
+      _properties.addAll([
+        EntityProperty(nextId, 'kind', 'rectangle'),
+        EntityProperty(nextId, 'x', '${100.0 + (nextId * 40.0)}'),
+        EntityProperty(nextId, 'y', '${100.0 + (nextId * 40.0)}'),
+        EntityProperty(nextId, 'width', '80.0'),
+        EntityProperty(nextId, 'height', '80.0'),
+        EntityProperty(nextId, 'speedX', '${3.0 + nextId}'),
+        EntityProperty(nextId, 'speedY', '${2.0 + nextId}'),
+        EntityProperty(nextId, 'color', '0xFF00FFCC'),
+        EntityProperty(nextId, 'text', 'BLOCK'),
+      ]);
     });
   }
 
   void _removeObject(int index) {
+    final obj = _objects[index];
     setState(() {
       _objects.removeAt(index);
+      _tags.removeWhere((t) => t.entityId == obj.id);
+      _payloads.removeWhere((p) => p.entityId == obj.id);
+      _properties.removeWhere((p) => p.entityId == obj.id);
     });
   }
 
   void _editObject(int index) {
     final obj = _objects[index];
+    final entTags = _tags.where((t) => t.entityId == obj.id);
+    final entPayloads = _payloads.where((p) => p.entityId == obj.id);
+    final entProps = _properties.where((p) => p.entityId == obj.id);
+    final propsMap = {for (var p in entProps) p.key: p.value};
+
     final nameCtrl = TextEditingController(text: obj.name);
     final categoryCtrl = TextEditingController(text: obj.category);
     final tagCtrl = TextEditingController(
-      text: obj.tags.map((t) => t.name).join(', '),
+      text: entTags.map((t) => t.name).join(', '),
     );
     final skinPathCtrl = TextEditingController(
-      text: obj.skins.isEmpty ? '' : obj.skins.first.assetPath,
+      text: entPayloads.isEmpty ? '' : entPayloads.first.assetPath,
     );
 
-    final kindNotifier =
-        ValueNotifier<String>(obj.properties['kind'] ?? 'rectangle');
+    final kindNotifier = ValueNotifier<String>(propsMap['kind'] ?? 'rectangle');
     final propsControllers = <String, TextEditingController>{};
-    obj.properties.forEach((key, value) {
+    propsMap.forEach((key, value) {
       if (key != 'kind') {
         propsControllers[key] = TextEditingController(text: value);
       }
@@ -230,21 +243,28 @@ class _PackageCreatorScreenState extends State<PackageCreatorScreen> {
             TextButton(
               onPressed: () {
                 setState(() {
+                  _tags.removeWhere((t) => t.entityId == obj.id);
+                  _payloads.removeWhere((p) => p.entityId == obj.id);
+                  _properties.removeWhere((p) => p.entityId == obj.id);
+
                   final newTags = tagCtrl.text
                       .split(',')
                       .map((t) => t.trim())
                       .where((t) => t.isNotEmpty)
-                      .map((t) => MalphasTag(name: t, isPublic: true))
+                      .map((t) => EntityTag(obj.id, t, true))
                       .toList();
+                  _tags.addAll(newTags);
 
-                  final newSkins = <MalphasSkin>[];
+                  int activePayloadId = 0;
                   if (skinPathCtrl.text.isNotEmpty) {
-                    newSkins.add(
-                      MalphasSkin(
-                        id: 'skin_${obj.id}',
-                        name: 'Skin ${obj.name}',
-                        assetPath: skinPathCtrl.text.trim(),
-                        version: '1.0',
+                    activePayloadId = 1;
+                    _payloads.add(
+                      EntityPayload(
+                        1,
+                        obj.id,
+                        'Skin ${obj.name}',
+                        skinPathCtrl.text.trim(),
+                        '1.0',
                       ),
                     );
                   }
@@ -255,14 +275,16 @@ class _PackageCreatorScreenState extends State<PackageCreatorScreen> {
                   propsControllers.forEach((key, ctrl) {
                     newProps[key] = ctrl.text.trim();
                   });
+                  newProps.forEach((k, v) {
+                    _properties.add(EntityProperty(obj.id, k, v));
+                  });
 
-                  _objects[index] = MalphasObject(
-                    id: obj.id,
-                    name: nameCtrl.text.trim(),
-                    category: categoryCtrl.text.trim(),
-                    properties: newProps,
-                    tags: newTags,
-                    skins: newSkins,
+                  _objects[index] = Entity(
+                    obj.id,
+                    '',
+                    nameCtrl.text.trim(),
+                    categoryCtrl.text.trim(),
+                    activePayloadId,
                   );
                 });
                 Navigator.pop(context);
@@ -331,7 +353,10 @@ class _PackageCreatorScreenState extends State<PackageCreatorScreen> {
         description: _descriptionController.text.trim(),
         canvasWidth: width,
         canvasHeight: height,
-        objects: _objects,
+        entities: _objects,
+        payloads: _payloads,
+        tags: _tags,
+        properties: _properties,
       );
 
       final bindings = MalphasBindings();
@@ -593,12 +618,28 @@ class _PackageCreatorScreenState extends State<PackageCreatorScreen> {
                                     fontSize: 13,
                                     fontWeight: FontWeight.bold),
                               ),
-                              subtitle: Text(
-                                '${obj.category} • ${obj.properties['kind']?.toUpperCase()} • Tags: ${obj.tags.map((t) => t.name).join(",")}',
-                                style: const TextStyle(
-                                    fontFamily: 'Courier',
-                                    color: Colors.white38,
-                                    fontSize: 9),
+                              subtitle: Builder(
+                                builder: (context) {
+                                  final kind = _properties
+                                      .firstWhere(
+                                          (p) =>
+                                              p.entityId == obj.id &&
+                                              p.key == 'kind',
+                                          orElse: () => const EntityProperty(
+                                              0, 'kind', 'rectangle'))
+                                      .value;
+                                  final tagList = _tags
+                                      .where((t) => t.entityId == obj.id)
+                                      .map((t) => t.name)
+                                      .join(', ');
+                                  return Text(
+                                    '${obj.category} • ${kind.toUpperCase()} • Tags: $tagList',
+                                    style: const TextStyle(
+                                        fontFamily: 'Courier',
+                                        color: Colors.white38,
+                                        fontSize: 9),
+                                  );
+                                },
                               ),
                               trailing: Row(
                                 mainAxisSize: MainAxisSize.min,

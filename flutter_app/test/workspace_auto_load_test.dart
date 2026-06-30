@@ -68,13 +68,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
 
     // The native engine should now be producing render commands.
-    final buffer = bindings.commandBuffer;
-    expect(
-      buffer,
-      isNotNull,
-      reason: 'Command buffer should be allocated after auto-load',
-    );
-    final count = bindings.getCommandCount(buffer!);
+    final count = bindings.commandCount;
     expect(
       count,
       greaterThan(0),

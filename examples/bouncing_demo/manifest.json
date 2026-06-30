@@ -2,13 +2,13 @@
   "pack_id": "bouncing_demo",
   "canvas_width": 1000,
   "canvas_height": 1000,
-  "objects": [
+  "entities": [
     {
-      "object_id": 1,
+      "entity_id": 1,
       "properties": {"kind": "rectangle"}
     },
     {
-      "object_id": 2,
+      "entity_id": 2,
       "properties": {"kind": "text"}
     }
   ]

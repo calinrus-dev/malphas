@@ -253,45 +253,42 @@ unsafe fn vm_div_reg(
     *pc += 4;
 }
 
-impl ResourcePackRuntime {
-    pub fn execute_logic_tick(&mut self, entity_id: u16, bytecode_buffer: &[u8]) {
-        if bytecode_buffer.is_empty() {
-            return;
+pub fn execute_logic_tick(rt: &mut ResourcePackRuntime, entity_id: u16, bytecode_buffer: &[u8]) {
+    if bytecode_buffer.is_empty() {
+        return;
+    }
+
+    const MAX_INSTRUCTIONS: usize = 4096;
+
+    let entity_offset = 32 + (entity_id as usize * 64);
+    let mut pc = 0usize;
+    let mut regs = [0.0f32; 8];
+    let mut instructions = 0usize;
+
+    while pc + 4 <= bytecode_buffer.len() {
+        if instructions >= MAX_INSTRUCTIONS {
+            break;
         }
+        instructions += 1;
 
-        const MAX_INSTRUCTIONS: usize = 4096;
+        let opcode = bytecode_buffer[pc];
+        let arg1 = bytecode_buffer[pc + 1];
+        let val_u16 = ((bytecode_buffer[pc + 2] as u16) << 8) | (bytecode_buffer[pc + 3] as u16);
 
-        let entity_offset = 32 + (entity_id as usize * 64);
-        let mut pc = 0usize;
-        let mut regs = [0.0f32; 8];
-        let mut instructions = 0usize;
-
-        while pc + 4 <= bytecode_buffer.len() {
-            if instructions >= MAX_INSTRUCTIONS {
-                break;
+        if (opcode as usize) < JUMP_TABLE.len() {
+            unsafe {
+                JUMP_TABLE[opcode as usize](
+                    rt,
+                    entity_offset,
+                    arg1,
+                    val_u16,
+                    &mut regs,
+                    &mut pc,
+                    bytecode_buffer,
+                );
             }
-            instructions += 1;
-
-            let opcode = bytecode_buffer[pc];
-            let arg1 = bytecode_buffer[pc + 1];
-            let val_u16 =
-                ((bytecode_buffer[pc + 2] as u16) << 8) | (bytecode_buffer[pc + 3] as u16);
-
-            if (opcode as usize) < JUMP_TABLE.len() {
-                unsafe {
-                    JUMP_TABLE[opcode as usize](
-                        self,
-                        entity_offset,
-                        arg1,
-                        val_u16,
-                        &mut regs,
-                        &mut pc,
-                        bytecode_buffer,
-                    );
-                }
-            } else {
-                break;
-            }
+        } else {
+            break;
         }
     }
 }
@@ -307,26 +304,24 @@ mod tests {
     /// dependency on `rand`.
     struct Xorshift64(u64);
 
-    impl Xorshift64 {
-        fn next_u64(&mut self) -> u64 {
-            let mut x = self.0;
-            x ^= x << 13;
-            x ^= x >> 7;
-            x ^= x << 17;
-            self.0 = x;
-            x
-        }
+    fn xorshift64_next_u64(rng: &mut Xorshift64) -> u64 {
+        let mut x = rng.0;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        rng.0 = x;
+        x
+    }
 
-        fn next_u8(&mut self) -> u8 {
-            self.next_u64() as u8
-        }
+    fn xorshift64_next_u8(rng: &mut Xorshift64) -> u8 {
+        xorshift64_next_u64(rng) as u8
+    }
 
-        fn next_usize(&mut self, max: usize) -> usize {
-            if max == 0 {
-                return 0;
-            }
-            (self.next_u64() as usize) % max
+    fn xorshift64_next_usize(rng: &mut Xorshift64, max: usize) -> usize {
+        if max == 0 {
+            return 0;
         }
+        (xorshift64_next_u64(rng) as usize) % max
     }
 
     fn fresh_runtime(arena_size: usize) -> (ResourcePackRuntime, Vec<u8>) {
@@ -344,15 +339,15 @@ mod tests {
         let (mut runtime, _arena) = fresh_runtime(4096);
 
         for _ in 0..100_000 {
-            let len = 4 + rng.next_usize(252); // 4..255 bytes
+            let len = 4 + xorshift64_next_usize(&mut rng, 252); // 4..255 bytes
             let mut bytecode = Vec::with_capacity(len);
             for _ in 0..len {
-                bytecode.push(rng.next_u8());
+                bytecode.push(xorshift64_next_u8(&mut rng));
             }
 
             // Vary the entity id across the small, valid range for a 4 KB Arena.
-            let entity_id = rng.next_usize(8) as u16;
-            runtime.execute_logic_tick(entity_id, &bytecode);
+            let entity_id = xorshift64_next_usize(&mut rng, 8) as u16;
+            execute_logic_tick(&mut runtime, entity_id, &bytecode);
         }
     }
 
@@ -362,12 +357,12 @@ mod tests {
         let (mut runtime, _arena) = fresh_runtime(4096);
 
         for _ in 0..10_000 {
-            let len = rng.next_usize(16); // 0..15 bytes, often not a multiple of 4
+            let len = xorshift64_next_usize(&mut rng, 16); // 0..15 bytes, often not a multiple of 4
             let mut bytecode = Vec::with_capacity(len);
             for _ in 0..len {
-                bytecode.push(rng.next_u8());
+                bytecode.push(xorshift64_next_u8(&mut rng));
             }
-            runtime.execute_logic_tick(0, &bytecode);
+            execute_logic_tick(&mut runtime, 0, &bytecode);
         }
     }
 
@@ -376,22 +371,22 @@ mod tests {
         let (mut runtime, _arena) = fresh_runtime(4096);
 
         // JMP to instruction 255 on a tiny buffer -> entity-local HALT.
-        runtime.execute_logic_tick(0, &[0x09, 0xFF, 0x00, 0x00]);
+        execute_logic_tick(&mut runtime, 0, &[0x09, 0xFF, 0x00, 0x00]);
 
         // JMP_LT to instruction 255 -> entity-local HALT when the branch is taken.
-        runtime.execute_logic_tick(0, &[0x08, 0x00, 0x00, 0xFF]);
+        execute_logic_tick(&mut runtime, 0, &[0x08, 0x00, 0x00, 0xFF]);
 
         // Mix jumps with random noise.
         let mut rng = Xorshift64(0xAABB_CCDD_EEFF_0011);
         for _ in 0..1_000 {
             let mut bytecode = Vec::with_capacity(64);
             for _ in 0..16 {
-                bytecode.push(rng.next_u8());
+                bytecode.push(xorshift64_next_u8(&mut rng));
             }
             // Force an unconditional jump to a target well beyond the buffer.
             bytecode[0] = 0x09;
             bytecode[1] = 0xFF;
-            runtime.execute_logic_tick(0, &bytecode);
+            execute_logic_tick(&mut runtime, 0, &bytecode);
         }
     }
 }

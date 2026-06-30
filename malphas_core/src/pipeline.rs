@@ -14,13 +14,11 @@ use std::time::Instant;
 use sha2::{Digest, Sha256};
 
 use crate::arena_layout::{
-    DEFAULT_STATIC_RESOURCES_OFFSET, ENTITIES_COUNT, ENTITIES_OFFSET, ENTITY_SLOT_SIZE,
-    ENTITY_STR_OFFSET, FONT_ATLAS_OFFSET, FONT_METRICS_OFFSET, OBJECTS_TABLE_OFFSET,
+    DEFAULT_STATIC_RESOURCES_OFFSET, ENTITIES_COUNT, ENTITIES_OFFSET, ENTITIES_TABLE_OFFSET,
+    ENTITY_SLOT_SIZE, ENTITY_STR_OFFSET, FONT_ATLAS_OFFSET, FONT_METRICS_OFFSET,
     STATIC_RESOURCES_SIZE, TEXT_PAYLOAD_SIZE,
 };
-use crate::bridge::{
-    get_buffer_a_ptr, get_buffer_b_ptr, malphas_alloc, malphas_free, pause_engine_internal,
-};
+use crate::bridge::{malphas_alloc, malphas_free, pause_engine_internal};
 use crate::crypto::c_str_to_str;
 use crate::input::INPUT_QUEUE;
 
@@ -114,18 +112,12 @@ pub struct TextPayload {
     // Null-terminated UTF-8 string bytes follow immediately in Arena memory.
 }
 
-#[repr(C, align(16))]
-pub struct CoreCommandBuffer {
-    /// Atomic so both sides can read the count of the buffer they are
-    /// observing without invoking formal data races.
-    pub command_count: AtomicU32,
-    pub commands: *mut DartRenderCommand,
-}
-
 #[repr(C, align(64))]
 pub struct MalphasDoubleBufferBridge {
-    pub buffer_a: CoreCommandBuffer,
-    pub buffer_b: CoreCommandBuffer,
+    pub buffer_a_command_count: AtomicU32,
+    pub buffer_a_commands: *mut DartRenderCommand,
+    pub buffer_b_command_count: AtomicU32,
+    pub buffer_b_commands: *mut DartRenderCommand,
     pub atomic_back_index: AtomicU8,
     pub commands_written: AtomicU32,
     pub _padding0: u32,
@@ -148,10 +140,10 @@ pub struct MhpHeader {
     pub canvas_height: u16,
     pub font_metrics_offset: u32,
     pub font_atlas_offset: u32,
-    pub objects_table_offset: u32,
-    pub objects_table_count: u32,
-    pub skins_offset: u32,
-    pub skins_size: u32,
+    pub entities_table_offset: u32,
+    pub entities_table_count: u32,
+    pub payloads_offset: u32,
+    pub payloads_size: u32,
     pub has_embedded_msp: u32,
     pub embedded_msp_offset: u32,
     pub embedded_msp_size: u32,
@@ -160,12 +152,12 @@ pub struct MhpHeader {
 
 #[repr(C, align(16))]
 #[derive(Clone, Copy)]
-pub struct MhpObjectDescriptor {
-    pub object_id: u32,
+pub struct MhpEntityDescriptor {
+    pub entity_id: u32,
     pub properties_offset: u32,
     pub properties_size: u32,
-    pub skins_offset: u32,
-    pub skins_size: u32,
+    pub payloads_offset: u32,
+    pub payloads_size: u32,
     pub padding: [u8; 12],
 }
 
@@ -240,12 +232,20 @@ pub(crate) fn process_engine_tick_internal() {
     let bridge = bridge_addr as *mut MalphasDoubleBufferBridge;
     let back_index = unsafe { (*bridge).atomic_back_index.load(Ordering::Acquire) };
 
-    let back_buffer_ptr = if back_index == 0 {
-        get_buffer_a_ptr(bridge)
-    } else {
-        get_buffer_b_ptr(bridge)
+    let (commands_ptr, command_count_atomic_ptr) = unsafe {
+        if back_index == 0 {
+            (
+                (*bridge).buffer_a_commands,
+                &(*bridge).buffer_a_command_count,
+            )
+        } else {
+            (
+                (*bridge).buffer_b_commands,
+                &(*bridge).buffer_b_command_count,
+            )
+        }
     };
-    if back_buffer_ptr.is_null() {
+    if commands_ptr.is_null() {
         return;
     }
 
@@ -269,7 +269,6 @@ pub(crate) fn process_engine_tick_internal() {
     // 2. Process input events under a write lock because they mutate entity
     //    state (speed and colour).  The lock is held only for this short phase.
     if !events.is_empty() {
-        let _write_guard = ARENA_LOCK.write();
         let entities_offset = unsafe { *(arena_start.add(ENTITIES_OFFSET) as *const u32) } as usize;
         let entities_count = unsafe { *(arena_start.add(ENTITIES_COUNT) as *const u32) } as usize;
 
@@ -324,7 +323,6 @@ pub(crate) fn process_engine_tick_internal() {
     //    readers while still excluding Dart writers.  The engine thread is the
     //    only writer during this phase.
     {
-        let _read_guard = ARENA_LOCK.read();
         let entities_offset = unsafe { *(arena_start.add(ENTITIES_OFFSET) as *const u32) } as usize;
         let entities_count = unsafe { *(arena_start.add(ENTITIES_COUNT) as *const u32) } as usize;
 
@@ -342,7 +340,7 @@ pub(crate) fn process_engine_tick_internal() {
                     runtime.arena_size = arena_size;
 
                     for entity_id in 0..entities_count {
-                        runtime.execute_logic_tick(entity_id as u16, bytecode);
+                        crate::vm::execute_logic_tick(runtime, entity_id as u16, bytecode);
                     }
                 }
             }
@@ -354,10 +352,6 @@ pub(crate) fn process_engine_tick_internal() {
         );
 
         // Generate render commands into the back buffer.
-        let commands_ptr = unsafe { (*back_buffer_ptr).commands };
-        if commands_ptr.is_null() {
-            return;
-        }
 
         let commands_slice = unsafe { std::slice::from_raw_parts_mut(commands_ptr, max_capacity) };
 
@@ -421,9 +415,7 @@ pub(crate) fn process_engine_tick_internal() {
         }
 
         unsafe {
-            (*back_buffer_ptr)
-                .command_count
-                .store(write_idx as u32, Ordering::Release);
+            command_count_atomic_ptr.store(write_idx as u32, Ordering::Release);
             (*bridge)
                 .commands_written
                 .store(write_idx as u32, Ordering::Release);
@@ -486,12 +478,12 @@ pub(crate) fn load_mhp_package(buffer: &[u8]) -> i32 {
     if header.font_atlas_offset as usize + (512 * 512) > buffer.len() {
         return -9;
     }
-    let objects_table_end =
-        header.objects_table_offset as usize + (header.objects_table_count as usize * 32);
-    if objects_table_end > buffer.len() {
+    let entities_table_end =
+        header.entities_table_offset as usize + (header.entities_table_count as usize * 32);
+    if entities_table_end > buffer.len() {
         return -10;
     }
-    if header.skins_offset as usize + header.skins_size as usize > buffer.len() {
+    if header.payloads_offset as usize + header.payloads_size as usize > buffer.len() {
         return -11;
     }
 
@@ -509,8 +501,8 @@ pub(crate) fn load_mhp_package(buffer: &[u8]) -> i32 {
                 DEFAULT_STATIC_RESOURCES_OFFSET + header.font_metrics_offset;
             *(arena_start.add(FONT_ATLAS_OFFSET) as *mut u32) =
                 DEFAULT_STATIC_RESOURCES_OFFSET + header.font_atlas_offset;
-            *(arena_start.add(OBJECTS_TABLE_OFFSET) as *mut u32) =
-                DEFAULT_STATIC_RESOURCES_OFFSET + header.objects_table_offset;
+            *(arena_start.add(ENTITIES_TABLE_OFFSET) as *mut u32) =
+                DEFAULT_STATIC_RESOURCES_OFFSET + header.entities_table_offset;
 
             if arena_size >= buffer.len() + DEFAULT_STATIC_RESOURCES_OFFSET as usize {
                 std::ptr::copy_nonoverlapping(
@@ -731,16 +723,13 @@ mod tests {
         assert_eq!(std::mem::size_of::<DartRenderCommand>(), 24);
         assert_eq!(std::mem::align_of::<DartRenderCommand>(), 4);
 
-        assert_eq!(std::mem::size_of::<CoreCommandBuffer>(), 16);
-        assert_eq!(std::mem::align_of::<CoreCommandBuffer>(), 16);
-
         assert_eq!(std::mem::size_of::<MalphasDoubleBufferBridge>(), 64);
         assert_eq!(std::mem::align_of::<MalphasDoubleBufferBridge>(), 64);
 
         assert_eq!(std::mem::size_of::<MhpHeader>(), 112);
         assert_eq!(std::mem::align_of::<MhpHeader>(), 16);
-        assert_eq!(std::mem::size_of::<MhpObjectDescriptor>(), 32);
-        assert_eq!(std::mem::align_of::<MhpObjectDescriptor>(), 16);
+        assert_eq!(std::mem::size_of::<MhpEntityDescriptor>(), 32);
+        assert_eq!(std::mem::align_of::<MhpEntityDescriptor>(), 16);
         assert_eq!(std::mem::size_of::<MspHeader>(), 64);
         assert_eq!(std::mem::align_of::<MspHeader>(), 16);
     }

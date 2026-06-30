@@ -15,6 +15,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+## [2.6.5] - 2026-06-30
+
+### Added
+- Created `flat_models.dart` containing flat relational DOD structures (`Entity`, `EntityPayload`, `EntityTag`, `EntityProperty`, `EntityPackage`) in Dart, replacing object lists with relational pointer lists via integer IDs.
+- Added flat FFI double-buffer command pointer and count getter FFI delegates to avoid pointer arithmetic in Dart.
+- Guaranteed 64-byte boundary alignment in the FFI memory allocator (`malphas_alloc`/`malphas_free`) to prevent ARM64/SSE faults and cache line conflict overhead.
+
+### Changed
+- Refactored `MalphasDoubleBufferBridge` to a flat Rust struct layout, moving atomic counts directly to the root structure.
+- Purged all custom OOP hierarchies and classes (e.g. `MalphasObject`, `MalphasSkin`) in Dart and Rust.
+- Moved VM tick execution code (`execute_logic_tick`) out of `impl ResourcePackRuntime` and into a standalone function in `vm.rs`.
+- Simplified VM test PRNG `Xorshift64` to a methodless struct with standalone helper functions.
+- Renamed all binary headers, manifest keys, and struct parameters from "Object/Skin" to "Entity/Payload" across both Rust and Dart.
+
+### Fixed
+- Fixed library resolution in `malphas_bindings.dart` to walk up to the repository root directory when running unit tests from `flutter_app/`, resolving local DLL test lookup errors.
+- Cleaned up stale built DLL copies under `flutter_app/`.
+
 ## [2.5.1] - 2026-06-29
 
 ### Added

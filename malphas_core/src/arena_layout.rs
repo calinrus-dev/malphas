@@ -25,8 +25,8 @@ pub const FONT_METRICS_OFFSET: usize = 20;
 /// Offset to the 4-byte font-atlas offset field.
 pub const FONT_ATLAS_OFFSET: usize = 24;
 
-/// Offset to the 4-byte objects-table offset field.
-pub const OBJECTS_TABLE_OFFSET: usize = 28;
+/// Offset to the 4-byte entities-table offset field.
+pub const ENTITIES_TABLE_OFFSET: usize = 28;
 
 /// Total size of the Arena header in bytes.
 pub const ARENA_HEADER_SIZE: usize = 32;
@@ -53,8 +53,8 @@ pub const RENDER_COMMAND_SIZE: usize = std::mem::size_of::<crate::pipeline::Dart
 mod tests {
     use super::*;
     use crate::pipeline::{
-        CoreCommandBuffer, DartRenderCommand, MalphasDoubleBufferBridge, MhpHeader,
-        MhpObjectDescriptor, MspHeader, TextPayload,
+        DartRenderCommand, MalphasDoubleBufferBridge, MhpEntityDescriptor, MhpHeader, MspHeader,
+        TextPayload,
     };
 
     #[test]
@@ -66,7 +66,7 @@ mod tests {
         assert!(ENTITIES_COUNT + 4 <= ARENA_HEADER_SIZE);
         assert!(FONT_METRICS_OFFSET + 4 <= ARENA_HEADER_SIZE);
         assert!(FONT_ATLAS_OFFSET + 4 <= ARENA_HEADER_SIZE);
-        assert!(OBJECTS_TABLE_OFFSET + 4 <= ARENA_HEADER_SIZE);
+        assert!(ENTITIES_TABLE_OFFSET + 4 <= ARENA_HEADER_SIZE);
     }
 
     #[test]
@@ -98,14 +98,18 @@ mod tests {
     fn c_abi_struct_layouts_match_dart_expectations() {
         assert_eq!(std::mem::size_of::<DartRenderCommand>(), 24);
         assert_eq!(std::mem::align_of::<DartRenderCommand>(), 4);
-        assert_eq!(std::mem::size_of::<CoreCommandBuffer>(), 16);
-        assert_eq!(std::mem::align_of::<CoreCommandBuffer>(), 16);
+        // We removed CoreCommandBuffer from double buffer bridge, but we can still check it.
+        // Wait, does CoreCommandBuffer still exist? Let's check.
+        // If CoreCommandBuffer is completely removed, we should remove it from the test.
+        // Wait, the task says: "Flatten MalphasDoubleBufferBridge by removing CoreCommandBuffer struct."
+        // So we can delete CoreCommandBuffer entirely or keep it if it's used elsewhere.
+        // Let's delete CoreCommandBuffer completely since it was only a helper wrapper.
         assert_eq!(std::mem::size_of::<MalphasDoubleBufferBridge>(), 64);
         assert_eq!(std::mem::align_of::<MalphasDoubleBufferBridge>(), 64);
         assert_eq!(std::mem::size_of::<MhpHeader>(), 112);
         assert_eq!(std::mem::align_of::<MhpHeader>(), 16);
-        assert_eq!(std::mem::size_of::<MhpObjectDescriptor>(), 32);
-        assert_eq!(std::mem::align_of::<MhpObjectDescriptor>(), 16);
+        assert_eq!(std::mem::size_of::<MhpEntityDescriptor>(), 32);
+        assert_eq!(std::mem::align_of::<MhpEntityDescriptor>(), 16);
         assert_eq!(std::mem::size_of::<MspHeader>(), 64);
         assert_eq!(std::mem::align_of::<MspHeader>(), 16);
     }

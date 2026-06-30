@@ -89,17 +89,17 @@ class MalphasBindings extends ChangeNotifier {
   late final int Function(int) _pauseEngine;
 
   // Portable pointer delegates exposed from Rust.
-  late final dffi.Pointer<CoreCommandBuffer> Function(
-    dffi.Pointer<MalphasDoubleBufferBridge>,
-  ) getBufferAPtr;
-  late final dffi.Pointer<CoreCommandBuffer> Function(
-    dffi.Pointer<MalphasDoubleBufferBridge>,
-  ) getBufferBPtr;
-  late final int Function(dffi.Pointer<MalphasDoubleBufferBridge>) getBackIndex;
-  late final int Function(dffi.Pointer<CoreCommandBuffer>) getCommandCount;
   late final dffi.Pointer<DartRenderCommand> Function(
-    dffi.Pointer<CoreCommandBuffer>,
-  ) getCommandsPointer;
+    dffi.Pointer<MalphasDoubleBufferBridge>,
+  ) getBufferACommands;
+  late final dffi.Pointer<DartRenderCommand> Function(
+    dffi.Pointer<MalphasDoubleBufferBridge>,
+  ) getBufferBCommands;
+  late final int Function(dffi.Pointer<MalphasDoubleBufferBridge>)
+      getBufferACommandCount;
+  late final int Function(dffi.Pointer<MalphasDoubleBufferBridge>)
+      getBufferBCommandCount;
+  late final int Function(dffi.Pointer<MalphasDoubleBufferBridge>) getBackIndex;
   late final int Function(dffi.Pointer<MalphasDoubleBufferBridge>)
       getCommandsWritten;
   late final dffi.Pointer<TextPayload> Function(dffi.Pointer<DartRenderCommand>)
@@ -133,8 +133,6 @@ class MalphasBindings extends ChangeNotifier {
   ) setEntity;
 
   dffi.Pointer<MalphasDoubleBufferBridge>? _doubleBufferBridge = dffi.nullptr;
-  dffi.Pointer<CoreCommandBuffer>? _bufferAPtr = dffi.nullptr;
-  dffi.Pointer<CoreCommandBuffer>? _bufferBPtr = dffi.nullptr;
   dffi.Pointer<dffi.Void>? _arena = dffi.nullptr;
 
   bool isNativeAvailable = false;
@@ -220,6 +218,14 @@ class MalphasBindings extends ChangeNotifier {
       if (!originalFile.existsSync()) {
         originalFile = File(
           '$workspace/malphas_core/target/release/$originalName',
+        );
+      }
+      if (!originalFile.existsSync()) {
+        originalFile = File('$workspace/../$originalName');
+      }
+      if (!originalFile.existsSync()) {
+        originalFile = File(
+          '$workspace/../target/release/$originalName',
         );
       }
       if (!originalFile.existsSync()) {
@@ -315,38 +321,39 @@ class MalphasBindings extends ChangeNotifier {
                     dffi.Pointer<ffi.Utf8>)>>('extract_zip_package')
         .asFunction();
 
-    getBufferAPtr = _nativeLib
+    getBufferACommands = _nativeLib
         .lookup<
             dffi.NativeFunction<
-                dffi.Pointer<CoreCommandBuffer> Function(
+                dffi.Pointer<DartRenderCommand> Function(
                   dffi.Pointer<MalphasDoubleBufferBridge>,
-                )>>('get_buffer_a_ptr')
+                )>>('get_buffer_a_commands')
         .asFunction();
-    getBufferBPtr = _nativeLib
+    getBufferBCommands = _nativeLib
         .lookup<
             dffi.NativeFunction<
-                dffi.Pointer<CoreCommandBuffer> Function(
+                dffi.Pointer<DartRenderCommand> Function(
                   dffi.Pointer<MalphasDoubleBufferBridge>,
-                )>>('get_buffer_b_ptr')
+                )>>('get_buffer_b_commands')
+        .asFunction();
+    getBufferACommandCount = _nativeLib
+        .lookup<
+                dffi.NativeFunction<
+                    dffi.Uint32 Function(
+                        dffi.Pointer<MalphasDoubleBufferBridge>)>>(
+            'get_buffer_a_command_count')
+        .asFunction();
+    getBufferBCommandCount = _nativeLib
+        .lookup<
+                dffi.NativeFunction<
+                    dffi.Uint32 Function(
+                        dffi.Pointer<MalphasDoubleBufferBridge>)>>(
+            'get_buffer_b_command_count')
         .asFunction();
     getBackIndex = _nativeLib
         .lookup<
             dffi.NativeFunction<
                 dffi.Uint8 Function(
                     dffi.Pointer<MalphasDoubleBufferBridge>)>>('get_back_index')
-        .asFunction();
-    getCommandCount = _nativeLib
-        .lookup<
-            dffi.NativeFunction<
-                dffi.Uint32 Function(
-                    dffi.Pointer<CoreCommandBuffer>)>>('get_command_count')
-        .asFunction();
-    getCommandsPointer = _nativeLib
-        .lookup<
-            dffi.NativeFunction<
-                dffi.Pointer<DartRenderCommand> Function(
-                  dffi.Pointer<CoreCommandBuffer>,
-                )>>('get_commands_pointer')
         .asFunction();
     getCommandsWritten = _nativeLib
         .lookup<
@@ -440,17 +447,14 @@ class MalphasBindings extends ChangeNotifier {
       throw Exception('Failed to allocate command buffers');
     }
 
-    _bufferAPtr = getBufferAPtr(_doubleBufferBridge!);
-    _bufferBPtr = getBufferBPtr(_doubleBufferBridge!);
+    _doubleBufferBridge!.ref.bufferACommandCount = 0;
+    _doubleBufferBridge!.ref.bufferACommands = commandsA;
+
+    _doubleBufferBridge!.ref.bufferBCommandCount = 0;
+    _doubleBufferBridge!.ref.bufferBCommands = commandsB;
 
     _doubleBufferBridge!.ref.atomicBackIndex = 0;
     _doubleBufferBridge!.ref.commandsWritten = 0;
-
-    _bufferAPtr!.ref.commandCount = 0;
-    _bufferAPtr!.ref.commands = commandsA;
-
-    _bufferBPtr!.ref.commandCount = 0;
-    _bufferBPtr!.ref.commands = commandsB;
 
     _arena = malphasAlloc(_arenaSize).cast<dffi.Void>();
     if (_arena == dffi.nullptr) {
@@ -486,18 +490,32 @@ class MalphasBindings extends ChangeNotifier {
     _initializeSharedMemory();
   }
 
-  /// Returns the buffer that Flutter should read from (the *front* buffer).
-  /// The Rust engine writes into the back buffer selected by `atomicBackIndex`;
-  /// the opposite buffer is therefore immutable for the duration of this frame.
-  dffi.Pointer<CoreCommandBuffer>? get commandBuffer {
+  /// Returns the pointer to the command array of the front buffer.
+  dffi.Pointer<DartRenderCommand> get commandsPointer {
     if (!isNativeAvailable) {
-      return _simulatedBuffer?.buffer ?? dffi.nullptr;
+      return _simulatedBuffer?.commands ?? dffi.nullptr;
     }
     if (_doubleBufferBridge == null || _doubleBufferBridge == dffi.nullptr) {
       return dffi.nullptr;
     }
     final backIndex = getBackIndex(_doubleBufferBridge!);
-    return (backIndex == 0) ? _bufferBPtr : _bufferAPtr;
+    return (backIndex == 0)
+        ? getBufferBCommands(_doubleBufferBridge!)
+        : getBufferACommands(_doubleBufferBridge!);
+  }
+
+  /// Returns the number of commands written to the front buffer.
+  int get commandCount {
+    if (!isNativeAvailable) {
+      return _simulatedBuffer?.commandCount ?? 0;
+    }
+    if (_doubleBufferBridge == null || _doubleBufferBridge == dffi.nullptr) {
+      return 0;
+    }
+    final backIndex = getBackIndex(_doubleBufferBridge!);
+    return (backIndex == 0)
+        ? getBufferBCommandCount(_doubleBufferBridge!)
+        : getBufferACommandCount(_doubleBufferBridge!);
   }
 
   dffi.Pointer<dffi.Void> get arena => _arena ?? dffi.nullptr;
@@ -582,7 +600,7 @@ class MalphasBindings extends ChangeNotifier {
     if (!isNativeAvailable) {
       if (_simulatedBuffer != null) {
         _simulatedBuffer!.executeSimulation();
-        count = _simulatedBuffer!.buffer!.ref.commandCount;
+        count = _simulatedBuffer!.commandCount;
       }
     } else {
       // Single-clock sync: Flutter's Ticker is the only clock source.  Wake
@@ -590,8 +608,9 @@ class MalphasBindings extends ChangeNotifier {
       // asynchronously on its own core while we read the latest front buffer.
       _checkFfiResult(triggerEnginePulse(), 'trigger_engine_pulse');
       final backIndex = getBackIndex(_doubleBufferBridge!);
-      final frontBuffer = (backIndex == 0) ? _bufferBPtr! : _bufferAPtr!;
-      count = getCommandCount(frontBuffer);
+      count = (backIndex == 0)
+          ? getBufferBCommandCount(_doubleBufferBridge!)
+          : getBufferACommandCount(_doubleBufferBridge!);
     }
     notifyListeners();
     return count;
@@ -756,23 +775,19 @@ class MalphasBindings extends ChangeNotifier {
   /// has exited, otherwise the engine could dereference freed memory.
   void _freeSharedMemory() {
     if (_doubleBufferBridge != null && _doubleBufferBridge != dffi.nullptr) {
-      if (_bufferAPtr != null && _bufferAPtr != dffi.nullptr) {
-        final commandsA = getCommandsPointer(_bufferAPtr!);
-        if (commandsA != dffi.nullptr) {
-          malphasFree(
-            commandsA.cast(),
-            maxCommandBufferCapacity * dffi.sizeOf<DartRenderCommand>(),
-          );
-        }
+      final commandsA = _doubleBufferBridge!.ref.bufferACommands;
+      if (commandsA != dffi.nullptr) {
+        malphasFree(
+          commandsA.cast(),
+          maxCommandBufferCapacity * dffi.sizeOf<DartRenderCommand>(),
+        );
       }
-      if (_bufferBPtr != null && _bufferBPtr != dffi.nullptr) {
-        final commandsB = getCommandsPointer(_bufferBPtr!);
-        if (commandsB != dffi.nullptr) {
-          malphasFree(
-            commandsB.cast(),
-            maxCommandBufferCapacity * dffi.sizeOf<DartRenderCommand>(),
-          );
-        }
+      final commandsB = _doubleBufferBridge!.ref.bufferBCommands;
+      if (commandsB != dffi.nullptr) {
+        malphasFree(
+          commandsB.cast(),
+          maxCommandBufferCapacity * dffi.sizeOf<DartRenderCommand>(),
+        );
       }
       malphasFree(
         _doubleBufferBridge!.cast(),
@@ -783,8 +798,6 @@ class MalphasBindings extends ChangeNotifier {
       malphasFree(_arena!.cast<dffi.Uint8>(), _arenaSize);
     }
     _doubleBufferBridge = dffi.nullptr;
-    _bufferAPtr = dffi.nullptr;
-    _bufferBPtr = dffi.nullptr;
     _arena = dffi.nullptr;
   }
 
@@ -815,32 +828,27 @@ class MalphasBindings extends ChangeNotifier {
 
 /// Fallback command buffer used when the native library cannot be loaded.
 class SnapshotCommandBuffer {
-  dffi.Pointer<CoreCommandBuffer>? buffer;
+  int commandCount = 0;
+  dffi.Pointer<DartRenderCommand>? commands;
 
   SnapshotCommandBuffer() {
-    buffer = ffi.calloc<CoreCommandBuffer>();
-    buffer!.ref.commandCount = 0;
-    buffer!.ref.commands = ffi.calloc<DartRenderCommand>(2);
+    commands = ffi.calloc<DartRenderCommand>(2);
   }
 
   void dispose() {
-    if (buffer != null) {
-      final commands = buffer!.ref.commands;
-      if (commands != dffi.nullptr) {
-        ffi.calloc.free(commands);
-      }
-      ffi.calloc.free(buffer!);
-      buffer = null;
+    if (commands != null) {
+      ffi.calloc.free(commands!);
+      commands = null;
     }
   }
 
   void executeSimulation() {
-    buffer!.ref.commandCount = 1;
-    buffer!.ref.commands[0].commandType = 1;
-    buffer!.ref.commands[0].x = 250;
-    buffer!.ref.commands[0].y = 250;
-    buffer!.ref.commands[0].width = 500;
-    buffer!.ref.commands[0].height = 500;
-    buffer!.ref.commands[0].colorRgba = 0xFF1A1B1C;
+    commandCount = 1;
+    commands![0].commandType = 1;
+    commands![0].x = 250;
+    commands![0].y = 250;
+    commands![0].width = 500;
+    commands![0].height = 500;
+    commands![0].colorRgba = 0xFF1A1B1C;
   }
 }

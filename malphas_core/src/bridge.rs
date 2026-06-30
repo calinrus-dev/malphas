@@ -10,7 +10,7 @@ use crate::arena_layout::{
 };
 use crate::input::INPUT_QUEUE;
 use crate::pipeline::{
-    process_engine_tick_internal, telemetry_now_micros, CoreCommandBuffer, DartRenderCommand,
+    process_engine_tick_internal, telemetry_now_micros, DartRenderCommand,
     MalphasDoubleBufferBridge, TextPayload, ARENA_ADDRESS, ARENA_SIZE, BRIDGE_ADDRESS,
     ENGINE_PAUSED, ENGINE_RUNNING, LAST_PULSE_MICROS, MAX_COMMANDS_CAPACITY, RUNTIME,
 };
@@ -201,20 +201,36 @@ pub(crate) fn trigger_engine_pulse_internal() -> i32 {
 // Portable FFI pointer delegates.  Dart must never perform pointer arithmetic
 // on the bridge layout or copy nested structs by value.
 // ---------------------------------------------------------------------------
-pub(crate) fn get_buffer_a_ptr(bridge: *mut MalphasDoubleBufferBridge) -> *mut CoreCommandBuffer {
+pub(crate) fn get_buffer_a_commands(
+    bridge: *mut MalphasDoubleBufferBridge,
+) -> *mut DartRenderCommand {
     if bridge.is_null() || !is_aligned(bridge) {
         return std::ptr::null_mut();
     }
-    // `addr_of_mut!` avoids creating an intermediate &mut to a struct that is
-    // also observed from Dart.
-    unsafe { std::ptr::addr_of_mut!((*bridge).buffer_a) }
+    unsafe { (*bridge).buffer_a_commands }
 }
 
-pub(crate) fn get_buffer_b_ptr(bridge: *mut MalphasDoubleBufferBridge) -> *mut CoreCommandBuffer {
+pub(crate) fn get_buffer_b_commands(
+    bridge: *mut MalphasDoubleBufferBridge,
+) -> *mut DartRenderCommand {
     if bridge.is_null() || !is_aligned(bridge) {
         return std::ptr::null_mut();
     }
-    unsafe { std::ptr::addr_of_mut!((*bridge).buffer_b) }
+    unsafe { (*bridge).buffer_b_commands }
+}
+
+pub(crate) fn get_buffer_a_command_count(bridge: *mut MalphasDoubleBufferBridge) -> u32 {
+    if bridge.is_null() || !is_aligned(bridge) {
+        return 0;
+    }
+    unsafe { (*bridge).buffer_a_command_count.load(Ordering::Acquire) }
+}
+
+pub(crate) fn get_buffer_b_command_count(bridge: *mut MalphasDoubleBufferBridge) -> u32 {
+    if bridge.is_null() || !is_aligned(bridge) {
+        return 0;
+    }
+    unsafe { (*bridge).buffer_b_command_count.load(Ordering::Acquire) }
 }
 
 pub(crate) fn get_back_index(bridge: *mut MalphasDoubleBufferBridge) -> u8 {
@@ -222,20 +238,6 @@ pub(crate) fn get_back_index(bridge: *mut MalphasDoubleBufferBridge) -> u8 {
         return 0;
     }
     unsafe { (*bridge).atomic_back_index.load(Ordering::Acquire) }
-}
-
-pub(crate) fn get_command_count(buffer: *const CoreCommandBuffer) -> u32 {
-    if buffer.is_null() || !is_aligned(buffer) {
-        return 0;
-    }
-    unsafe { (*buffer).command_count.load(Ordering::Acquire) }
-}
-
-pub(crate) fn get_commands_pointer(buffer: *const CoreCommandBuffer) -> *mut DartRenderCommand {
-    if buffer.is_null() || !is_aligned(buffer) {
-        return std::ptr::null_mut();
-    }
-    unsafe { (*buffer).commands }
 }
 
 pub(crate) fn get_commands_written(bridge: *mut MalphasDoubleBufferBridge) -> u32 {
@@ -276,7 +278,7 @@ pub(crate) fn malphas_alloc(size: usize) -> *mut u8 {
     if size == 0 {
         return std::ptr::null_mut();
     }
-    let layout = match std::alloc::Layout::from_size_align(size, 16) {
+    let layout = match std::alloc::Layout::from_size_align(size, 64) {
         Ok(l) => l,
         Err(_) => return std::ptr::null_mut(),
     };
@@ -287,7 +289,7 @@ pub(crate) fn malphas_free(ptr: *mut u8, size: usize) {
     if ptr.is_null() || size == 0 {
         return;
     }
-    let layout = match std::alloc::Layout::from_size_align(size, 16) {
+    let layout = match std::alloc::Layout::from_size_align(size, 64) {
         Ok(l) => l,
         Err(_) => return,
     };
@@ -308,9 +310,9 @@ mod tests {
         let ptr = malphas_alloc(size);
         assert!(!ptr.is_null());
         assert_eq!(
-            ptr as usize % 16,
+            ptr as usize % 64,
             0,
-            "Allocator must return 16-byte aligned memory"
+            "Allocator must return 64-byte aligned memory"
         );
         unsafe { std::ptr::write_bytes(ptr, 0xAB, size) };
         malphas_free(ptr, size);
@@ -375,19 +377,14 @@ mod tests {
         let bridge_ptr: *mut crate::pipeline::MalphasDoubleBufferBridge = &mut bridge;
         let misaligned_bridge = unsafe { bridge_ptr.byte_add(1) };
 
-        assert!(get_buffer_a_ptr(std::ptr::null_mut()).is_null());
-        assert!(get_buffer_a_ptr(misaligned_bridge).is_null());
-        assert!(get_buffer_b_ptr(misaligned_bridge).is_null());
+        assert!(get_buffer_a_commands(std::ptr::null_mut()).is_null());
+        assert!(get_buffer_a_commands(misaligned_bridge).is_null());
+        assert!(get_buffer_b_commands(misaligned_bridge).is_null());
+        assert_eq!(get_buffer_a_command_count(std::ptr::null_mut()), 0);
+        assert_eq!(get_buffer_a_command_count(misaligned_bridge), 0);
+        assert_eq!(get_buffer_b_command_count(misaligned_bridge), 0);
         assert_eq!(get_back_index(misaligned_bridge), 0);
         assert_eq!(get_commands_written(misaligned_bridge), 0);
-
-        let mut buffer = unsafe { std::mem::zeroed::<CoreCommandBuffer>() };
-        let buffer_ptr: *mut CoreCommandBuffer = &mut buffer;
-        let misaligned_buffer = unsafe { buffer_ptr.byte_add(1) };
-
-        assert_eq!(get_command_count(std::ptr::null()), 0);
-        assert_eq!(get_command_count(misaligned_buffer), 0);
-        assert!(get_commands_pointer(misaligned_buffer).is_null());
     }
 
     #[test]

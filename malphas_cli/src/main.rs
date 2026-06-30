@@ -33,10 +33,10 @@ struct MhpHeader {
     canvas_height: u16,
     font_metrics_offset: u32,
     font_atlas_offset: u32,
-    objects_table_offset: u32,
-    objects_table_count: u32,
-    skins_offset: u32,
-    skins_size: u32,
+    entities_table_offset: u32,
+    entities_table_count: u32,
+    payloads_offset: u32,
+    payloads_size: u32,
     has_embedded_msp: u32,
     embedded_msp_offset: u32,
     embedded_msp_size: u32,
@@ -45,12 +45,12 @@ struct MhpHeader {
 
 #[repr(C, align(16))]
 #[derive(Clone, Copy, Debug)]
-struct MhpObjectDescriptor {
-    object_id: u32,
+struct MhpEntityDescriptor {
+    entity_id: u32,
     properties_offset: u32,
     properties_size: u32,
-    skins_offset: u32,
-    skins_size: u32,
+    payloads_offset: u32,
+    payloads_size: u32,
     padding: [u8; 12],
 }
 
@@ -75,13 +75,13 @@ struct Manifest {
     pack_id: String,
     canvas_width: u16,
     canvas_height: u16,
-    objects: Vec<ManifestObject>,
+    entities: Vec<ManifestEntity>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ManifestObject {
-    object_id: u32,
+struct ManifestEntity {
+    entity_id: u32,
     properties: serde_json::Value,
 }
 
@@ -268,91 +268,86 @@ struct BytecodePatch {
 
 /// Two-pass assembler producing the default bouncing-physics bytecode.
 fn assemble_bouncing_script() -> Vec<u8> {
-    struct Assembler<'a> {
-        insts: &'a mut Vec<u8>,
-        labels: &'a mut std::collections::HashMap<&'static str, usize>,
-        patches: &'a mut Vec<BytecodePatch>,
-    }
-
-    impl Assembler<'_> {
-        fn mark(&mut self, name: &'static str) {
-            self.labels.insert(name, self.insts.len() / 4);
-        }
-
-        fn emit(&mut self, op: u8, arg1: u8, val: u16) {
-            self.insts.push(op);
-            self.insts.push(arg1);
-            self.insts.push(((val >> 8) & 0xFF) as u8);
-            self.insts.push((val & 0xFF) as u8);
-        }
-
-        fn emit_jmp_lt(&mut self, label: &'static str, reg1: u8, reg2: u8) {
-            self.patches.push(BytecodePatch {
-                instruction_index: self.insts.len() / 4,
-                target_label: label,
-                reg2,
-            });
-            self.emit(0x08, reg1, 0);
-        }
-    }
-
     let mut insts: Vec<u8> = Vec::new();
     let mut labels: std::collections::HashMap<&'static str, usize> =
         std::collections::HashMap::new();
     let mut patches: Vec<BytecodePatch> = Vec::new();
 
+    let mark = |labels: &mut std::collections::HashMap<&'static str, usize>,
+                insts: &Vec<u8>,
+                name: &'static str| {
+        labels.insert(name, insts.len() / 4);
+    };
+
+    let emit = |insts: &mut Vec<u8>, op: u8, arg1: u8, val: u16| {
+        insts.push(op);
+        insts.push(arg1);
+        insts.push(((val >> 8) & 0xFF) as u8);
+        insts.push((val & 0xFF) as u8);
+    };
+
+    let emit_jmp_lt = |patches: &mut Vec<BytecodePatch>,
+                       insts: &mut Vec<u8>,
+                       label: &'static str,
+                       reg1: u8,
+                       reg2: u8| {
+        patches.push(BytecodePatch {
+            instruction_index: insts.len() / 4,
+            target_label: label,
+            reg2,
+        });
+        insts.push(0x08);
+        insts.push(reg1);
+        insts.push(0);
+        insts.push(0);
+    };
+
     {
-        let mut asm = Assembler {
-            insts: &mut insts,
-            labels: &mut labels,
-            patches: &mut patches,
-        };
+        mark(&mut labels, &insts, "start");
+        emit(&mut insts, 0x05, 0, 4); // READ_ARENA_F32(reg0, offset=4) -> X
+        emit(&mut insts, 0x05, 1, 8); // READ_ARENA_F32(reg1, offset=8) -> Y
+        emit(&mut insts, 0x05, 2, 24); // READ_ARENA_F32(reg2, offset=24) -> speed_x
+        emit(&mut insts, 0x05, 3, 28); // READ_ARENA_F32(reg3, offset=28) -> speed_y
+        emit(&mut insts, 0x02, 0, 2); // ADD_REG(reg0, reg2) -> X += speed_x
+        emit(&mut insts, 0x02, 1, 3); // ADD_REG(reg1, reg3) -> Y += speed_y
 
-        asm.mark("start");
-        asm.emit(0x05, 0, 4); // READ_ARENA_F32(reg0, offset=4) -> X
-        asm.emit(0x05, 1, 8); // READ_ARENA_F32(reg1, offset=8) -> Y
-        asm.emit(0x05, 2, 24); // READ_ARENA_F32(reg2, offset=24) -> speed_x
-        asm.emit(0x05, 3, 28); // READ_ARENA_F32(reg3, offset=28) -> speed_y
-        asm.emit(0x02, 0, 2); // ADD_REG(reg0, reg2) -> X += speed_x
-        asm.emit(0x02, 1, 3); // ADD_REG(reg1, reg3) -> Y += speed_y
+        emit(&mut insts, 0x05, 4, 32); // READ_ARENA_F32(reg4, offset=32) -> min_x
+        emit_jmp_lt(&mut patches, &mut insts, "skip_reverse_x_a", 4, 0); // if min_x < X, skip reverse
+        emit(&mut insts, 0x01, 5, 0); // LOAD_REG_CONST(reg5, 0)
+        emit(&mut insts, 0x01, 6, 1); // LOAD_REG_CONST(reg6, 1)
+        emit(&mut insts, 0x03, 5, 6); // SUB_REG(reg5, reg6) -> reg5 = -1
+        emit(&mut insts, 0x0B, 2, 5); // MUL_REG(reg2, reg5) -> speed_x = -speed_x
 
-        asm.emit(0x05, 4, 32); // READ_ARENA_F32(reg4, offset=32) -> min_x
-        asm.emit_jmp_lt("skip_reverse_x_a", 4, 0); // if min_x < X, skip reverse
-        asm.emit(0x01, 5, 0); // LOAD_REG_CONST(reg5, 0)
-        asm.emit(0x01, 6, 1); // LOAD_REG_CONST(reg6, 1)
-        asm.emit(0x03, 5, 6); // SUB_REG(reg5, reg6) -> reg5 = -1
-        asm.emit(0x0B, 2, 5); // MUL_REG(reg2, reg5) -> speed_x = -speed_x
+        mark(&mut labels, &insts, "skip_reverse_x_a");
+        emit(&mut insts, 0x05, 4, 36); // READ_ARENA_F32(reg4, offset=36) -> max_x
+        emit_jmp_lt(&mut patches, &mut insts, "skip_reverse_x_b", 0, 4); // if X < max_x, skip reverse
+        emit(&mut insts, 0x01, 5, 0);
+        emit(&mut insts, 0x01, 6, 1);
+        emit(&mut insts, 0x03, 5, 6);
+        emit(&mut insts, 0x0B, 2, 5);
 
-        asm.mark("skip_reverse_x_a");
-        asm.emit(0x05, 4, 36); // READ_ARENA_F32(reg4, offset=36) -> max_x
-        asm.emit_jmp_lt("skip_reverse_x_b", 0, 4); // if X < max_x, skip reverse
-        asm.emit(0x01, 5, 0);
-        asm.emit(0x01, 6, 1);
-        asm.emit(0x03, 5, 6);
-        asm.emit(0x0B, 2, 5);
+        mark(&mut labels, &insts, "skip_reverse_x_b");
+        emit(&mut insts, 0x05, 4, 40); // READ_ARENA_F32(reg4, offset=40) -> min_y
+        emit_jmp_lt(&mut patches, &mut insts, "skip_reverse_y_a", 4, 1); // if min_y < Y, skip reverse
+        emit(&mut insts, 0x01, 5, 0);
+        emit(&mut insts, 0x01, 6, 1);
+        emit(&mut insts, 0x03, 5, 6);
+        emit(&mut insts, 0x0B, 3, 5); // MUL_REG(reg3, reg5) -> speed_y = -speed_y
 
-        asm.mark("skip_reverse_x_b");
-        asm.emit(0x05, 4, 40); // READ_ARENA_F32(reg4, offset=40) -> min_y
-        asm.emit_jmp_lt("skip_reverse_y_a", 4, 1); // if min_y < Y, skip reverse
-        asm.emit(0x01, 5, 0);
-        asm.emit(0x01, 6, 1);
-        asm.emit(0x03, 5, 6);
-        asm.emit(0x0B, 3, 5); // MUL_REG(reg3, reg5) -> speed_y = -speed_y
+        mark(&mut labels, &insts, "skip_reverse_y_a");
+        emit(&mut insts, 0x05, 4, 44); // READ_ARENA_F32(reg4, offset=44) -> max_y
+        emit_jmp_lt(&mut patches, &mut insts, "skip_reverse_y_b", 1, 4); // if Y < max_y, skip reverse
+        emit(&mut insts, 0x01, 5, 0);
+        emit(&mut insts, 0x01, 6, 1);
+        emit(&mut insts, 0x03, 5, 6);
+        emit(&mut insts, 0x0B, 3, 5);
 
-        asm.mark("skip_reverse_y_a");
-        asm.emit(0x05, 4, 44); // READ_ARENA_F32(reg4, offset=44) -> max_y
-        asm.emit_jmp_lt("skip_reverse_y_b", 1, 4); // if Y < max_y, skip reverse
-        asm.emit(0x01, 5, 0);
-        asm.emit(0x01, 6, 1);
-        asm.emit(0x03, 5, 6);
-        asm.emit(0x0B, 3, 5);
-
-        asm.mark("skip_reverse_y_b");
-        asm.emit(0x04, 0, 4); // WRITE_ARENA_F32(offset=4, reg0) -> X
-        asm.emit(0x04, 1, 8); // WRITE_ARENA_F32(offset=8, reg1) -> Y
-        asm.emit(0x04, 2, 24); // WRITE_ARENA_F32(offset=24, reg2) -> speed_x
-        asm.emit(0x04, 3, 28); // WRITE_ARENA_F32(offset=28, reg3) -> speed_y
-        asm.emit(0x00, 0, 0); // HALT
+        mark(&mut labels, &insts, "skip_reverse_y_b");
+        emit(&mut insts, 0x04, 0, 4); // WRITE_ARENA_F32(offset=4, reg0) -> X
+        emit(&mut insts, 0x04, 1, 8); // WRITE_ARENA_F32(offset=8, reg1) -> Y
+        emit(&mut insts, 0x04, 2, 24); // WRITE_ARENA_F32(offset=24, reg2) -> speed_x
+        emit(&mut insts, 0x04, 3, 28); // WRITE_ARENA_F32(offset=28, reg3) -> speed_y
+        emit(&mut insts, 0x00, 0, 0); // HALT
     }
 
     // Resolve labels.
@@ -394,7 +389,7 @@ fn build_mhp(
     canvas_height: u16,
     metrics: &[u8],
     atlas: &[u8],
-    objects: &[ObjectEntry],
+    entities: &[EntityEntry],
     msp: &[u8],
 ) -> Vec<u8> {
     let mut metrics_section = metrics.to_vec();
@@ -402,46 +397,45 @@ fn build_mhp(
     let mut atlas_section = atlas.to_vec();
     pad16(&mut atlas_section);
 
-    // Objects table + property data pool.
-    // Skins are reserved for a future skin format; in v2.5.x no skin payload is
-    // emitted, so every descriptor reports skins_size == 0 and skins_offset == 0.
-    let mut objects_table: Vec<u8> = Vec::new();
+    // Entities table + property data pool.
+    // Payloads are reserved for a future format; in v2.5.x no payload is
+    // emitted, so every descriptor reports payloads_size == 0 and payloads_offset == 0.
+    let mut entities_table: Vec<u8> = Vec::new();
     let mut data_pool: Vec<u8> = Vec::new();
 
-    for obj in objects {
-        let prop_json = serde_json::to_string(&obj.properties).unwrap_or_else(|_| "{}".to_string());
+    for ent in entities {
+        let prop_json = serde_json::to_string(&ent.properties).unwrap_or_else(|_| "{}".to_string());
         let mut prop_bytes = prop_json.into_bytes();
         pad16(&mut prop_bytes);
         let prop_offset = data_pool.len();
         data_pool.extend_from_slice(&prop_bytes);
 
-        let descriptor = MhpObjectDescriptor {
-            object_id: obj.object_id,
+        let descriptor = MhpEntityDescriptor {
+            entity_id: ent.entity_id,
             properties_offset: u32::try_from(prop_offset).unwrap(),
             properties_size: u32::try_from(prop_bytes.len()).unwrap(),
-            skins_offset: 0,
-            skins_size: 0,
+            payloads_offset: 0,
+            payloads_size: 0,
             padding: [0; 12],
         };
-        objects_table.extend_from_slice(&descriptor_as_bytes(&descriptor));
+        entities_table.extend_from_slice(&descriptor_as_bytes(&descriptor));
     }
-    pad16(&mut objects_table);
+    pad16(&mut entities_table);
     pad16(&mut data_pool);
 
     let font_metrics_offset = MHP_HEADER_SIZE;
     let font_atlas_offset = font_metrics_offset + metrics_section.len();
-    let objects_table_offset = font_atlas_offset + atlas_section.len();
-    let skins_offset = objects_table_offset + objects_table.len();
-    let embedded_msp_offset = skins_offset + data_pool.len();
+    let entities_table_offset = font_atlas_offset + atlas_section.len();
+    let payloads_offset = entities_table_offset + entities_table.len();
+    let embedded_msp_offset = payloads_offset + data_pool.len();
     let embedded_msp_size = msp.len();
 
-    // In v2.5.x the data pool contains only object properties; the skin format
-    // is reserved for a future release.  The header's skins_offset/skins_size
+    // In v2.5.x the data pool contains only entity properties. The header's payloads_offset/payloads_size
     // therefore describe the property data pool so existing loaders remain valid.
     let mut payload = Vec::new();
     payload.extend_from_slice(&metrics_section);
     payload.extend_from_slice(&atlas_section);
-    payload.extend_from_slice(&objects_table);
+    payload.extend_from_slice(&entities_table);
     payload.extend_from_slice(&data_pool);
     payload.extend_from_slice(msp);
 
@@ -462,10 +456,10 @@ fn build_mhp(
         canvas_height,
         font_metrics_offset: u32::try_from(font_metrics_offset).unwrap(),
         font_atlas_offset: u32::try_from(font_atlas_offset).unwrap(),
-        objects_table_offset: u32::try_from(objects_table_offset).unwrap(),
-        objects_table_count: u32::try_from(objects.len()).unwrap(),
-        skins_offset: u32::try_from(skins_offset).unwrap(),
-        skins_size: u32::try_from(data_pool.len()).unwrap(),
+        entities_table_offset: u32::try_from(entities_table_offset).unwrap(),
+        entities_table_count: u32::try_from(entities.len()).unwrap(),
+        payloads_offset: u32::try_from(payloads_offset).unwrap(),
+        payloads_size: u32::try_from(data_pool.len()).unwrap(),
         has_embedded_msp: 1,
         embedded_msp_offset: u32::try_from(embedded_msp_offset).unwrap(),
         embedded_msp_size: u32::try_from(embedded_msp_size).unwrap(),
@@ -494,10 +488,10 @@ fn header_as_bytes(header: &MhpHeader) -> [u8; MHP_HEADER_SIZE] {
     buf[66..68].copy_from_slice(&header.canvas_height.to_le_bytes());
     buf[68..72].copy_from_slice(&header.font_metrics_offset.to_le_bytes());
     buf[72..76].copy_from_slice(&header.font_atlas_offset.to_le_bytes());
-    buf[76..80].copy_from_slice(&header.objects_table_offset.to_le_bytes());
-    buf[80..84].copy_from_slice(&header.objects_table_count.to_le_bytes());
-    buf[84..88].copy_from_slice(&header.skins_offset.to_le_bytes());
-    buf[88..92].copy_from_slice(&header.skins_size.to_le_bytes());
+    buf[76..80].copy_from_slice(&header.entities_table_offset.to_le_bytes());
+    buf[80..84].copy_from_slice(&header.entities_table_count.to_le_bytes());
+    buf[84..88].copy_from_slice(&header.payloads_offset.to_le_bytes());
+    buf[88..92].copy_from_slice(&header.payloads_size.to_le_bytes());
     buf[92..96].copy_from_slice(&header.has_embedded_msp.to_le_bytes());
     buf[96..100].copy_from_slice(&header.embedded_msp_offset.to_le_bytes());
     buf[100..104].copy_from_slice(&header.embedded_msp_size.to_le_bytes());
@@ -507,13 +501,13 @@ fn header_as_bytes(header: &MhpHeader) -> [u8; MHP_HEADER_SIZE] {
     buf
 }
 
-fn descriptor_as_bytes(descriptor: &MhpObjectDescriptor) -> [u8; 32] {
+fn descriptor_as_bytes(descriptor: &MhpEntityDescriptor) -> [u8; 32] {
     let mut buf = [0u8; 32];
-    buf[0..4].copy_from_slice(&descriptor.object_id.to_le_bytes());
+    buf[0..4].copy_from_slice(&descriptor.entity_id.to_le_bytes());
     buf[4..8].copy_from_slice(&descriptor.properties_offset.to_le_bytes());
     buf[8..12].copy_from_slice(&descriptor.properties_size.to_le_bytes());
-    buf[12..16].copy_from_slice(&descriptor.skins_offset.to_le_bytes());
-    buf[16..20].copy_from_slice(&descriptor.skins_size.to_le_bytes());
+    buf[12..16].copy_from_slice(&descriptor.payloads_offset.to_le_bytes());
+    buf[16..20].copy_from_slice(&descriptor.payloads_size.to_le_bytes());
     buf[20..32].copy_from_slice(&descriptor.padding);
     buf
 }
@@ -530,8 +524,8 @@ fn msp_header_as_bytes(header: &MspHeader) -> [u8; 64] {
 }
 
 #[derive(Debug)]
-struct ObjectEntry {
-    object_id: u32,
+struct EntityEntry {
+    entity_id: u32,
     properties: serde_json::Value,
 }
 
@@ -560,12 +554,12 @@ fn compile_manifest(manifest_path: &Path) -> Result<(PathBuf, PathBuf), Box<dyn 
         return Err("canvas_height must be greater than 0".into());
     }
 
-    let objects: Vec<ObjectEntry> = manifest
-        .objects
+    let entities: Vec<EntityEntry> = manifest
+        .entities
         .into_iter()
-        .map(|obj| ObjectEntry {
-            object_id: obj.object_id,
-            properties: obj.properties,
+        .map(|ent| EntityEntry {
+            entity_id: ent.entity_id,
+            properties: ent.properties,
         })
         .collect();
 
@@ -581,7 +575,7 @@ fn compile_manifest(manifest_path: &Path) -> Result<(PathBuf, PathBuf), Box<dyn 
         canvas_height,
         &metrics,
         &atlas,
-        &objects,
+        &entities,
         &msp,
     );
 
@@ -645,8 +639,8 @@ mod tests {
         assert_eq!(std::mem::align_of::<MhpHeader>(), 16);
         assert_eq!(std::mem::size_of::<MspHeader>(), 64);
         assert_eq!(std::mem::align_of::<MspHeader>(), 16);
-        assert_eq!(std::mem::size_of::<MhpObjectDescriptor>(), 32);
-        assert_eq!(std::mem::align_of::<MhpObjectDescriptor>(), 16);
+        assert_eq!(std::mem::size_of::<MhpEntityDescriptor>(), 32);
+        assert_eq!(std::mem::align_of::<MhpEntityDescriptor>(), 16);
     }
 
     #[test]
@@ -667,7 +661,7 @@ mod tests {
         let manifest_path = tmp_dir.join("manifest.json");
         let mut file = fs::File::create(&manifest_path).unwrap();
         file.write_all(
-            br#"{"pack_id":"round_trip_pack","canvas_width":1000,"canvas_height":1000,"objects":[{"object_id":1,"properties":{"x":10}}]}"#,
+            br#"{"pack_id":"round_trip_pack","canvas_width":1000,"canvas_height":1000,"entities":[{"entity_id":1,"properties":{"x":10}}]}"#,
         )
         .unwrap();
         file.flush().unwrap();
@@ -856,10 +850,10 @@ mod tests {
             canvas_height: 0,
             font_metrics_offset: 0,
             font_atlas_offset: 0,
-            objects_table_offset: 0,
-            objects_table_count: 0,
-            skins_offset: 0,
-            skins_size: 0,
+            entities_table_offset: 0,
+            entities_table_count: 0,
+            payloads_offset: 0,
+            payloads_size: 0,
             has_embedded_msp: 0,
             embedded_msp_offset: 0,
             embedded_msp_size: 0,

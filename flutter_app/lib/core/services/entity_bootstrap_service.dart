@@ -1,13 +1,10 @@
 import 'dart:convert';
 import 'dart:typed_data';
 import '../ffi/malphas_bindings.dart';
-import '../../features/package_manager/models.dart';
+import '../models/flat_models.dart';
+import '../../features/package_manager/package_controller.dart';
 
 /// Scene layout constants used by the entity bootstrap service.
-///
-/// These values are Dart-side defaults for positioning and styling entities.
-/// They are intentionally separate from the low-level Arena header offsets in
-/// [ArenaLayout] so the two contracts cannot be confused.
 class SceneLayout {
   SceneLayout._();
 
@@ -19,10 +16,6 @@ class SceneLayout {
 }
 
 /// Decouples entity setup from the workspace UI.
-///
-/// The service configures a safe default scene through the Rust-gated helpers.
-/// Future package-driven setups should receive the parsed package metadata and
-/// pause the engine around multi-step writes to avoid torn state.
 class EntityBootstrapService {
   final MalphasBindings bindings;
 
@@ -78,15 +71,22 @@ class EntityBootstrapService {
     );
   }
 
-  void configurePackageScene(MalphasPackage pack) {
-    bindings.setEntitiesCount(pack.objects.length);
+  void configurePackageScene(EntityPackage pack) {
+    final packEntities = PackageController()
+        .entities
+        .where((e) => e.packageId == pack.id)
+        .toList();
+
+    bindings.setEntitiesCount(packEntities.length);
 
     int textOffsetAccumulator =
         4 * 1024 * 1024; // Allocate text strings at offset 4MB in Arena
 
-    for (int i = 0; i < pack.objects.length; i++) {
-      final obj = pack.objects[i];
-      final props = obj.properties;
+    for (int i = 0; i < packEntities.length; i++) {
+      final ent = packEntities[i];
+      final entProperties =
+          PackageController().properties.where((p) => p.entityId == ent.id);
+      final props = {for (var p in entProperties) p.key: p.value};
 
       final kind = props['kind'] ?? 'rectangle';
       final commandType = kind == 'text' ? 2 : 1;

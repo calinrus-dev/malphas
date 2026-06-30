@@ -56,23 +56,22 @@ final class TextPayload extends Struct {
 /// * 16 bytes, 16-byte aligned.
 /// * `commandCount` is written by Rust with Release ordering and read by Dart
 ///   with Acquire ordering; it is NOT a normal Dart field write.
-final class CoreCommandBuffer extends Struct {
-  @Uint32()
-  external int commandCount;
-
-  external Pointer<DartRenderCommand> commands;
-}
-
-/// C-ABI mirror of the Rust `MalphasDoubleBufferBridge`.
-///
-/// * 64 bytes, 64-byte aligned.
-/// * The _padding fields mirror the trailing alignment bytes that Rust
-///   reserves for `#[repr(C, align(64))]`. They must not be read or written.
-/// * Dart never performs pointer arithmetic on this struct; it uses the Rust
-///   exported getter functions (`get_buffer_a_ptr`, `get_back_index`, etc.).
 final class MalphasDoubleBufferBridge extends Struct {
-  external CoreCommandBuffer bufferA;
-  external CoreCommandBuffer bufferB;
+  @Uint32()
+  external int bufferACommandCount;
+
+  @Uint32()
+  external int _padA;
+
+  external Pointer<DartRenderCommand> bufferACommands;
+
+  @Uint32()
+  external int bufferBCommandCount;
+
+  @Uint32()
+  external int _padB;
+
+  external Pointer<DartRenderCommand> bufferBCommands;
 
   @Uint8()
   external int atomicBackIndex;

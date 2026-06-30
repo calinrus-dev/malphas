@@ -14,9 +14,11 @@ use std::ffi::c_void;
 use std::os::raw::c_char;
 
 use crate::bridge::{
-    get_back_index as get_back_index_internal, get_buffer_a_ptr as get_buffer_a_ptr_internal,
-    get_buffer_b_ptr as get_buffer_b_ptr_internal, get_command_count as get_command_count_internal,
-    get_commands_pointer as get_commands_pointer_internal,
+    get_back_index as get_back_index_internal,
+    get_buffer_a_command_count as get_buffer_a_command_count_internal,
+    get_buffer_a_commands as get_buffer_a_commands_internal,
+    get_buffer_b_command_count as get_buffer_b_command_count_internal,
+    get_buffer_b_commands as get_buffer_b_commands_internal,
     get_commands_written as get_commands_written_internal,
     get_text_payload_pointer as get_text_payload_pointer_internal, init_engine_internal,
     malphas_alloc as malphas_alloc_internal, malphas_free as malphas_free_internal,
@@ -34,8 +36,8 @@ use crate::pipeline::{
     load_resource_pack as load_resource_pack_internal,
     load_resource_pack_raw as load_resource_pack_raw_internal, process_engine_tick_sync,
     set_entities_count as set_entities_count_internal, set_entity as set_entity_internal,
-    write_arena_bytes as write_arena_bytes_internal, CoreCommandBuffer, DartRenderCommand,
-    MalphasDoubleBufferBridge, TextPayload,
+    write_arena_bytes as write_arena_bytes_internal, DartRenderCommand, MalphasDoubleBufferBridge,
+    TextPayload,
 };
 
 // ---------------------------------------------------------------------------
@@ -78,32 +80,32 @@ pub extern "C" fn process_input_event(event_type: i32, x: f32, y: f32) -> i32 {
 // Portable FFI pointer delegates.
 // ---------------------------------------------------------------------------
 #[no_mangle]
-pub extern "C" fn get_buffer_a_ptr(
+pub extern "C" fn get_buffer_a_commands(
     bridge: *mut MalphasDoubleBufferBridge,
-) -> *mut CoreCommandBuffer {
-    get_buffer_a_ptr_internal(bridge)
+) -> *mut DartRenderCommand {
+    get_buffer_a_commands_internal(bridge)
 }
 
 #[no_mangle]
-pub extern "C" fn get_buffer_b_ptr(
+pub extern "C" fn get_buffer_b_commands(
     bridge: *mut MalphasDoubleBufferBridge,
-) -> *mut CoreCommandBuffer {
-    get_buffer_b_ptr_internal(bridge)
+) -> *mut DartRenderCommand {
+    get_buffer_b_commands_internal(bridge)
+}
+
+#[no_mangle]
+pub extern "C" fn get_buffer_a_command_count(bridge: *mut MalphasDoubleBufferBridge) -> u32 {
+    get_buffer_a_command_count_internal(bridge)
+}
+
+#[no_mangle]
+pub extern "C" fn get_buffer_b_command_count(bridge: *mut MalphasDoubleBufferBridge) -> u32 {
+    get_buffer_b_command_count_internal(bridge)
 }
 
 #[no_mangle]
 pub extern "C" fn get_back_index(bridge: *mut MalphasDoubleBufferBridge) -> u8 {
     get_back_index_internal(bridge)
-}
-
-#[no_mangle]
-pub extern "C" fn get_command_count(buffer: *const CoreCommandBuffer) -> u32 {
-    get_command_count_internal(buffer)
-}
-
-#[no_mangle]
-pub extern "C" fn get_commands_pointer(buffer: *const CoreCommandBuffer) -> *mut DartRenderCommand {
-    get_commands_pointer_internal(buffer)
 }
 
 #[no_mangle]

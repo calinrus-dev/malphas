@@ -1,9 +1,6 @@
-import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import '../../core/compiler/package_compiler.dart';
-import '../../core/ffi/malphas_bindings.dart';
+import 'package_controller.dart';
 
 class PackageConfigScreen extends StatefulWidget {
   const PackageConfigScreen({super.key});
@@ -13,173 +10,205 @@ class PackageConfigScreen extends StatefulWidget {
 }
 
 class _PackageConfigScreenState extends State<PackageConfigScreen> {
-  final List<String> _registeredObjects = [
-    'Block_Primitive_Cube',
-    'Block_Curved_Sphere',
-    'Custom_Dock_Layout',
-    'Buffer_Static_Fluid',
-  ];
-  bool _isCompiling = false;
-  String _statusMessage = '';
+  final PackageController _controller = PackageController();
+  final _pathController = TextEditingController();
 
-  Future<void> _compileAndLoadPack() async {
-    setState(() {
-      _isCompiling = true;
-      _statusMessage = 'Generating Font Atlas and packaging resources...';
-    });
+  int _mhpCount = 0;
+  int _mspCount = 0;
+  List<String> _foundFiles = [];
+  bool _dirExists = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final currentPath = _controller.resolveWorkspaceRoot();
+    _pathController.text = currentPath;
+    _scanDirectory(currentPath);
+  }
+
+  @override
+  void dispose() {
+    _pathController.dispose();
+    super.dispose();
+  }
+
+  void _scanDirectory(String path) {
+    if (path.trim().isEmpty) {
+      setState(() {
+        _mhpCount = 0;
+        _mspCount = 0;
+        _foundFiles = [];
+        _dirExists = false;
+      });
+      return;
+    }
 
     try {
-      final compiler = MalphasPackageCompiler();
-      const packId = 'pack_custom_01';
-      final manifest = {
-        "pack_id": packId,
-        "canvas_width": 1000,
-        "canvas_height": 1000,
-        "objects": [
-          {
-            "object_id": 42,
-            "properties": {
-              "max_speed": "15.5",
-              "collision_type": "bounding_box",
-            },
-          },
-          {
-            "object_id": 43,
-            "properties": {"font_size": "48.0", "color": "white"},
-          },
-        ],
-      };
+      final dir = Directory(path.trim());
+      if (dir.existsSync()) {
+        final List<String> names = [];
+        int mhp = 0;
+        int msp = 0;
 
-      final output = await compiler.compilePackage(manifest);
-
-      final workspace = Directory.current.path;
-      final packagesDir = Directory('$workspace/packages');
-      if (!packagesDir.existsSync()) {
-        packagesDir.createSync(recursive: true);
-      }
-
-      // The CLI emits <pack_id>.mhp and <pack_id>.msp next to the manifest.
-      final outputPathMhp = '${packagesDir.path}/$packId.mhp';
-      final outputPathMsp = '${packagesDir.path}/$packId.msp';
-
-      File(outputPathMhp).writeAsBytesSync(output.mhpBytes);
-      File(outputPathMsp).writeAsBytesSync(output.mspBytes);
-
-      final bindings = MalphasBindings();
-
-      // Pause the engine so entity setup cannot race the simulation tick.
-      bindings.pauseEngine(true);
-      try {
-        // Load MHP first (this sets up static metadata, fonts, layouts, and embedded logic)
-        final loadResMhp = bindings.loadPack(outputPathMhp);
-        if (loadResMhp != 0) {
-          throw Exception(
-            'load_resource_pack (MHP) failed with error $loadResMhp',
-          );
+        // Scan direct children (packages/ and subfolders if needed)
+        // Check for MHP/MSP files inside packages/ directory or root directory
+        final targets = [dir, Directory('${dir.path}/packages')];
+        for (final targetDir in targets) {
+          if (targetDir.existsSync()) {
+            for (final entity in targetDir.listSync()) {
+              if (entity is File) {
+                final name = entity.uri.pathSegments.last;
+                if (name.toLowerCase().endsWith('.mhp')) {
+                  mhp++;
+                  names.add(name);
+                } else if (name.toLowerCase().endsWith('.msp')) {
+                  msp++;
+                  names.add(name);
+                }
+              }
+            }
+          }
         }
 
-        // Hot-swap with standalone logic (.msp) to demonstrate dynamic loading
-        final loadResMsp = bindings.loadPack(outputPathMsp);
-        if (loadResMsp != 0) {
-          throw Exception(
-            'load_resource_pack (MSP) failed with error $loadResMsp',
-          );
-        }
-
-        // Configure entities through the Rust-gated API instead of writing the
-        // Arena directly from Dart.
-        bindings.setEntitiesCount(2);
-
-        const text = "MALPHAS LIVE CORE";
-        final textBytes = utf8.encode(text);
-        // Write the text payload header (geometry + font size) followed by the
-        // null-terminated string bytes into the Arena.
-        bindings.writeArenaText(
-          2048,
-          300.0, // x
-          400.0, // y
-          48.0, // font size
-          Uint8List.fromList([...textBytes, 0]),
-        );
-
-        bindings.configureEntity(
-          entityId: 0,
-          commandType: 1,
-          layer: 0,
-          x: 100.0,
-          y: 150.0,
-          width: 180.0,
-          height: 120.0,
-          colorRgba: 0xFF00FFCC,
-          speedX: 4.0,
-          speedY: 3.0,
-          minX: 20.0,
-          maxX: 800.0,
-          minY: 20.0,
-          maxY: 860.0,
-        );
-
-        bindings.configureEntity(
-          entityId: 1,
-          commandType: 2,
-          layer: 1,
-          x: 300.0,
-          y: 400.0,
-          width: 48.0,
-          height: 0.0,
-          colorRgba: 0xFFE0DCD3,
-          speedX: -3.5,
-          speedY: 2.5,
-          minX: 20.0,
-          maxX: 450.0,
-          minY: 20.0,
-          maxY: 880.0,
-          strOffset: 2048,
-        );
-      } finally {
-        bindings.pauseEngine(false);
+        setState(() {
+          _mhpCount = mhp;
+          _mspCount = msp;
+          _foundFiles = names;
+          _dirExists = true;
+        });
+      } else {
+        setState(() {
+          _mhpCount = 0;
+          _mspCount = 0;
+          _foundFiles = [];
+          _dirExists = false;
+        });
       }
-
+    } catch (_) {
       setState(() {
-        _statusMessage =
-            'Successfully compiled and hot-swapped! Bytecode logic active.';
+        _mhpCount = 0;
+        _mspCount = 0;
+        _foundFiles = [];
+        _dirExists = false;
       });
+    }
+  }
+
+  Future<void> _applyWorkspacePath() async {
+    final newPath = _pathController.text.trim();
+    if (newPath.isEmpty) return;
+
+    try {
+      final dir = Directory(newPath);
+      if (!dir.existsSync()) {
+        // Attempt to create it if it doesn't exist (if parent directory is writable)
+        dir.createSync(recursive: true);
+      }
+
+      await _controller.updateWorkspaceRoot(newPath);
+      _scanDirectory(newPath);
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Pack compiled and hot-swapped successfully.'),
-            backgroundColor: Colors.green,
+          SnackBar(
+            backgroundColor: const Color(0xff0d0d0d),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+              side: const BorderSide(color: Color(0xff00ffcc)),
+            ),
+            content: const Text(
+              'Workspace path applied successfully!',
+              style: TextStyle(
+                  fontFamily: 'Courier',
+                  color: Color(0xff00ffcc),
+                  fontSize: 11),
+            ),
           ),
         );
       }
     } catch (e) {
-      setState(() {
-        _statusMessage = 'Compilation error: $e';
-      });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          SnackBar(
+            backgroundColor: const Color(0xff0d0d0d),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+              side: const BorderSide(color: Color(0xffd32f2f)),
+            ),
+            content: Text(
+              'Failed to apply workspace path: $e',
+              style: const TextStyle(
+                  fontFamily: 'Courier',
+                  color: Color(0xffe0dcd3),
+                  fontSize: 11),
+            ),
+          ),
         );
       }
-    } finally {
-      setState(() {
-        _isCompiling = false;
-      });
+    }
+  }
+
+  Future<void> _resetToDefault() async {
+    try {
+      await _controller.updateWorkspaceRoot(null);
+      final defaultPath = _controller.resolveWorkspaceRoot();
+      _pathController.text = defaultPath;
+      _scanDirectory(defaultPath);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: const Color(0xff0d0d0d),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+              side: const BorderSide(color: Color(0xff00ffcc)),
+            ),
+            content: const Text(
+              'Workspace path reset to default!',
+              style: TextStyle(
+                  fontFamily: 'Courier',
+                  color: Color(0xff00ffcc),
+                  fontSize: 11),
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: const Color(0xff0d0d0d),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+              side: const BorderSide(color: Color(0xffd32f2f)),
+            ),
+            content: Text(
+              'Error resetting path: $e',
+              style: const TextStyle(
+                  fontFamily: 'Courier',
+                  color: Color(0xffe0dcd3),
+                  fontSize: 11),
+            ),
+          ),
+        );
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: const Color(0xff000000),
       appBar: AppBar(
         title: const Text(
-          'PACKAGE CONFIGURATION',
+          'WORKSPACE SETTINGS',
           style: TextStyle(
             fontFamily: 'Georgia',
-            fontSize: 16,
+            fontSize: 15,
             fontWeight: FontWeight.bold,
             color: Color(0xffe0dcd3),
           ),
@@ -187,214 +216,236 @@ class _PackageConfigScreenState extends State<PackageConfigScreen> {
         backgroundColor: Colors.black,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios, size: 14),
+          icon: const Icon(Icons.arrow_back_ios,
+              size: 14, color: Color(0xffe0dcd3)),
           onPressed: () => Navigator.pop(context),
         ),
       ),
       body: SafeArea(
         child: SingleChildScrollView(
           physics: const BouncingScrollPhysics(),
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(20),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'BASIC ARCHIVE DATA',
+              const Text(
+                'MALPHAS SYSTEM DIRECTORY',
                 style: TextStyle(
-                  fontFamily: 'Arial',
+                  fontFamily: 'Courier',
                   fontSize: 10,
-                  color: theme.primaryColor,
+                  color: Color(0xff00ffcc),
                   fontWeight: FontWeight.bold,
                   letterSpacing: 0.5,
                 ),
               ),
               const SizedBox(height: 12),
-              _buildField('PACKAGE NAME', 'Malphas Geometry Core'),
-              _buildField(
-                'GENERAL DESCRIPTION',
-                'Static structures mapped to raw native memory.',
-              ),
-              Wrap(
-                spacing: 12,
-                runSpacing: 12,
-                children: [
-                  SizedBox(
-                    width: 150,
-                    child: _buildField('AUTHOR', 'Calin Rus'),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xff0d0d0d),
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(color: const Color(0xff1b1b1b)),
+                ),
+                child: TextFormField(
+                  controller: _pathController,
+                  style: const TextStyle(
+                      color: Colors.white, fontSize: 13, fontFamily: 'Arial'),
+                  decoration: const InputDecoration(
+                    labelText: 'Workspace Root Folder Path',
+                    labelStyle: TextStyle(color: Colors.white38, fontSize: 11),
+                    border: InputBorder.none,
                   ),
-                  SizedBox(width: 120, child: _buildField('VERSION', 'v1.0.0')),
+                  onChanged: _scanDirectory,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: SizedBox(
+                      height: 48,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xff0d0d0d),
+                          side: const BorderSide(color: Color(0xff1b1b1b)),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(24)),
+                        ),
+                        onPressed: _resetToDefault,
+                        child: const Text(
+                          'RESET TO DEFAULT',
+                          style: TextStyle(
+                            fontFamily: 'Courier',
+                            fontWeight: FontWeight.bold,
+                            fontSize: 11,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: SizedBox(
+                      height: 48,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xff00ffcc),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(24)),
+                        ),
+                        onPressed: _applyWorkspacePath,
+                        child: const Text(
+                          'APPLY PATH',
+                          style: TextStyle(
+                            fontFamily: 'Courier',
+                            fontWeight: FontWeight.bold,
+                            fontSize: 11,
+                            color: Colors.black,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
                 ],
               ),
-              const Divider(color: Colors.white10, height: 32),
+              const Divider(color: Color(0xff1b1b1b), height: 40),
               const Text(
-                'REGISTERED OBJECTS (INTEGRAL ECOSYSTEM):',
+                'WORKSPACE STATUS TELEMETRY',
                 style: TextStyle(
-                  fontFamily: 'Arial',
+                  fontFamily: 'Courier',
                   fontSize: 10,
-                  color: Colors.white24,
+                  color: Colors.white38,
                   fontWeight: FontWeight.bold,
                 ),
               ),
               const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: _registeredObjects
-                    .map(
-                      (obj) => Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 12,
-                        ),
-                        decoration: BoxDecoration(
-                          color: theme.cardColor,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: const Color(0xff1b1b1b)),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(
-                              Icons.extension_outlined,
-                              size: 14,
-                              color: Colors.white30,
-                            ),
-                            const SizedBox(width: 8),
-                            Flexible(
-                              child: Text(
-                                obj,
-                                style: const TextStyle(
-                                  fontFamily: 'Courier',
-                                  fontSize: 11,
-                                  color: Color(0xffe0dcd3),
-                                  fontWeight: FontWeight.bold,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    )
-                    .toList(),
-              ),
-              const SizedBox(height: 32),
-              if (_statusMessage.isNotEmpty) ...[
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(12),
-                  margin: const EdgeInsets.only(bottom: 16),
-                  decoration: BoxDecoration(
-                    color: const Color(0xff0d0d0d),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: const Color(0xff1b1b1b)),
-                  ),
-                  child: Text(
-                    _statusMessage,
-                    style: const TextStyle(
-                      fontFamily: 'Courier',
-                      fontSize: 10,
-                      color: Color(0xffe0dcd3),
-                    ),
-                  ),
-                ),
-              ],
-              SizedBox(
+              Container(
                 width: double.infinity,
-                height: 48,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: theme.primaryColor,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                  ),
-                  onPressed: _isCompiling ? null : _compileAndLoadPack,
-                  child: _isCompiling
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            color: Colors.black,
-                            strokeWidth: 2,
-                          ),
-                        )
-                      : const Text(
-                          'COMPILE & HOT-SWAP (ZERO-COPY)',
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: const Color(0xff0d0d0d),
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(color: const Color(0xff1b1b1b)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Text(
+                          'Directory Verified: ',
+                          style: TextStyle(
+                              fontFamily: 'Courier',
+                              color: Colors.white70,
+                              fontSize: 11),
+                        ),
+                        Text(
+                          _dirExists ? 'YES (ACTIVE)' : 'NO (NOT FOUND)',
                           style: TextStyle(
                             fontFamily: 'Courier',
-                            color: Colors.black,
+                            color: _dirExists
+                                ? const Color(0xff00ffcc)
+                                : Colors.redAccent,
                             fontWeight: FontWeight.bold,
                             fontSize: 11,
-                            letterSpacing: 0.5,
                           ),
                         ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'MHP Packages Found: $_mhpCount',
+                      style: const TextStyle(
+                          fontFamily: 'Courier',
+                          color: Colors.white70,
+                          fontSize: 11),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'MSP Bytecode Scripts Found: $_mspCount',
+                      style: const TextStyle(
+                          fontFamily: 'Courier',
+                          color: Colors.white70,
+                          fontSize: 11),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
+              const Text(
+                'FOUND BINARIES IN DIRECTORY',
+                style: TextStyle(
+                  fontFamily: 'Courier',
+                  fontSize: 10,
+                  color: Colors.white38,
+                  fontWeight: FontWeight.bold,
                 ),
               ),
               const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                height: 48,
-                child: OutlinedButton(
-                  style: OutlinedButton.styleFrom(
-                    side: const BorderSide(color: Color(0xff1b1b1b)),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                    ),
+              if (_foundFiles.isEmpty)
+                Container(
+                  padding: const EdgeInsets.symmetric(vertical: 30),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: const Color(0xff0d0d0d),
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(color: const Color(0xff161616)),
                   ),
-                  onPressed: () => Navigator.pop(context),
                   child: const Text(
-                    'BACK TO MAIN PANEL',
+                    'No .mhp or .msp files detected in this folder.',
                     style: TextStyle(
-                      fontFamily: 'Courier',
-                      color: Color(0xffe0dcd3),
-                      fontWeight: FontWeight.bold,
-                      fontSize: 11,
-                      letterSpacing: 0.5,
-                    ),
+                        color: Colors.white24,
+                        fontSize: 11,
+                        fontFamily: 'Arial'),
                   ),
+                )
+              else
+                ListView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: _foundFiles.length,
+                  itemBuilder: (context, index) {
+                    final filename = _foundFiles[index];
+                    final isMsp = filename.toLowerCase().endsWith('.msp');
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 6),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xff0d0d0d),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xff1b1b1b)),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            isMsp
+                                ? Icons.analytics_outlined
+                                : Icons.folder_zip_outlined,
+                            size: 14,
+                            color: isMsp
+                                ? const Color(0xff00ffcc)
+                                : Colors.white30,
+                          ),
+                          const SizedBox(width: 12),
+                          Text(
+                            filename,
+                            style: const TextStyle(
+                              fontFamily: 'Courier',
+                              fontSize: 12,
+                              color: Color(0xffe0dcd3),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
                 ),
-              ),
             ],
           ),
         ),
-      ),
-    );
-  }
-
-  Widget _buildField(String label, String value) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 14),
-      padding: const EdgeInsets.all(12),
-      width: double.infinity,
-      decoration: BoxDecoration(
-        color: const Color(0xff0d0d0d),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xff141414)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: const TextStyle(
-              fontFamily: 'Arial',
-              fontSize: 8,
-              color: Colors.white24,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            value,
-            style: const TextStyle(
-              fontFamily: 'Arial',
-              fontSize: 13,
-              color: Colors.white,
-            ),
-          ),
-        ],
       ),
     );
   }

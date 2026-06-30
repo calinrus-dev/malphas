@@ -84,13 +84,13 @@ void main() {
       'pack_id': 'integ_test_pack',
       'canvas_width': 1000,
       'canvas_height': 1000,
-      'objects': [
+      'entities': [
         {
-          'object_id': 1,
+          'entity_id': 1,
           'properties': {'kind': 'rectangle'},
         },
         {
-          'object_id': 2,
+          'entity_id': 2,
           'properties': {'kind': 'text'},
         },
       ],
@@ -162,14 +162,11 @@ void main() {
     }
 
     // 6. Read the front command buffer and verify expected commands.
-    final buffer = bindings.commandBuffer;
-    expect(buffer, isNotNull);
-    expect(buffer, isNot(dffi.nullptr));
-
-    final count = bindings.getCommandCount(buffer!);
+    final count = bindings.commandCount;
     expect(count, greaterThanOrEqualTo(2));
 
-    final commandsPtr = bindings.getCommandsPointer(buffer);
+    final commandsPtr = bindings.commandsPointer;
+    expect(commandsPtr, isNot(dffi.nullptr));
     final commandTypes = <int>[];
     for (int i = 0; i < count; i++) {
       commandTypes.add(commandsPtr[i].commandType);

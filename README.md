@@ -1,8 +1,8 @@
-# Malphas v2.6.0 — Sprite Skins & No-Code Creator
+# Malphas v2.6.5 — Flat DOD & FFI Alignment
 
 A high-performance, terminal-inspired graphical engine with a modular Rust core and a passive Flutter frontend. The two sides communicate through a small, explicit C-ABI boundary and share memory directly instead of marshalling messages across an isolating bridge.
 
-> **v2.6.0** introduces custom sprite skins preloading and rendering, dynamic scene bootstrapping based on rich JSON manifest mapping, and a premium visual No-Code Package Creator UI. It also preserves v2.5.5 bare-metal optimizations including LTO, aligned 64-byte FFI double buffer boundary false-sharing mitigation, and unaligned safe memory operations.
+> **v2.6.5** introduces a complete transition to Data-Oriented Design (DOD). All visual skin objects and metadata hierarchies are replaced by flat, relational database tables (`Entity`, `EntityPayload`, `EntityTag`, `EntityProperty`) in both Rust and Dart. The FFI double-buffer bridge is flattened to eliminate pointer arithmetic on the Dart side, and the native allocator guarantees 64-byte boundary alignment to prevent cache-line conflicts and keep ARM64 FFI loads safe.
 
 ## Architecture at a glance
 
@@ -23,6 +23,7 @@ A high-performance, terminal-inspired graphical engine with a modular Rust core 
 │  │         │ │     │ │        │ │         │ │          │                    │
 │  │ MHP/MSP │ │byte-│ │ double │ │ 256-evt │ │ Ed25519  │                    │
 │  │ loader  │ │code │ │ buffer │ │ queue   │ │ verify   │                    │
+│  │         │ │     │ │        │ │         │ │          │                    │
 │  └─────────┘ └─────┘ └────────┘ └─────────┘ └──────────┘                    │
 │                         │                                                   │
 │  C-ABI exports ◄────────┘                                                   │
@@ -39,13 +40,13 @@ A high-performance, terminal-inspired graphical engine with a modular Rust core 
 
 Flutter owns the only clock and acts as a passive display server. Every vertical sync it sends one pulse through `trigger_engine_pulse()`. The Rust simulation thread wakes up, drains pending input, executes one frame of bytecode logic, writes render commands into the back buffer, and flips the bridge. Flutter reads the front buffer on the next frame.
 
-The `malphas-cli` compiler is a standalone Rust executable. It parses `manifest.json`, builds the font atlas, assembles the MHP/MSP binaries, and signs outputs with Ed25519. Dart's `MalphasPackageCompiler` is now a thin wrapper that locates the CLI and invokes it.
+The `malphas-cli` compiler is a standalone Rust executable. It parses `manifest.json`, builds the font atlas, assembles the MHP/MSP binaries, and signs outputs with Ed25519. Dart's `MalphasPackageCompiler` is a thin wrapper that locates the CLI and invokes it.
 
 This single-clock design eliminates drift between the Dart scheduler and the native simulation, keeps battery use low, and makes the engine trivially pausable by stopping the pulse.
 
 ## Shared-memory command stream
 
-Render commands are exchanged through a homogeneous array of `DartRenderCommand` structs. The array is always 24 bytes per slot and is allocated with `malphas_alloc` so it is 16-byte aligned on every target platform.
+Render commands are exchanged through a homogeneous array of `DartRenderCommand` structs. The array is always 24 bytes per slot and is allocated through `malphas_alloc` which guarantees 64-byte alignment, satisfying all target platform alignment rules.
 
 ### `DartRenderCommand` logical union (24 bytes)
 
@@ -54,7 +55,7 @@ Render commands are exchanged through a homogeneous array of `DartRenderCommand`
 pub struct DartRenderCommand {
     pub command_type: u8,   // 1 = rectangle, 2 = text
     pub layer: u8,
-    pub pad: u16,
+    pub pad: u16,           // Packs command-to-entity ID mappings
     pub x: f32,
     pub y: f32,
     pub width: f32,
@@ -85,18 +86,27 @@ Keeping the command array homogeneous means the rasterizer can walk it with a fi
 ### Double-buffer bridge
 
 ```rust
-#[repr(C, align(16))]
+#[repr(C, align(64))]
 pub struct MalphasDoubleBufferBridge {
-    pub buffer_a: CoreCommandBuffer,
-    pub buffer_b: CoreCommandBuffer,
+    pub buffer_a_command_count: AtomicU32,
+    pub _padding0: u32,
+    pub buffer_a_commands: *mut DartRenderCommand,
+    pub buffer_b_command_count: AtomicU32,
+    pub _padding1: u32,
+    pub buffer_b_commands: *mut DartRenderCommand,
     pub atomic_back_index: AtomicU8,
+    pub _padding2: u8,
+    pub _padding3: u8,
+    pub _padding4: u8,
     pub commands_written: AtomicU32,
+    pub _padding5: u32,
+    pub _padding6: u64,
+    pub _padding7: u64,
+    pub _padding8: u64,
 }
 ```
 
-Rust writes into the buffer selected by `atomic_back_index`; Flutter reads from the opposite buffer. Dart never performs pointer arithmetic on the bridge layout. All nested pointers are retrieved through exported getter functions (`get_buffer_a_ptr`, `get_command_count`, `get_commands_pointer`, etc.) so the Rust compiler is free to keep the layout strictly aligned.
-
-When Rust needs the address of a field that Dart also observes, it uses `std::ptr::addr_of_mut!` instead of creating a temporary `&mut`. This avoids aliasing violations and keeps Miri and strict-provenance tools happy.
+Rust writes into the buffer selected by `atomic_back_index`; Flutter reads from the opposite buffer. Dart never performs pointer arithmetic on the bridge layout. All command pointers and counts are retrieved via flat FFI getter delegates (`get_buffer_a_commands`, `get_buffer_a_command_count`, etc.) to completely avoid aliasing violations and satisfy strict memory models.
 
 ## Memory model and allocation
 
@@ -110,7 +120,7 @@ pub extern "C" fn malphas_alloc(size: usize) -> *mut u8;
 pub extern "C" fn malphas_free(ptr: *mut u8, size: usize);
 ```
 
-The allocator returns 16-byte aligned memory, which is required by `CoreCommandBuffer`, `MalphasDoubleBufferBridge`, `MhpHeader`, `MspHeader`, and ARM64 loads. Dart must not use `ffi.calloc` or `malloc` for the bridge, command arrays, or Arena.
+The allocator returns 64-byte aligned memory, which satisfies the alignment required by `MalphasDoubleBufferBridge` and prevents false sharing on modern CPU architectures. Dart must not use `ffi.calloc` or `malloc` for the bridge, command arrays, or Arena.
 
 When freeing, pass the exact size that was originally requested so Rust can reconstruct the correct `Layout`.
 
@@ -134,10 +144,10 @@ pub struct MhpHeader {
     pub canvas_height: u16,
     pub font_metrics_offset: u32,
     pub font_atlas_offset: u32,
-    pub objects_table_offset: u32,
-    pub objects_table_count: u32,
-    pub skins_offset: u32,
-    pub skins_size: u32,
+    pub entities_table_offset: u32,
+    pub entities_table_count: u32,
+    pub payloads_offset: u32,
+    pub payloads_size: u32,
     pub has_embedded_msp: u32,
     pub embedded_msp_offset: u32,
     pub embedded_msp_size: u32,
@@ -156,10 +166,10 @@ pub struct MhpHeader {
 | 66 | 2 | `canvas_height` `u16` |
 | 68 | 4 | `font_metrics_offset` `u32` |
 | 72 | 4 | `font_atlas_offset` `u32` |
-| 76 | 4 | `objects_table_offset` `u32` |
-| 80 | 4 | `objects_table_count` `u32` |
-| 84 | 4 | `skins_offset` `u32` |
-| 88 | 4 | `skins_size` `u32` |
+| 76 | 4 | `entities_table_offset` `u32` |
+| 80 | 4 | `entities_table_count` `u32` |
+| 84 | 4 | `payloads_offset` `u32` |
+| 88 | 4 | `payloads_size` `u32` |
 | 92 | 4 | `has_embedded_msp` `u32` |
 | 96 | 4 | `embedded_msp_offset` `u32` |
 | 100 | 4 | `embedded_msp_size` `u32` |
@@ -167,33 +177,33 @@ pub struct MhpHeader {
 | **108** | **4** | *alignment padding to 16 bytes* |
 | **112** | | **total size** |
 
-The header is followed by the font metrics table, the alpha font atlas, the objects table, the data pool, and an optional embedded MSP payload. Every section is padded to a 16-byte boundary before the next section starts. The SHA-256 checksum covers everything after the header.
+The header is followed by the font metrics table, the alpha font atlas, the entities table, the payloads data pool, and an optional embedded MSP payload. Every section is padded to a 16-byte boundary. The SHA-256 checksum covers everything after the header.
 
-#### `MhpObjectDescriptor` (32 bytes)
+#### `MhpEntityDescriptor` (32 bytes)
 
 ```rust
 #[repr(C, align(16))]
-pub struct MhpObjectDescriptor {
-    pub object_id: u32,
+pub struct MhpEntityDescriptor {
+    pub entity_id: u32,
     pub properties_offset: u32,
     pub properties_size: u32,
-    pub skins_offset: u32,
-    pub skins_size: u32,
+    pub payloads_offset: u32,
+    pub payloads_size: u32,
     pub padding: [u8; 12],
 }
 ```
 
 | Offset | Size | Field |
 |--------|------|-------|
-| 0 | 4 | `object_id` `u32` |
+| 0 | 4 | `entity_id` `u32` |
 | 4 | 4 | `properties_offset` `u32` |
 | 8 | 4 | `properties_size` `u32` |
-| 12 | 4 | `skins_offset` `u32` |
-| 16 | 4 | `skins_size` `u32` |
+| 12 | 4 | `payloads_offset` `u32` |
+| 16 | 4 | `payloads_size` `u32` |
 | 20 | 12 | `padding` `[u8; 12]` |
 | **32** | | **total size** |
 
-The alpha font atlas is a 512×512 A8 texture generated by `malphas-cli`. Dart converts it to `rgba8888` by filling RGB with white and using the stored alpha value as the alpha channel (`rgbaBytes[i * 4 + 3] = alpha`).
+The alpha font atlas is a 512×512 A8 texture generated by `malphas-cli`. Dart converts it to `rgba8888` by filling RGB with white and using the stored alpha value as the alpha channel.
 
 ### MSP — Malphas Script Package
 
@@ -268,7 +278,7 @@ The Rust workspace test suite includes deterministic fuzz tests that exercise th
 - out-of-bounds jump targets
 - misaligned Arena accesses
 
-Unit tests also verify struct sizes and alignments, the 16-byte aligned allocator round-trip, the lock-free bytecode container read latency, and the full engine thread lifecycle.
+Unit tests also verify struct sizes and alignments, the 64-byte aligned allocator round-trip, the lock-free bytecode container read latency, and the full engine thread lifecycle.
 
 ## Build, test and release
 
@@ -320,6 +330,7 @@ malphas_core/          Rust cdylib, C-ABI exports, decoupled modules (pipeline/v
 malphas_cli/           Rust executable, package compiler and Ed25519 signer
 flutter_app/           Flutter UI, FFI bindings, package compiler wrapper
   lib/core/ffi/        Dart mirrors of Rust structs and the bindings class
+  lib/core/models/     Flat relational DOD models (flat_models.dart)
   lib/core/compiler/   Dart wrapper that invokes malphas-cli
   lib/features/        Engine manager, package manager, workspace UI
   motors/              Populated by build.sh / build_core.ps1; ignored by git
@@ -352,8 +363,8 @@ Tagged versions are built and published automatically by GitHub Actions. Pushing
 To publish a new version:
 
 ```bash
-git tag -a v2.5.5 -m "Release v2.5.5"
-git push origin v2.5.5
+git tag -a v2.6.5 -m "Release v2.6.5"
+git push origin v2.6.5
 ```
 
 > **Note:** The release workflow depends on the repository secret `TEST_SIGNING_KEY` to sign the native engine artifacts. Make sure the secret is configured before pushing the tag.

@@ -1,7 +1,7 @@
 name: malphas_app
-description: "Malphas v2.6.0 — Multi-Architecture Android Deployment"
+description: "Malphas v2.6.5 — Multi-Architecture Android Deployment"
 publish_to: 'none'
-version: 2.6.0+1
+version: 2.6.5+1
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -31,3 +31,4 @@ flutter:
   assets:
     - assets/fonts/
     - assets/sprites/
+    - assets/packages/

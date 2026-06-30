@@ -7,7 +7,7 @@ import '../../core/ui_primitives/primitive_canvas.dart';
 import '../hub/environment_model.dart';
 import '../package_manager/package_manager_screen.dart';
 import '../package_manager/package_controller.dart';
-import '../package_manager/models.dart';
+import '../../core/models/flat_models.dart';
 import '../engine_manager/engine_manager_screen.dart';
 
 class WorkspaceScreen extends StatefulWidget {
@@ -74,17 +74,20 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
         final registry = PackageController();
         final pack = registry.getAllPackages().firstWhere(
               (p) => p.id == targetPackId,
-              orElse: () => MalphasPackage(
-                id: targetPackId,
-                name: targetPackId,
-                version: '1.0.0',
-                author: 'Unknown',
-                description: '',
-                objects: [],
+              orElse: () => EntityPackage(
+                targetPackId,
+                targetPackId,
+                '1.0.0',
+                'Unknown',
+                '',
+                null,
+                false,
               ),
             );
 
-        if (pack.objects.isNotEmpty) {
+        final packEntities =
+            registry.entities.where((e) => e.packageId == pack.id).toList();
+        if (packEntities.isNotEmpty) {
           _bootstrap.configurePackageScene(pack);
         } else {
           _bootstrap.configureDefaultScene();

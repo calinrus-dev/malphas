@@ -6,7 +6,7 @@ import '../ffi/arena_layout.dart';
 import '../ffi/malphas_bindings.dart';
 import '../ffi/types.dart';
 import '../../features/package_manager/package_controller.dart';
-import '../../features/package_manager/models.dart';
+import '../../core/models/flat_models.dart';
 
 /// A pure synchronous rasterizer backed by the native command buffer.
 ///
@@ -65,22 +65,18 @@ class EnginePainter extends CustomPainter {
       _backgroundPaint,
     );
 
-    final bufferPtr = bindings.commandBuffer;
-    if (bufferPtr == null || bufferPtr == dffi.nullptr) {
-      _stopAndMaybeDrawOverlay(canvas);
-      return;
-    }
-
-    final count = bindings.getCommandCount(bufferPtr);
-    final commands = bindings.getCommandsPointer(bufferPtr);
+    final count = bindings.commandCount;
+    final commands = bindings.commandsPointer;
     if (commands == dffi.nullptr || count <= 0) {
       _stopAndMaybeDrawOverlay(canvas);
       return;
     }
 
-    // Bidirectional normalization over immutable virtual matrix 1000x1000 with letterboxing
-    final double scale =
-        (size.width < size.height ? size.width : size.height) / 1000.0;
+    // Responsive layout scaling and letterboxing (virtual matrix: 1000 x 1000)
+    final double scaleX = size.width / 1000.0;
+    final double scaleY = size.height / 1000.0;
+    final double scale = scaleX < scaleY ? scaleX : scaleY;
+
     final double offsetX = (size.width - (1000.0 * scale)) / 2.0;
     final double offsetY = (size.height - (1000.0 * scale)) / 2.0;
 
@@ -93,13 +89,8 @@ class EnginePainter extends CustomPainter {
 
     final activePack = PackageController().getAllPackages().firstWhere(
           (p) => p.isLoaded,
-          orElse: () => MalphasPackage(
-              id: 'dummy',
-              name: 'dummy',
-              version: '1.0',
-              author: '',
-              description: '',
-              objects: []),
+          orElse: () =>
+              const EntityPackage('dummy', 'dummy', '1.0', '', '', null, false),
         );
 
     int i = 0;
@@ -118,11 +109,20 @@ class EnginePainter extends CustomPainter {
 
           final int entityId = (rawHeader >> 16) & 0xFFFF;
           ui.Image? skinImage;
-          if (entityId < activePack.objects.length) {
-            final obj = activePack.objects[entityId];
-            if (obj.skins.isNotEmpty) {
-              final skin = obj.currentSkin;
-              skinImage = PackageController.skinImages[skin.assetPath];
+          final controller = PackageController();
+          final entIndex = controller.entities.indexWhere(
+            (e) => e.packageId == activePack.id && e.id == entityId,
+          );
+          if (entIndex != -1) {
+            final ent = controller.entities[entIndex];
+            if (ent.activePayloadId != 0) {
+              final payloadIndex = controller.payloads.indexWhere(
+                (p) => p.entityId == ent.id && p.id == ent.activePayloadId,
+              );
+              if (payloadIndex != -1) {
+                final payload = controller.payloads[payloadIndex];
+                skinImage = PackageController.skinImages[payload.assetPath];
+              }
             }
           }
 

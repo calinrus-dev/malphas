@@ -1,8 +1,8 @@
-# Malphas Agent Instructions — v2.6.0
+# Malphas Agent Instructions — v2.6.5
 
 These rules define the design language, build/test workflow, FFI safety constraints, and agent conventions of the Malphas project. All agents modifying code, documentation, or system mechanics must follow them.
 
-Version v2.6.0 — Sprite Skins & No-Code Creator introduces dynamic scene configuration based on rich JSON manifests, custom sprite skins using preloaded ui.Image buffers with immediate color rectangle fallback, and visual package compilation. FFI entities map commands to objects using the 16-bit `pad` field of `DartRenderCommand` inside the Arena.
+Version v2.6.5 — Flat DOD Refactoring & FFI Alignment introduces a pure Data-Oriented Design (DOD) model representation. All object lists, visual assets, and skin descriptors have been purged and replaced with relational `Entity`, `EntityPayload`, `EntityTag`, and `EntityProperty` flat tables mapped via integer IDs. The FFI bridge is a flattened layout using 64-byte alignment to eliminate false-sharing and unaligned loads.
 
 ## 1. Terminal Aesthetic
 
@@ -76,24 +76,24 @@ Malphas shares memory between Dart and Rust. Breaking these rules causes crashes
 - **All** shared-memory buffers (double-buffer bridge, command arrays, Arena) must be allocated through the exported Rust allocator:
   - `malphas_alloc(size)`
   - `malphas_free(ptr, size)`
-- Do **not** use `ffi.calloc` / `malloc` for shared memory. The system allocator may only provide 8-byte alignment, which is insufficient for ARM64.
+- Do **not** use `ffi.calloc` / `malloc` for shared memory. The system allocator may only provide 8-byte alignment. Our FFI allocator guarantees 64-byte alignment to prevent cache-line conflicts and keep strict ARM64/SSE alignments happy.
 - Free buffers with the **same size** that was passed to `malphas_alloc` so the Rust allocator can reconstruct the correct `Layout`.
 
 ### 7.2 Struct Layout Stability
 
-- All C-ABI structs are `#[repr(C)]` and explicitly aligned to 16 bytes where required (`#[repr(C, align(16))]`).
-- Do **not** change field order, sizes, or alignment of `DartRenderCommand`, `CoreCommandBuffer`, `MalphasDoubleBufferBridge`, `MhpHeader`, `MhpObjectDescriptor`, `MspHeader`, or `TextPayload` without updating both Rust and Dart definitions and the layout tests in `malphas_core/src/lib.rs` and `malphas_cli/src/main.rs`.
+- All C-ABI structs are `#[repr(C)]` and explicitly aligned to 16 or 64 bytes where required (`#[repr(C, align(64))]`).
+- Do **not** change field order, sizes, or alignment of `DartRenderCommand`, `MalphasDoubleBufferBridge`, `MhpHeader`, `MhpEntityDescriptor`, `MspHeader`, or `TextPayload` without updating both Rust and Dart definitions and the layout tests in `malphas_core/src/lib.rs` and `malphas_cli/src/main.rs`.
 - Dart FFI struct mirrors live in `flutter_app/lib/core/ffi/types.dart` and must remain byte-compatible with the Rust side.
 
 ### 7.3 Pointer Delegates
 
 - Dart must never perform pointer arithmetic on `MalphasDoubleBufferBridge` or copy nested structs by value.
 - Always use the exported getter functions:
-  - `get_buffer_a_ptr(bridge)`
-  - `get_buffer_b_ptr(bridge)`
+  - `get_buffer_a_commands(bridge)`
+  - `get_buffer_b_commands(bridge)`
+  - `get_buffer_a_command_count(bridge)`
+  - `get_buffer_b_command_count(bridge)`
   - `get_back_index(bridge)`
-  - `get_command_count(buffer)`
-  - `get_commands_pointer(buffer)`
   - `get_commands_written(bridge)`
 - On the Rust side, use `std::ptr::addr_of_mut!` when taking field addresses of a struct that Dart also observes, to avoid creating intermediate `&mut` references.
 
