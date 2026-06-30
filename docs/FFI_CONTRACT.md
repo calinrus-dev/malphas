@@ -1,7 +1,7 @@
 # FFI Contract
 
 This document is the authoritative specification of the Rust/Dart FFI boundary
-for Malphas v2.9.0.  Both sides must keep these layouts, alignments, and memory
+for Malphas v2.10.0.  Both sides must keep these layouts, alignments, and memory
 ordering guarantees in lockstep.
 
 ## `MalphasDoubleBufferBridge`
@@ -101,14 +101,14 @@ before the flip.
 The bridge embeds `BRIDGE_ABI_VERSION`:
 
 ```rust
-pub const BRIDGE_ABI_VERSION: u32 = 0x02090000;
+pub const BRIDGE_ABI_VERSION: u32 = 0x02100000;
 ```
 
 Format: `0xMMmmpp00`, where `MM` = major, `mm` = minor, `pp` = patch.  For
-v2.9.0 this is `0x02090000`.
+v2.10.0 this is `0x02100000`.
 
 `initEngine` in Dart must read `bridge.abiVersion` (or call a Rust getter) and
-refuse to run if the value is not `0x02090000`.  A mismatch means the Dart
+refuse to run if the value is not `0x02100000`.  A mismatch means the Dart
 binding and the native library are out of sync and the layout is not safe to
 use.
 

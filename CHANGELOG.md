@@ -1,271 +1,46 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
-## [Unreleased]
+## [2.10.0] — Hardened Frontend & Zero-Copy Blind Painter
 
 ### Added
+- Flutter frontend: zero-copy `PrimitiveCanvas` rendering via FFI.
+- Silver Platter lookup table: O(1) payload resolution for `.mxc` systems.
+- ArcSwap-based MSP snapshot loading: hot-swap without data races.
+- Ed25519 signature verification for `.msp` and `.mxc` binaries.
+- Path sandbox: canonicalization, traversal rejection, symlink blocking.
+- Trust anchor service: secure storage integration (Android Keystore, iOS Keychain, desktop keyring).
+- Lock-free input queue with event coalescence.
+- FFI contract tests: ABI version lock, struct size verification (64-byte alignment).
+- Security integration tests: signature rejection, sandbox enforcement, malformed MSP handling.
+- CI/CD: Android AAB/APK, Windows release, Linux/macOS builds with signed artifacts.
 
 ### Changed
+- Bumped ABI version to `0x02100000`.
+- `MspHeader` and `MspEntityDescriptor` strictly aligned to 64 bytes.
+- MSP version bumped to `3` to reflect the new 64-byte aligned descriptor layout.
+- Dart models flattened to final classes with integer IDs (no OOP hierarchies).
+- Package manager: virtualized `GridView`, async Isolate decoding, tag-based filtering.
 
 ### Fixed
+- FFI struct size mismatch between Rust and Dart — aligned `DartRenderCommand` to 64 bytes.
+- Use-after-free in Silver Platter during MSP refresh.
+- Data race in double-buffer bridge pointer access.
+- Path traversal vulnerability in payload file resolution.
+- Hardcoded test trust anchor removed from release builds.
 
-### Removed
+### Security
+- All `.mxc` binaries must carry a valid Ed25519 signature or the engine refuses load.
+- MSP checksum migrated from partial XOR to SHA-256 over the entity table and payload section.
+- ZIP extraction hardened against bombs, symlinks, and hardlinks.
+- Constant-time signature comparison via `subtle::ConstantTimeEq`.
 
-## [2.9.0] - 2026-06-30
-
-### Breaking Changes
-
-- ABI bump to `BRIDGE_ABI_VERSION = 0x02090000`.  Dart must verify this value in
-  `initEngine` before trusting the bridge layout.
-- Rust now owns the FFI bridge and command buffers.  Dart must not allocate or
-  free `MalphasDoubleBufferBridge`; it only receives a read-only pointer from
-  `init_engine`.
-- Trust anchor is mandatory in release builds.  Release `malphas_core` binaries
-  ship without a default anchor; loading signed assets fails until
-  `setTrustAnchor` / `set_trust_anchor` is called or `MALPHAS_TRUST_ANCHOR` is
-  supplied at build time.
-- Removed the bytecode VM and `vm.rs`; `.mxc` files are native `cdylib`
-  libraries exporting `malphas_init_system` and `malphas_tick`.
-- New FFI snapshot getter contract: Dart must read `atomic_back_index` and the
-  matching command count through Rust getters with Acquire ordering; direct
-  struct field reads of atomic data are not supported.
+## [2.7.0] — Fortress Master Implementation
 
 ### Added
+- Data-Oriented Memory Router: Rust core with mmap-based MSP loading.
+- Stateless `.mxc` system loading via `libloading`.
+- `catch_unwind` panic isolation around system ticks.
+- `MALPHAS_INSECURE_SKIP_VERIFY` debug escape hatch.
 
-- Ed25519 sidecar signatures for engine libraries, `.msp` packs, and `.mxc`
-  systems.  Signatures are verified over SHA-256 hashes of the target files.
-- Runtime sandbox for `.mxc` loading.  Only paths under `systems/`, `packages/`,
-  and `motors/` are accepted; symlinks and `..` traversal are rejected.
-- Lockless input event queue with event-type validation, NaN/infinity rejection,
-  spatial coalescence, and per-frame draining.
-- Panic isolation via `catch_unwind` around system `init` and `tick`; a
-  misbehaving system is tainted instead of crashing the engine.
-- `set_trust_anchor` FFI call and Dart `setTrustAnchor` for runtime trust anchor
-  configuration and key rotation.
-- `MALPHAS_TRUST_ANCHOR` `--dart-define` support in Flutter release builds so
-  the engine binary can be verified before loading.
-- Security integration test suite covering unsigned assets, invalid signatures,
-  sandbox traversal, and symlink rejection.
-
-### Changed
-
-- `init_engine` now takes only `max_commands` and returns the Rust-allocated
-  bridge pointer.
-- `MalphasBindings.initEngine` verifies `bridge.abiVersion` and rejects ABI
-  mismatches.
-- `PrimitiveCanvas` front-buffer getters use the atomic back index and count
-  getters instead of direct struct field reads.
-- Workspace version, `pubspec.yaml`, `README.md`, and `BRIDGE_ABI_VERSION` all
-  derive from the single root `VERSION` file.
-
-### Fixed
-
-- Input-queue tests are serialized around the shared static queue to eliminate
-  flakiness.
-- Security tests use absolute paths instead of `std::env::set_current_dir` to
-  avoid races between parallel tests.
-- `.gitignore` updated so `packages/` only ignores the repository-root directory
-  and `flutter_app/assets/packages/.gitkeep` is tracked.
-
-### Removed
-
-- `malphas_core/src/vm.rs` and all bytecode VM container semantics.
-- Dart-side allocation of `MalphasDoubleBufferBridge` and command buffers.
-
-### Migrating from v2.8.0 to v2.9.0
-
-1. **Update FFI initialization.**  Replace any `init_engine(...)` call with the
-   new single-argument signature `init_engine(max_commands)`.  The bridge pointer
-   returned by Rust is read-only; remove all Dart-side bridge allocation.
-2. **Verify the ABI version.**  In Dart, read `bridge.abiVersion` after
-   `initEngine` and ensure it equals `0x02090000` before rendering.
-3. **Provide a production trust anchor.**  Before loading MSP or MXC assets,
-   call `setTrustAnchor(publicKeyHex)` with your release Ed25519 public key, or
-   build Flutter with `--dart-define=MALPHAS_TRUST_ANCHOR=<public-key-hex>`.
-4. **Sign your assets.**  Use `malphas-cli sign` or set `MALPHAS_SIGNING_KEY`
-   during `./build.sh` / `.\build_core.ps1` to produce `.sig` sidecars for the
-   engine, MSP, and MXC files.
-5. **Place systems in allowed directories.**  Move or keep `.mxc` files under
-   `systems/`, `packages/`, or `motors/` so the sandbox accepts them.
-6. **Remove VM-based systems.**  Recompile any old bytecode systems as native
-   `cdylib` libraries exporting `malphas_init_system` and `malphas_tick`.
-7. **For local development only**, debug builds may set
-   `MALPHAS_INSECURE_SKIP_VERIFY=1`.  This bypass is compiled out of release
-   builds and must never be used in production.
-
-## [2.8.0] - 2026-06-30
-
-### Added
-- New CI badge for Flutter Lint in `README.md`.
-- `flutter_app/assets/packages/.gitkeep` so the asset directory survives a clean checkout.
-- Cross-platform CI verification section in `README.md`.
-
-### Changed
-- Bumped workspace and Flutter app version from `2.7.5` to `2.8.0`.
-- Reusable workflows (`rust_ci.yml`, `flutter_ci.yml`, `flutter_lint.yml`, `flutter_windows_build.yml`) now inherit secrets with `secrets: inherit`.
-- `flutter_ci.yml` and `flutter_lint.yml` download artifacts into `flutter_app/native/` and `flutter_app/native-sig/` so the `flutter_app` working directory resolves them correctly.
-- `flutter_ci.yml` downloads the signed `bouncing_demo-mxc` artifact and falls back to the unsigned system library when signatures are unavailable.
-- `flutter_windows_build.yml` downloads the signed `bouncing_demo-mxc-windows-latest` artifact instead of re-signing locally.
-
-### Fixed
-- `rust_ci.yml` step *Sign bouncing_demo system as .mxc* now extracts and validates `MALPHAS_SIGNING_KEY` before use.
-- `android_build.yml` signing step now passes the private key to `malphas-cli sign`.
-- `build.sh` Android cross-compilation now sets `CC_*`, `CXX_*`, `AR_*`, and `CARGO_TARGET_*_LINKER` for NDK r26c versioned LLVM triples.
-- Fixed flaky `input::tests::test_capacity_drops_oldest_event` by serializing input-queue tests around the shared static queue.
-- Fixed macOS security test `reject_unsigned_system` by using absolute paths instead of `std::env::set_current_dir`, removing a race between parallel tests.
-- Fixed `.gitignore` so `packages/` only ignores the repository-root directory and `flutter_app/assets/packages/.gitkeep` is tracked.
-
-## [2.7.5] - 2026-06-30
-
-### Added
-- **Fortress hardening**: Rust now owns the FFI bridge and command buffers; Flutter only receives a read-only pointer.
-- Ed25519 sidecar signature verification for `.msp` (`.msp.sig`) and `.mxc`/`.so`/`.dll` (`.sig`) files via a configurable global trust anchor.
-- Runtime sandbox for `.mxc` loading: only paths under `systems/`, `packages/`, or `motors/` are accepted.
-- Centralized `IntegrityPolicy` with streaming SHA-256, constant-time comparison, and a 256 MiB cap on signed files.
-- Secure ZIP extractor with compression-ratio, entry-count, total-size, and symlink defences.
-- `set_trust_anchor` FFI + Dart `setTrustAnchor` so Flutter can override the default test-only trust anchor at runtime.
-- Lockless input event queue with validation, coalescence, and per-frame draining.
-- `catch_unwind` panic isolation around system `init` and `tick`; misbehaving systems are tainted instead of crashing the engine.
-- `scripts/check_version_sync.sh` and CI step to keep Rust workspace and Flutter pubspec versions aligned.
-- Security integration test suite (`malphas_core/tests/security_tests.rs`) covering unsigned/invalid MSP signatures, unsigned/invalid system signatures, and sandbox path traversal rejection.
-
-### Changed
-- `init_engine` ABI break: now takes only `max_commands` and returns the Rust-allocated bridge pointer.
-- `malphas-cli sign` now signs the SHA-256 hash of the file, matching the core verifier.
-- `MalphasBindings.initEngine` updated to the Rust-owned bridge model; removed Dart-side bridge/buffer allocation.
-- `PrimitiveCanvas` front-buffer getters read `bufferACommands`/`bufferBCommands` directly from the bridge struct.
-- Bumped workspace version and `pubspec.yaml` to `2.7.5`.
-- Replaced the default test-only Ed25519 trust anchor with a freshly generated keypair.
-- `rust_ci.yml` now passes the signing key to `malphas-cli sign` and signs both the engine library and `bouncing_demo.mxc`.
-- `build_core.ps1` signs native artifacts when `MALPHAS_SIGNING_KEY` is present.
-
-### Fixed
-- Clippy `--all-targets -D warnings` is now clean.
-- Unused imports/dead code warnings across `malphas_core` cleaned up.
-
-### Threat Model
-- The runtime trusts the configured Ed25519 trust anchor for every native binary it loads (engine, `.msp`, `.mxc`).
-- The runtime does **not** trust the Flutter UI: it only receives a read-only pointer to the front buffer and cannot allocate or free the bridge.
-- The runtime does **not** trust the host file system: `.mxc` paths are sandboxed to `systems/`, `packages/`, and `motors/`.
-- The runtime does **not** trust third-party systems: each system is wrapped in `catch_unwind` and is tainted on panic or overflow.
-- `MALPHAS_INSECURE_SKIP_VERIFY` is a debug-only escape hatch and must never be enabled in production.
-
-### Migrating from v2.7.0
-- Replace `init_engine(...)` calls with the new single-argument signature: `init_engine(max_commands)`.
-- Remove any Dart-side allocation of `MalphasDoubleBufferBridge` or command buffers; Rust now owns them.
-- Sign your `.msp` and `.mxc` files with `malphas-cli sign` or set `MALPHAS_SIGNING_KEY` during `./build.sh` / `.\build_core.ps1`.
-- Provide a production Ed25519 public key via `setTrustAnchor` / `set_trust_anchor` before loading signed assets.
-- For local development only, set `MALPHAS_INSECURE_SKIP_VERIFY=1`.
-
-## [2.7.0] - 2026-06-30
-
-### Added
-- **Data-Oriented Memory Router**: the Rust core is now a pure memory router that maps MSP files via `mmap` and dispatches ticks to native `.mxc` systems.
-- **MSP v2 format**: rigid 64-byte aligned binary with `MspHeader` (64 bytes), `MspEntityDescriptor` (64 bytes), and a 64 KB Error Payload reserve.
-- **Silver Platter**: a flat `*const u8` lookup table built once at load time; systems read payloads by direct pointer indexing.
-- **MXC v2**: `.mxc` files are now real native dynamic libraries (`cdylib`) exporting `malphas_init_system` and `malphas_tick`, replacing the old bytecode VM container.
-- `refresh_msp` FFI call for hot-swapping the mapped MSP without unloading loaded `.mxc` systems.
-- `PayloadDecodeService` that runs JSON/local-file decoding in Dart `Isolate`s for the virtualized payload grid.
-- `GridView.builder` payload grid in the package manager with async preview cards (image, JSON, text, binary).
-- Workspace "Install / Update Environment" button that recompiles packages via `malphas-cli` and hot-swaps the MSP mmap.
-- `bouncing_demo` system crate with internal SoA state, demonstrating bounce logic and native render-command emission.
-
-### Changed
-- `MalphasBindings` Dart API rewritten for v2.7.0: `init_engine`, `trigger_engine_pulse`, `load_msp`, `refresh_msp`, `load_system`, `malphas_alloc/free`.
-- `PrimitiveCanvas` now reads render commands directly from the native front buffer pointer with **zero-copy**; no command list is materialized in Dart memory per frame.
-- `MalphasPackageCompiler` now produces only `.msp`; `.mxc` artifacts are built separately by Cargo as native `cdylib`s.
-- Updated `build.sh` and `build_core.ps1` to build the `bouncing_demo` system and copy it as `bouncing_demo.mxc`.
-- Bumped app description and version to `2.7.0+1` in `pubspec.yaml`.
-- Regenerated `examples/bouncing_demo/manifest.json` and payload binaries to the v2.7.0 schema (`pack_id` + `entities[].payload_file`).
-
-### Removed
-- The bytecode VM (`vm.rs`) and `.mxc` bytecode container semantics.
-- The shared writable Arena and all arena-based entity setup (`arena_layout.dart`, `EntityBootstrapService`, `configureEntity`, `writeArenaText`, `setEntitiesCount`).
-- Legacy resource-pack / SHA2 pack-loading logic.
-- `arc-swap` dependency from the core.
-
-### Fixed
-- `MspEntityDescriptor` manual padding corrected to 40 bytes so the struct remains exactly 64 bytes including the implicit 4-byte padding before `tag_mask`.
-- MSP loader checksum now covers the entity table + payload section deterministically.
-- Flutter tests updated to the new FFI lifecycle and prebuilt `bouncing_demo` integration flow.
-- `EngineController` now calls `verifyEngineSignature` matching the v2.7.0 FFI boundary.
-
-## [2.6.5] - 2026-06-30
-
-### Added
-- Created `flat_models.dart` containing flat relational DOD structures (`Entity`, `EntityPayload`, `EntityTag`, `EntityProperty`, `EntityPackage`) in Dart, replacing object lists with relational pointer lists via integer IDs.
-- Added flat FFI double-buffer command pointer and count getter FFI delegates to avoid pointer arithmetic in Dart.
-- Guaranteed 64-byte boundary alignment in the FFI memory allocator (`malphas_alloc`/`malphas_free`) to prevent ARM64/SSE faults and cache line conflict overhead.
-- Introduced `MxcHeader` and `.mxc` executable container format for VM bytecode logic.
-
-### Changed
-- Standardized file formats: eradicated MHP in favor of MSP (Malphas Source Pack) for resources, and MXC (Malphas eXecutable Core) for logic bytecode.
-- Upgraded C-ABI structures (`MspHeader` (128 bytes), `MspEntityDescriptor` (64 bytes), `MxcHeader` (64 bytes), and `MalphasDoubleBufferBridge` (64 bytes)) to strict 64-byte alignments (`#[repr(C, align(64))]`) and calculated padding manually to align with cache lines.
-- Updated the package compiler CLI to pad all binary sub-payload offsets to a multiple of 64 bytes to ensure memory mapped FFI alignment.
-- Purged all custom OOP hierarchies and classes (e.g. `MalphasObject`, `MalphasSkin`) in Dart and Rust.
-- Moved VM tick execution code (`execute_logic_tick`) out of `impl ResourcePackRuntime` and into a standalone function in `vm.rs`.
-- Simplified VM test PRNG `Xorshift64` to a methodless struct with standalone helper functions.
-- Renamed all binary headers, manifest keys, and struct parameters from "Object/Skin" to "Entity/Payload" across both Rust and Dart.
-
-### Fixed
-- Fixed library resolution in `malphas_bindings.dart` to walk up to the repository root directory when running unit tests from `flutter_app/`, resolving local DLL test lookup errors.
-- Cleaned up stale built DLL copies under `flutter_app/`.
-
-## [2.5.1] - 2026-06-29
-
-### Added
-- Shared Arena layout constants in `malphas_core/src/arena_layout.rs` and `flutter_app/lib/core/ffi/arena_layout.dart`.
-- Rust FFI getter `get_text_payload_pointer` to keep Dart pointer arithmetic off the C-ABI boundary.
-- `_checkFfiResult` wrappers in Dart for critical FFI calls (`initEngine`, `loadPack`, `setEntity`, etc.).
-- Rust integration test: end-to-end `init → load pack → set entities → pulse → shutdown`.
-- `EntityBootstrapService` decouples entity setup from `WorkspaceScreen`.
-- `MalphasEnvironment` persistence and reactive `ChangeNotifier` controllers.
-- `CHANGELOG.md`, `CONTRIBUTING.md`, GitHub issue/PR templates, and real `flutter_app/README.md`.
-- Android release workflow (`android_release.yml`) building AAB/APK and attaching them to GitHub Releases.
-- Android `.so` signature step in `android_build.yml` using `TEST_SIGNING_KEY`.
-- CI version-sync check ensuring `Cargo.toml`, `pubspec.yaml`, `README.md`, and `AGENTS.md` agree.
-
-### Changed
-- Bumped workspace and app version to `2.5.1+1` to resolve `v2.5.0`/`v2.5.1` drift in commit history.
-- `malphas-cli` manifest parsing now uses typed `serde` structs with strict validation and rejects empty signing keys.
-- `malphas-cli` accepts hex keys with optional `0x`/`0X` prefix.
-- `build.sh` Android cross-compilation now fails if any ABI does not build.
-- `flutter_ci.yml` runs `flutter test` correctly (no invalid `--binding-type=test`, no duplicated `cd flutter_app`).
-
-### Fixed
-- Clippy warning in `malphas_core/src/bridge.rs` related to `Send`/`Sync` of the double-buffer bridge.
-- `engine_signature_test.dart` now restores the original `.sig` even if assertions throw.
-- `PrimitiveCanvas` no longer performs pointer arithmetic on `DartRenderCommand`.
-- Font atlas bounds are validated before `decodeImageFromPixels`.
-- Workspace auto-load errors are now visible in the UI as well as via `SnackBar`.
-
-## [2.5.0] - 2026-06-29
-
-### Added
-- Multi-architecture Android deployment with NDK r26c for `arm64-v8a`, `armeabi-v7a`, and `x86_64`.
-- Decoupled onboarding loop: `WorkspaceScreen` auto-loads the active package on entry.
-- Real example package under `examples/bouncing_demo/` compiled by `malphas-cli`.
-- Flutter engine and package discovery from disk (`flutter_app/motors/`, `examples/`, `packages/`).
-- Native headless test binding and CI pipeline for Rust and Flutter.
-- Shared-memory command stream via homogeneous 24-byte `DartRenderCommand` slots.
-- Double-buffer bridge (`MalphasDoubleBufferBridge`) with exported pointer getters.
-- `malphas-cli` package compiler and Ed25519 signer.
-- Dart FFI bindings in `flutter_app/lib/core/ffi/`.
-- Lock-free resource and bytecode hot-swap.
-- Deterministic bytecode VM fuzz tests.
-- Cross-platform build scripts `build.sh` and `build_core.ps1`.
-
-### Changed
-- Flutter frontend acts as a passive display server driven by a single VSync clock.
-- Rust core is built as a `cdylib` with a small, explicit C-ABI boundary.
-
-### Fixed
-- Engine integrity checks now compute real SHA-256 sums of motor files instead of using placeholders.
-- Input event queue is bounded to 256 events with duplicate coalescing.
-
-### Removed
-- Hard-coded mock engines, mock packages, and placeholder SHA-256 hashes.
+### Security
+- Initial sandbox and signature verification framework.

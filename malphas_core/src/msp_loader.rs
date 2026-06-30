@@ -23,7 +23,7 @@ use sha2::{Digest, Sha256};
 use crate::integrity_policy::global_trust_anchor;
 
 pub const MSP_MAGIC: [u8; 4] = *b"MLPS";
-pub const MSP_VERSION: u32 = 2;
+pub const MSP_VERSION: u32 = 3;
 
 /// Maximum size of an MSP file that the loader will map.  Files larger than
 /// this are rejected before any memory is mapped.
@@ -59,7 +59,7 @@ pub struct MspHeader {
 
 /// 64-byte aligned entity descriptor.
 ///
-/// The field order is fixed by the v2.9.0 ABI.  Because `tag_mask` is a u64
+/// The field order is fixed by the v2.10.0 ABI.  Because `tag_mask` is a u64
 /// placed after a u32, the compiler inserts 4 bytes of implicit padding before
 /// `tag_mask`.  The manual padding is therefore 40 bytes (not 44) so the total
 /// struct size remains exactly 64 bytes.

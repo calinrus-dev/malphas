@@ -104,7 +104,7 @@ dependencies = [
 
 [[package]]
 name = "bouncing_demo"
-version = "2.9.0"
+version = "2.10.0"
 
 [[package]]
 name = "bumpalo"
@@ -565,7 +565,7 @@ dependencies = [
 
 [[package]]
 name = "malphas_cli"
-version = "2.9.0"
+version = "2.10.0"
 dependencies = [
  "clap",
  "ed25519-dalek",
@@ -578,7 +578,7 @@ dependencies = [
 
 [[package]]
 name = "malphas_core"
-version = "2.9.0"
+version = "2.10.0"
 dependencies = [
  "arc-swap",
  "ed25519-dalek",

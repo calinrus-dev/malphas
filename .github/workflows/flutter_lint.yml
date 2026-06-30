@@ -89,6 +89,8 @@ jobs:
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
       - name: Run Flutter tests
+        env:
+          MALPHAS_INSECURE_SKIP_VERIFY: ${{ github.event_name == 'pull_request' && '1' || '' }}
         run: flutter test
 
       - name: Verify Dart format

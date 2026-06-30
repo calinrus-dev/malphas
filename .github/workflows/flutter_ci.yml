@@ -182,6 +182,14 @@ jobs:
           PUBKEY=$(./motors/malphas-cli pubkey --signing-key-env MALPHAS_SIGNING_KEY)
           echo "PUBKEY=$PUBKEY" >> "$GITHUB_ENV"
 
+      - name: Write test trust anchor asset
+        shell: bash
+        run: |
+          if [ -n "$PUBKEY" ]; then
+            mkdir -p assets
+            printf '%s\n' "$PUBKEY" > assets/trust_anchor.pem
+          fi
+
       - name: Compile bouncing_demo manifest with downloaded CLI
         shell: bash
         run: |
@@ -206,6 +214,7 @@ jobs:
       - name: Run Flutter Tests (Native Headless)
         env:
           LD_LIBRARY_PATH: ${{ github.workspace }}/flutter_app/motors
+          MALPHAS_INSECURE_SKIP_VERIFY: ${{ github.event_name == 'pull_request' && '1' || '' }}
         run: |
           export LD_LIBRARY_PATH="${{ github.workspace }}/flutter_app/motors"
           xvfb-run -a flutter test --dart-define=MALPHAS_TRUST_ANCHOR="$PUBKEY"

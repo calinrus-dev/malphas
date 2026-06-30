@@ -1,4 +1,4 @@
-//! Malphas Source Pack (MSP) compiler v2.9.0.
+//! Malphas Source Pack (MSP) compiler v2.10.0.
 //!
 //! Builds a rigid, 64-byte aligned binary from a human-readable workspace:
 //!
@@ -20,7 +20,7 @@ use sha2::{Digest, Sha256};
 use crate::manifest::Manifest;
 
 pub const MSP_MAGIC: [u8; 4] = *b"MLPS";
-pub const MSP_VERSION: u32 = 2;
+pub const MSP_VERSION: u32 = 3;
 /// Space reserved at the end of the payload section for Error Payloads.
 pub const ERROR_PAYLOAD_RESERVE: usize = 64 * 1024;
 
@@ -451,7 +451,7 @@ mod tests {
         let manifest_dir = tmp_dir.join("workspace");
         fs::create_dir_all(&manifest_dir).unwrap();
 
-        // Regression: the exact traversal payload from the v2.9.0 hardening spec
+        // Regression: the exact traversal payload from the v2.10.0 hardening spec
         // must be rejected before any filesystem read is attempted.
         let manifest = Manifest {
             pack_id: "traversal_test".to_string(),

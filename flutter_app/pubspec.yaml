@@ -1,16 +1,18 @@
 name: malphas_app
-description: "Malphas v2.9.0 — Sovereign Runtime"
+description: "Malphas v2.10.0 — Sovereign Runtime"
 publish_to: 'none'
-version: 2.9.0+1
+version: 2.10.0+1
 
 environment:
-  sdk: '>=3.0.0 <4.0.0'
+  sdk: '>=3.1.0 <4.0.0'
 
 dependencies:
   flutter:
     sdk: flutter
   ffi: ^2.1.2
   path_provider: ^2.1.1
+  path: ^1.9.0
+  flutter_secure_storage: ^9.2.2
   crypto: ^3.0.3
 
 dev_dependencies:
@@ -31,3 +33,4 @@ flutter:
     - assets/fonts/
     - assets/sprites/
     - assets/packages/
+    - assets/trust_anchor.pem

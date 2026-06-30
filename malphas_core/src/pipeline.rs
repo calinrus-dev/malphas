@@ -1,4 +1,4 @@
-// C-ABI structures and the background simulation tick for Malphas v2.9.0.
+// C-ABI structures and the background simulation tick for Malphas v2.10.0.
 //
 // The hot path is driven by a single VSync pulse from Flutter.  On each tick
 // the core obtains the fresh Silver Platter from the mapped MSP and hands the
@@ -16,7 +16,7 @@ use crate::system_host::tick_systems;
 
 /// ABI version embedded in the bridge.  Dart must verify this value before
 /// trusting the layout.  Format: 0xMMmmpp00 (major, minor, patch).
-pub const BRIDGE_ABI_VERSION: u32 = 0x02090000;
+pub const BRIDGE_ABI_VERSION: u32 = 0x02100000;
 
 // ---------------------------------------------------------------------------
 // Global shared-memory handles and engine lifecycle state.
@@ -52,22 +52,25 @@ pub(crate) fn get_commands_generated_count_internal() -> u64 {
 // ---------------------------------------------------------------------------
 // C-ABI structures.
 // ---------------------------------------------------------------------------
-#[repr(C)]
+#[repr(C, align(64))]
 #[derive(Clone, Copy)]
 pub struct DartRenderCommand {
-    pub command_type: u8,
-    pub layer: u8,
-    pub pad: u16,
-    pub x: f32,
-    pub y: f32,
-    pub width: f32,
-    pub height: f32,
-    pub color_rgba: u32,
+    pub cmd_type: u32,   // 4 bytes
+    pub entity_id: u32,  // 4 bytes
+    pub x: f32,          // 4 bytes
+    pub y: f32,          // 4 bytes
+    pub width: f32,      // 4 bytes
+    pub height: f32,     // 4 bytes
+    pub color: u32,      // 4 bytes
+    pub payload_id: u32, // 4 bytes
+    // Total so far: 32 bytes
+    pub _padding: [u32; 8], // 32 bytes padding
 }
+// Total: exactly 64 bytes, 64-byte aligned.
 
 /// In-Arena text object pointed to by text render commands.
 ///
-/// Kept for ABI compatibility; text rendering in v2.9.0 is handled by systems.
+/// Kept for ABI compatibility; text rendering in v2.10.0 is handled by systems.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct TextPayload {
@@ -318,8 +321,8 @@ mod tests {
 
     #[test]
     fn test_struct_alignments() {
-        assert_eq!(std::mem::size_of::<DartRenderCommand>(), 24);
-        assert_eq!(std::mem::align_of::<DartRenderCommand>(), 4);
+        assert_eq!(std::mem::size_of::<DartRenderCommand>(), 64);
+        assert_eq!(std::mem::align_of::<DartRenderCommand>(), 64);
 
         assert_eq!(std::mem::size_of::<MalphasDoubleBufferBridge>(), 64);
         assert_eq!(std::mem::align_of::<MalphasDoubleBufferBridge>(), 64);

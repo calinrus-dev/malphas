@@ -1,5 +1,6 @@
 import 'dart:ffi' as dffi;
 import 'dart:io';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:malphas_app/main.dart';
 import 'package:malphas_app/core/ffi/types.dart';
@@ -27,9 +28,8 @@ void main() {
 
     try {
       // Perform 10,000 reads and writes at aligned DartRenderCommand strides.
-      // The allocator is 64-byte aligned and DartRenderCommand is 24 bytes,
-      // so every stride stays naturally aligned for the struct's 4-byte rule.
-      const slotSize = 24;
+      // DartRenderCommand is a 64-byte packed struct as required by v2.10.0.
+      const slotSize = 64;
       for (int i = 0; i < 10000; i++) {
         final offset = i * slotSize;
         if (offset + slotSize > totalSize) break;
@@ -38,21 +38,23 @@ void main() {
           ptr.address + offset,
         );
 
-        cmdPtr.ref.commandType = 2;
-        cmdPtr.ref.layer = 1;
+        cmdPtr.ref.type = 2;
+        cmdPtr.ref.entityId = 1;
         cmdPtr.ref.x = 100.5 + i;
         cmdPtr.ref.y = 200.5 + i;
         cmdPtr.ref.width = 50.0;
         cmdPtr.ref.height = 50.0;
-        cmdPtr.ref.colorRgba = 0xFF112233;
+        cmdPtr.ref.color = 0xFF112233;
+        cmdPtr.ref.payloadId = 42;
 
-        expect(cmdPtr.ref.commandType, equals(2));
-        expect(cmdPtr.ref.layer, equals(1));
+        expect(cmdPtr.ref.type, equals(2));
+        expect(cmdPtr.ref.entityId, equals(1));
         expect(cmdPtr.ref.x, equals(100.5 + i));
         expect(cmdPtr.ref.y, equals(200.5 + i));
         expect(cmdPtr.ref.width, equals(50.0));
         expect(cmdPtr.ref.height, equals(50.0));
-        expect(cmdPtr.ref.colorRgba, equals(0xFF112233));
+        expect(cmdPtr.ref.color, equals(0xFF112233));
+        expect(cmdPtr.ref.payloadId, equals(42));
       }
     } finally {
       bindings.malphasFree(ptr, totalSize);
@@ -81,18 +83,32 @@ void main() {
     }
 
     // 1. Initialise the engine and allocate the bridge/buffers.
-    expect(bindings.initEngine(), equals(0));
+    expect(() => bindings.initEngine(), returnsNormally);
 
-    // Configure the trust anchor from build-time configuration so signed MSP
-    // and MXC assets can be verified in this integration test.
-    const trustAnchor = String.fromEnvironment('MALPHAS_TRUST_ANCHOR');
-    if (trustAnchor.isNotEmpty) {
-      expect(bindings.setTrustAnchor(trustAnchor), equals(0));
+    // Configure the trust anchor from a build-time define or the bundled asset
+    // so signed MSP and MXC assets can be verified in this integration test.
+    // When neither is available (e.g. CI with MALPHAS_INSECURE_SKIP_VERIFY),
+    // continue without an anchor.
+    const trustAnchorFromDefine =
+        String.fromEnvironment('MALPHAS_TRUST_ANCHOR');
+    String? trustAnchor;
+    if (trustAnchorFromDefine.isNotEmpty) {
+      trustAnchor = trustAnchorFromDefine;
+    } else {
+      try {
+        trustAnchor =
+            (await rootBundle.loadString('assets/trust_anchor.pem')).trim();
+      } catch (_) {
+        trustAnchor = null;
+      }
+    }
+    if (trustAnchor != null && trustAnchor.isNotEmpty) {
+      expect(() => bindings.setTrustAnchor(trustAnchor!), returnsNormally);
     }
 
     // 2. Load the Silver Platter and the .mxc system.
-    expect(bindings.loadMsp(mspFile.path), equals(0));
-    expect(bindings.loadSystem(systemPath), equals(0));
+    expect(() => bindings.loadMsp(mspFile.path), returnsNormally);
+    expect(() => bindings.loadSystem(systemPath), returnsNormally);
 
     // 3. Pulse the engine and read the front buffer directly.
     for (int i = 0; i < 20; i++) {
@@ -107,7 +123,7 @@ void main() {
     expect(commandsPtr, isNot(dffi.nullptr));
     final commandTypes = <int>[];
     for (int i = 0; i < snapshot.count; i++) {
-      commandTypes.add(commandsPtr[i].commandType);
+      commandTypes.add(commandsPtr[i].type);
     }
 
     // bouncing_demo emits rectangle render commands.

@@ -28,11 +28,15 @@ fi
 MAJOR=$(echo "$VERSION" | cut -d. -f1)
 MINOR=$(echo "$VERSION" | cut -d. -f2)
 PATCH=$(echo "$VERSION" | cut -d. -f3)
-EXPECTED_ABI_VERSION=$(printf '0x%02x%02x%02x00' "$MAJOR" "$MINOR" "$PATCH")
+# Encode each semver component as two BCD digits (e.g. 2.10.0 -> 0x02100000).
+major_bcd=$(( MAJOR / 10 * 16 + MAJOR % 10 ))
+minor_bcd=$(( MINOR / 10 * 16 + MINOR % 10 ))
+patch_bcd=$(( PATCH / 10 * 16 + PATCH % 10 ))
+EXPECTED_ABI_VERSION=$(printf '0x%02x%02x%02x00' "$major_bcd" "$minor_bcd" "$patch_bcd")
 
 cargo_version=$(grep -E '^version\s*=' "$ROOT/Cargo.toml" | head -n1 | sed -E 's/.*"([^"]+)".*/\1/')
 flutter_version=$(grep -E '^version:' "$ROOT/flutter_app/pubspec.yaml" | head -n1 | sed -E 's/.*([0-9]+\.[0-9]+\.[0-9]+).*/\1/')
-readme_version=$(grep -E '^# Malphas v[0-9]+\.[0-9]+\.[0-9]+' "$ROOT/README.md" | head -n1 | sed -E 's/.*v([0-9]+\.[0-9]+\.[0-9]+).*/\1/')
+readme_version=$(grep -E '^# Malphas( Engine)? v[0-9]+\.[0-9]+\.[0-9]+' "$ROOT/README.md" | head -n1 | sed -E 's/.*v([0-9]+\.[0-9]+\.[0-9]+).*/\1/')
 abi_version=$(grep -E 'pub const BRIDGE_ABI_VERSION:' "$ROOT/malphas_core/src/pipeline.rs" | sed -E 's/.*=\s*(0x[0-9a-fA-F]+).*/\1/')
 
 echo "VERSION file:      $VERSION"
