@@ -28,7 +28,7 @@ jobs:
               print(tomllib.loads(pathlib.Path('Cargo.toml').read_text(encoding='utf-8'))['workspace']['package']['version'])")
           fi
           PUBSPEC_VERSION=$(grep -E '^version:\s*' flutter_app/pubspec.yaml | sed -E 's/.*:\s*([^+]+).*/\1/')
-          README_VERSION=$(grep -E '^# Malphas v[0-9]+\.[0-9]+\.[0-9]+' README.md | sed -E 's/.*v([0-9]+\.[0-9]+\.[0-9]+).*/\1/')
+          README_VERSION=$(grep -E '^# Malphas( Engine)? v[0-9]+\.[0-9]+\.[0-9]+' README.md | sed -E 's/.*v([0-9]+\.[0-9]+\.[0-9]+).*/\1/')
           echo "Cargo.toml:    $CARGO_VERSION"
           echo "pubspec.yaml:  $PUBSPEC_VERSION"
           echo "README.md:     $README_VERSION"
