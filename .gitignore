@@ -2,6 +2,11 @@
 target/
 **/*.rs.bk
 
+# Secrets and local environment
+.env
+*.pem
+*.key
+
 # IDE and Project configuration
 .idea/
 .vscode/

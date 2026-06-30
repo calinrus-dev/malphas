@@ -1,4 +1,4 @@
-//! Malphas Source Pack (MSP) compiler v2.7.0.
+//! Malphas Source Pack (MSP) compiler v2.7.5.
 //!
 //! Builds a rigid, 64-byte aligned binary from a human-readable workspace:
 //!

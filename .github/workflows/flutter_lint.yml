@@ -59,5 +59,10 @@ jobs:
       - name: Analyze
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
+      - name: Run Flutter tests
+        run: flutter test
+        env:
+          MALPHAS_INSECURE_SKIP_VERIFY: 1
+
       - name: Verify Dart format
         run: dart format --set-exit-if-changed .

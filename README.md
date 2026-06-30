@@ -1,4 +1,4 @@
-# Malphas v2.7.0
+# Malphas v2.7.5
 ## Zero-Copy, Cache-Aligned, Native Memory Router
 
 > **Malphas is not a game engine. It is not a framework. It is not a fantasy console.**
@@ -10,7 +10,7 @@ The difference is that Malphas does not pretend. There is no toy runtime, no coz
 
 The core is Rust. The display terminal is Flutter. Between them stands a minimal C-ABI bridge that does not serialize, does not copy, and does not ask permission from a garbage collector.
 
-> **v2.7.0 — The Memory Router** removes the bytecode VM, the entity-as-object model, and the shared writable Arena. The pipeline is now: flat data on disk (`MSP`) → memory-mapped (`mmap`) → native systems (`MXC`) → raw render commands → screen. Nothing else is allowed in the hot path.
+> **v2.7.5 — Fortress Hardening** keeps the v2.7.0 Memory Router pipeline and hardens it: Rust owns the FFI bridge, all native binaries are Ed25519-signed, the input queue is lockless, and misbehaving systems are isolated with `catch_unwind`. The pipeline remains: flat data on disk (`MSP`) → memory-mapped (`mmap`) → native systems (`MXC`) → raw render commands → screen.
 
 ---
 
@@ -35,7 +35,7 @@ Malphas is composed of three inseparable layers. Each layer has exactly one resp
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                    MALPHAS v2.7.0 — SOVEREIGN RUNTIME                   │
+│                    MALPHAS v2.7.5 — SOVEREIGN RUNTIME                   │
 │                                                                         │
 │   ┌─────────────┐     ┌─────────────────┐     ┌─────────────────────┐  │
 │   │     MSP     │────▶│   Memory Router │────▶│        MXC          │ │

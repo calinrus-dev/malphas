@@ -63,6 +63,19 @@ if (-not (Test-Path $cliSrc -PathType Leaf)) {
     Write-Ok "Built CLI: $cliSrc"
 }
 
+# Sign native artifacts when a test signing key is available.
+$signingKey = $env:MALPHAS_SIGNING_KEY
+if ($signingKey -and (Test-Path $cliSrc -PathType Leaf)) {
+    $key = $signingKey -replace '^0x', '' -replace '^0X', ''
+    if ($key -match '^[0-9a-fA-F]{64}$') {
+        Write-Info "Signing native artifacts with MALPHAS_SIGNING_KEY..."
+        & $cliSrc sign $srcLib $key
+        if ($LASTEXITCODE -ne 0) { Write-Warn "Failed to sign $srcLib" }
+    } else {
+        Write-Warn "MALPHAS_SIGNING_KEY is not a 64-character hex string; skipping signing."
+    }
+}
+
 # Determine signature source (next to DLL, with fallback to repo root)
 if (Test-Path $sigSrc -PathType Leaf) {
     Write-Ok "Found signature next to library: $sigSrc"
@@ -113,6 +126,16 @@ if (Test-Path $sysSrc -PathType Leaf) {
     Write-Ok "Copied system .mxc: $exampleMxc"
     Copy-Item -Path $sysSrc -Destination $motorsMxc -Force -ErrorAction SilentlyContinue
     Write-Ok "Copied system .mxc: $motorsMxc"
+
+    if ($signingKey -and (Test-Path $cliSrc -PathType Leaf)) {
+        $key = $signingKey -replace '^0x', '' -replace '^0X', ''
+        if ($key -match '^[0-9a-fA-F]{64}$') {
+            & $cliSrc sign $motorsMxc $key
+            if ($LASTEXITCODE -ne 0) { Write-Warn "Failed to sign $motorsMxc" }
+            & $cliSrc sign $exampleMxc $key
+            if ($LASTEXITCODE -ne 0) { Write-Warn "Failed to sign $exampleMxc" }
+        }
+    }
 }
 
 # Copy a non-timestamped copy of the library and signature to the workspace root
@@ -120,7 +143,7 @@ Write-Info "Copying non-timestamped motor to workspace root..."
 $rootLib = Join-Path $root $libName
 Copy-Item -Path $srcLib -Destination $rootLib -Force
 Write-Ok "Copied motor: $rootLib"
-if ($sigSrc) {
+if ($sigSrc -and ($sigSrc -ne "$rootLib.sig")) {
     Copy-Item -Path $sigSrc -Destination "$rootLib.sig" -Force
     Write-Ok "Copied signature: $rootLib.sig"
 }

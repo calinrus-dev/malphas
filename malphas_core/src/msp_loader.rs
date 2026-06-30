@@ -1,21 +1,30 @@
 // Zero-copy MSP (Malphas Source Pack) loader.
 //
-// The .msp file is mapped directly into virtual memory via mmap.  A flat
-// "Silver Platter" lookup table of *const u8 pointers is built once at load
-// time: lookup_table[entity_id] points to the absolute memory address of that
-// entity's payload.  The last 64 KB of the payload section are reserved for
-// hardcoded Error Payloads; invalid entity IDs resolve to that address so the
-// hot path never crashes.
+// The .msp file is mapped directly into virtual memory via mmap in read-only
+// mode.  A flat "Silver Platter" lookup table of *const u8 pointers is built
+// once at load time: lookup_table[entity_id] points to the absolute memory
+// address of that entity's payload.  The last 64 KB of the payload section are
+// reserved for hardcoded Error Payloads; invalid entity IDs resolve to that
+// address so the hot path never crashes.
+//
+// Systems must treat payloads as immutable.  If a system needs mutable working
+// memory it must allocate its own SoA state from the read-only static payloads.
 
 use std::ffi::{c_char, CStr};
 use std::fs::OpenOptions;
 use std::path::Path;
-use std::sync::RwLock;
+use std::sync::Arc;
 
-use memmap2::MmapMut;
+use arc_swap::ArcSwapOption;
+use memmap2::Mmap;
+
+use crate::integrity_policy::global_trust_anchor;
 
 pub const MSP_MAGIC: [u8; 4] = *b"MLPS";
 pub const MSP_VERSION: u32 = 2;
+
+const ERR_MSP_SIGNATURE_MISSING: i32 = -120;
+const ERR_MSP_SIGNATURE_INVALID: i32 = -121;
 
 /// Space reserved at the end of the payload section for hardcoded Error
 /// Payloads.  Every valid MSP must contain at least this many bytes of
@@ -41,7 +50,7 @@ pub struct MspHeader {
 
 /// 64-byte aligned entity descriptor.
 ///
-/// The field order is fixed by the v2.7.0 ABI.  Because `tag_mask` is a u64
+/// The field order is fixed by the v2.7.5 ABI.  Because `tag_mask` is a u64
 /// placed after a u32, the compiler inserts 4 bytes of implicit padding before
 /// `tag_mask`.  The manual padding is therefore 40 bytes (not 44) so the total
 /// struct size remains exactly 64 bytes.
@@ -79,7 +88,7 @@ pub fn compute_msp_checksum(data: &[u8]) -> u64 {
 /// In-memory view of a mapped MSP.
 #[allow(dead_code)]
 pub struct MspMap {
-    mmap: MmapMut,
+    mmap: Mmap,
     lookup_table: Vec<*const u8>,
     entity_count: u32,
     payload_section_offset: u32,
@@ -88,24 +97,19 @@ pub struct MspMap {
 }
 
 // The mmap-backed pointer table is read-only after construction and the
-// underlying MmapMut is Send + Sync, so it is safe to share across threads.
+// underlying Mmap is Send + Sync, so it is safe to share across threads.
 unsafe impl Send for MspMap {}
 unsafe impl Sync for MspMap {}
 
 impl MspMap {
-    /// Map an MSP file from disk.  The file is opened read-write so that
-    /// hot-loaded systems may mutate payloads in place without copying data.
+    /// Map an MSP file from disk in read-only mode.
     pub fn load(path: &Path) -> Result<Self, i32> {
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(path)
-            .map_err(|_| -100)?;
-        let mmap = unsafe { MmapMut::map_mut(&file).map_err(|_| -101)? };
+        let file = OpenOptions::new().read(true).open(path).map_err(|_| -100)?;
+        let mmap = unsafe { Mmap::map(&file).map_err(|_| -101)? };
         Self::from_mmap(mmap)
     }
 
-    fn from_mmap(mmap: MmapMut) -> Result<Self, i32> {
+    fn from_mmap(mmap: Mmap) -> Result<Self, i32> {
         let base = mmap.as_ptr();
         let len = mmap.len();
 
@@ -232,29 +236,58 @@ impl MspMap {
     }
 }
 
-static MSP_MAP: RwLock<Option<MspMap>> = RwLock::new(None);
+pub(crate) static MSP_MAP: ArcSwapOption<MspMap> = ArcSwapOption::const_empty();
 
 /// Execute a read-only operation against the currently mapped MSP, if any.
 pub fn with_msp_map<F, R>(f: F) -> Option<R>
 where
     F: FnOnce(&MspMap) -> R,
 {
-    MSP_MAP.read().ok().and_then(|guard| guard.as_ref().map(f))
+    MSP_MAP.load_full().as_ref().map(|arc| f(arc))
+}
+
+/// Locate a sidecar Ed25519 signature file for an MSP.
+///
+/// Tries `<path>.msp.sig` first, then falls back to `<path>.sig`.
+fn msp_signature_path(path: &Path) -> Option<std::path::PathBuf> {
+    let sidecar = path.with_extension("msp.sig");
+    if sidecar.exists() {
+        return Some(sidecar);
+    }
+    let fallback = path.with_extension("sig");
+    if fallback.exists() {
+        return Some(fallback);
+    }
+    None
 }
 
 /// Load or reload an MSP from disk.  Replaces the previous map atomically.
+///
+/// The file must carry a valid Ed25519 sidecar signature unless the
+/// `MALPHAS_INSECURE_SKIP_VERIFY` environment variable is set (debug only).
 pub fn load_msp(path: &Path) -> Result<(), i32> {
+    let skip_verify = std::env::var_os("MALPHAS_INSECURE_SKIP_VERIFY").is_some();
+
+    if !skip_verify {
+        let sig_path = msp_signature_path(path).ok_or(ERR_MSP_SIGNATURE_MISSING)?;
+        let signature_hex =
+            std::fs::read_to_string(&sig_path).map_err(|_| ERR_MSP_SIGNATURE_INVALID)?;
+        if global_trust_anchor()
+            .verify_ed25519_signature(path, &signature_hex)
+            .is_err()
+        {
+            return Err(ERR_MSP_SIGNATURE_INVALID);
+        }
+    }
+
     let new_map = MspMap::load(path)?;
-    let mut guard = MSP_MAP.write().map_err(|_| -110)?;
-    *guard = Some(new_map);
+    MSP_MAP.store(Some(Arc::new(new_map)));
     Ok(())
 }
 
 /// Unload the currently mapped MSP and release the mmap.
 pub fn unload_msp() {
-    if let Ok(mut guard) = MSP_MAP.write() {
-        *guard = None;
-    }
+    MSP_MAP.store(None);
 }
 
 fn c_str_to_path<'a>(ptr: *const c_char) -> Option<&'a Path> {
@@ -281,19 +314,11 @@ pub extern "C" fn refresh_msp_file(filepath: *const c_char) -> i32 {
 }
 
 pub(crate) fn get_msp_lookup_table_internal() -> *const *const u8 {
-    MSP_MAP
-        .read()
-        .ok()
-        .and_then(|guard| guard.as_ref().map(|m| m.lookup_table_ptr()))
-        .unwrap_or(std::ptr::null())
+    with_msp_map(|m| m.lookup_table_ptr()).unwrap_or(std::ptr::null())
 }
 
 pub(crate) fn get_msp_entity_count_internal() -> u32 {
-    MSP_MAP
-        .read()
-        .ok()
-        .and_then(|guard| guard.as_ref().map(|m| m.entity_count()))
-        .unwrap_or(0)
+    with_msp_map(|m| m.entity_count()).unwrap_or(0)
 }
 
 // ---------------------------------------------------------------------------
@@ -316,11 +341,10 @@ mod tests {
         payload_section: &[u8],
     ) {
         let header_size = std::mem::size_of::<MspHeader>();
-        let descriptor_size = std::mem::size_of::<MspEntityDescriptor>();
 
         let entity_table_offset = header_size;
         let payload_section_offset =
-            ((entity_table_offset + descriptors.len() * descriptor_size + 63) / 64) * 64;
+            (entity_table_offset + std::mem::size_of_val(descriptors)).div_ceil(64) * 64;
 
         let mut payload_section = payload_section.to_vec();
         // Reserve the error-payload region after any real payload data.
@@ -335,8 +359,7 @@ mod tests {
             entity_table.extend_from_slice(&descriptor_as_bytes(descriptor));
         }
 
-        let mut data = Vec::new();
-        data.resize(payload_section_offset, 0);
+        let mut data = vec![0; payload_section_offset];
         data[entity_table_offset..entity_table_offset + entity_table.len()]
             .copy_from_slice(&entity_table);
         data.extend_from_slice(&payload_section);

@@ -1,17 +1,19 @@
-//! End-to-end integration test for the Malphas FFI core v2.7.0.
+//! End-to-end integration test for the Malphas FFI core v2.7.5.
 //!
-//! Exercises the full lifecycle: init → load MSP → load bouncing_demo.mxc →
+//! Exercises the full lifecycle: init → load MSP → load signed bouncing_demo.mxc →
 //! trigger pulse → shutdown, verifying that the system produces render
 //! commands and cleans up its background thread.
 
-use std::ffi::c_void;
 use std::io::Write;
 use std::sync::atomic::Ordering;
 
+use ed25519_dalek::{Signer, SigningKey};
 use malphas_core::msp_loader::{
     compute_msp_checksum, MspEntityDescriptor, MspHeader, ERROR_PAYLOAD_RESERVE, MSP_MAGIC,
     MSP_VERSION,
 };
+use rand_core::OsRng;
+use sha2::{Digest, Sha256};
 
 #[repr(C, align(64))]
 #[derive(Clone, Copy)]
@@ -32,9 +34,10 @@ struct EntityPayload {
 }
 
 #[repr(C, align(64))]
+#[allow(dead_code)]
 struct MalphasDoubleBufferBridge {
     buffer_a_command_count: std::sync::atomic::AtomicU32,
-    _padding0: u32,
+    abi_version: u32,
     buffer_a_commands: *mut malphas_core::pipeline::DartRenderCommand,
     buffer_b_command_count: std::sync::atomic::AtomicU32,
     _padding1: u32,
@@ -196,55 +199,31 @@ fn end_to_end_init_load_msp_system_pulse_shutdown() {
         system_path.display()
     );
 
-    let mut bridge = MalphasDoubleBufferBridge {
-        buffer_a_command_count: std::sync::atomic::AtomicU32::new(0),
-        _padding0: 0,
-        buffer_a_commands: std::ptr::null_mut(),
-        buffer_b_command_count: std::sync::atomic::AtomicU32::new(0),
-        _padding1: 0,
-        buffer_b_commands: std::ptr::null_mut(),
-        atomic_back_index: std::sync::atomic::AtomicU8::new(0),
-        _padding2: 0,
-        _padding3: 0,
-        _padding4: 0,
-        commands_written: std::sync::atomic::AtomicU32::new(0),
-        _padding5: 0,
-        _padding6: 0,
-        _padding7: 0,
-        _padding8: 0,
-    };
-
-    let command_capacity = 2048usize;
-    let command_buffer_size =
-        command_capacity * std::mem::size_of::<malphas_core::pipeline::DartRenderCommand>();
-
-    let commands_a = unsafe {
-        std::alloc::alloc(std::alloc::Layout::from_size_align(command_buffer_size, 64).unwrap())
-            as *mut malphas_core::pipeline::DartRenderCommand
-    };
-    let commands_b = unsafe {
-        std::alloc::alloc(std::alloc::Layout::from_size_align(command_buffer_size, 64).unwrap())
-            as *mut malphas_core::pipeline::DartRenderCommand
-    };
-
-    assert!(!commands_a.is_null());
-    assert!(!commands_b.is_null());
-
-    bridge.buffer_a_commands = commands_a;
-    bridge.buffer_b_commands = commands_b;
-
-    let bridge_ptr = &mut bridge as *mut MalphasDoubleBufferBridge as *mut c_void;
-
-    // 1. init
-    let init_result = malphas_core::init_engine(bridge_ptr as *mut _, 2048);
-    assert_eq!(init_result, 0, "init_engine must succeed");
+    // 1. init: Rust allocates and owns the bridge and command buffers.
+    let bridge_ptr = malphas_core::init_engine(2048);
+    assert!(!bridge_ptr.is_null(), "init_engine must succeed");
+    let bridge = unsafe { &*bridge_ptr };
 
     std::thread::sleep(std::time::Duration::from_millis(20));
 
-    // 2. Load a minimal MSP package.
+    // 2. Build and sign a minimal MSP package with an on-the-fly trust anchor.
+    let signing_key = SigningKey::generate(&mut OsRng);
+    let verifying_key = signing_key.verifying_key();
+    malphas_core::set_global_trust_anchor(&hex::encode(verifying_key.to_bytes()))
+        .expect("test trust anchor must be valid");
+
     let msp_path =
         std::env::temp_dir().join(format!("malphas_integration_{}.msp", std::process::id()));
     build_test_msp(&msp_path);
+
+    let msp_bytes = std::fs::read(&msp_path).unwrap();
+    let msp_hash = Sha256::digest(&msp_bytes);
+    let msp_signature = signing_key.sign(&msp_hash);
+    std::fs::write(
+        msp_path.with_extension("msp.sig"),
+        hex::encode(msp_signature.to_bytes()),
+    )
+    .unwrap();
 
     let load_result = malphas_core::load_msp(
         std::ffi::CString::new(msp_path.to_str().unwrap())
@@ -253,9 +232,36 @@ fn end_to_end_init_load_msp_system_pulse_shutdown() {
     );
     assert_eq!(load_result, 0, "load_msp must succeed");
 
-    // 3. Load the bouncing_demo system.
+    // 3. Install the system binary under an approved sandbox root.
+    let original_dir = std::env::current_dir().unwrap();
+    let work_dir = std::env::temp_dir().join(format!("malphas_work_{}", std::process::id()));
+    std::fs::create_dir_all(&work_dir).unwrap();
+    std::env::set_current_dir(&work_dir).unwrap();
+
+    let systems_dir = std::path::Path::new("systems");
+    std::fs::create_dir_all(systems_dir).unwrap();
+
+    let system_file_name = system_path.file_name().unwrap();
+    let sandboxed_system = systems_dir.join(system_file_name);
+    std::fs::copy(&system_path, &sandboxed_system).unwrap();
+
+    let system_bytes = std::fs::read(&sandboxed_system).unwrap();
+    let system_hash = Sha256::digest(&system_bytes);
+    let signature = signing_key.sign(&system_hash);
+    std::fs::write(
+        sandboxed_system.with_extension(
+            sandboxed_system
+                .extension()
+                .and_then(|e| e.to_str())
+                .map_or_else(|| "sig".to_string(), |e| format!("{e}.sig")),
+        ),
+        hex::encode(signature.to_bytes()),
+    )
+    .unwrap();
+
+    let relative_system_path = std::path::Path::new("systems").join(system_file_name);
     let system_result = malphas_core::load_system(
-        std::ffi::CString::new(system_path.to_str().unwrap())
+        std::ffi::CString::new(relative_system_path.to_str().unwrap())
             .unwrap()
             .as_ptr(),
     );
@@ -300,20 +306,10 @@ fn end_to_end_init_load_msp_system_pulse_shutdown() {
     assert_eq!(cmd.command_type, 1);
     assert_eq!(cmd.color_rgba, 0xFF112233);
 
-    // 6. Shutdown.
+    // 6. Shutdown: Rust frees the bridge and command buffers.
     assert_eq!(malphas_core::shutdown_engine(), 0);
 
-    // Clean up command buffers.
-    unsafe {
-        std::alloc::dealloc(
-            commands_a as *mut u8,
-            std::alloc::Layout::from_size_align(command_buffer_size, 64).unwrap(),
-        );
-        std::alloc::dealloc(
-            commands_b as *mut u8,
-            std::alloc::Layout::from_size_align(command_buffer_size, 64).unwrap(),
-        );
-    }
-
     let _ = std::fs::remove_file(&msp_path);
+    std::env::set_current_dir(&original_dir).unwrap();
+    let _ = std::fs::remove_dir_all(&work_dir);
 }

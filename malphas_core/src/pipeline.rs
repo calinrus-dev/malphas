@@ -1,22 +1,25 @@
-// C-ABI structures and the background simulation tick for Malphas v2.7.0.
+// C-ABI structures and the background simulation tick for Malphas v2.7.5.
 //
 // The hot path is driven by a single VSync pulse from Flutter.  On each tick
 // the core obtains the fresh Silver Platter from the mapped MSP and hands the
 // back buffer directly to the loaded `.mxc` systems.  Systems write render
 // commands into the buffer; the core only flips the double-buffer index.
 
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, AtomicUsize, Ordering};
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 
-use crate::msp_loader::with_msp_map;
+use crate::input::drain_input_events;
+use crate::msp_loader::MSP_MAP;
 use crate::system_host::tick_systems;
+
+/// ABI version embedded in the bridge.  Dart must verify this value before
+/// trusting the layout.  Format: 0xMMmmpp00 (major, minor, patch).
+pub const BRIDGE_ABI_VERSION: u32 = 0x02070500;
 
 // ---------------------------------------------------------------------------
 // Global shared-memory handles and engine lifecycle state.
 // ---------------------------------------------------------------------------
-pub(crate) static BRIDGE_ADDRESS: AtomicUsize = AtomicUsize::new(0);
-pub(crate) static MAX_COMMANDS_CAPACITY: AtomicU32 = AtomicU32::new(2048);
 pub(crate) static ENGINE_RUNNING: AtomicBool = AtomicBool::new(false);
 pub(crate) static ENGINE_PAUSED: AtomicBool = AtomicBool::new(false);
 
@@ -78,10 +81,12 @@ pub struct TextPayload {
     // Null-terminated UTF-8 string bytes follow immediately in memory.
 }
 
+/// 64-byte FFI-visible double-buffer bridge.  Fields are laid out so that Dart
+/// can read the atomic counts and back index without copying the struct.
 #[repr(C, align(64))]
 pub struct MalphasDoubleBufferBridge {
     pub buffer_a_command_count: AtomicU32,
-    pub _padding0: u32,
+    pub abi_version: u32,
     pub buffer_a_commands: *mut DartRenderCommand,
     pub buffer_b_command_count: AtomicU32,
     pub _padding1: u32,
@@ -98,10 +103,110 @@ pub struct MalphasDoubleBufferBridge {
     // Total: 64 bytes, 1 cache line.
 }
 
+/// Owned Rust-side view of the bridge and its buffers.  The pointers are valid
+/// for the lifetime of this object.
+pub(crate) struct BridgeState {
+    pub bridge: *mut MalphasDoubleBufferBridge,
+    pub buffer_a: *mut DartRenderCommand,
+    pub buffer_b: *mut DartRenderCommand,
+    pub capacity: u32,
+}
+
+// The pointers point to allocations owned by this struct and never change after
+// construction, so sharing an immutable Arc<BridgeState> across threads is safe.
+unsafe impl Send for BridgeState {}
+unsafe impl Sync for BridgeState {}
+
+static BRIDGE_STATE: Mutex<Option<Arc<BridgeState>>> = Mutex::new(None);
+static LAST_TICK_MICROS: AtomicU64 = AtomicU64::new(0);
+
+// ---------------------------------------------------------------------------
+// Bridge allocation / freeing.
+// ---------------------------------------------------------------------------
+pub(crate) fn allocate_bridge(max_commands: u32) -> Option<*mut MalphasDoubleBufferBridge> {
+    if max_commands == 0 {
+        return None;
+    }
+
+    let bridge_size = std::mem::size_of::<MalphasDoubleBufferBridge>();
+    let bridge_ptr = crate::bridge::malphas_alloc(bridge_size) as *mut MalphasDoubleBufferBridge;
+    if bridge_ptr.is_null() {
+        return None;
+    }
+
+    let command_bytes = (max_commands as usize) * std::mem::size_of::<DartRenderCommand>();
+    let buffer_a = crate::bridge::malphas_alloc(command_bytes) as *mut DartRenderCommand;
+    let buffer_b = crate::bridge::malphas_alloc(command_bytes) as *mut DartRenderCommand;
+    if buffer_a.is_null() || buffer_b.is_null() {
+        crate::bridge::malphas_free(bridge_ptr as *mut u8, bridge_size);
+        if !buffer_a.is_null() {
+            crate::bridge::malphas_free(buffer_a as *mut u8, command_bytes);
+        }
+        if !buffer_b.is_null() {
+            crate::bridge::malphas_free(buffer_b as *mut u8, command_bytes);
+        }
+        return None;
+    }
+
+    unsafe {
+        std::ptr::write_bytes(bridge_ptr as *mut u8, 0, bridge_size);
+        (*bridge_ptr).abi_version = BRIDGE_ABI_VERSION;
+        (*bridge_ptr).buffer_a_commands = buffer_a;
+        (*bridge_ptr).buffer_b_commands = buffer_b;
+        (*bridge_ptr).atomic_back_index.store(0, Ordering::Relaxed);
+        (*bridge_ptr)
+            .buffer_a_command_count
+            .store(0, Ordering::Relaxed);
+        (*bridge_ptr)
+            .buffer_b_command_count
+            .store(0, Ordering::Relaxed);
+        (*bridge_ptr).commands_written.store(0, Ordering::Relaxed);
+    }
+
+    let state = Arc::new(BridgeState {
+        bridge: bridge_ptr,
+        buffer_a,
+        buffer_b,
+        capacity: max_commands,
+    });
+
+    match BRIDGE_STATE.lock() {
+        Ok(mut guard) => {
+            *guard = Some(state);
+        }
+        Err(_) => {
+            // Poisoned lock: clean up rather than leak.
+            crate::bridge::malphas_free(bridge_ptr as *mut u8, bridge_size);
+            crate::bridge::malphas_free(buffer_a as *mut u8, command_bytes);
+            crate::bridge::malphas_free(buffer_b as *mut u8, command_bytes);
+            return None;
+        }
+    }
+
+    Some(bridge_ptr)
+}
+
+pub(crate) fn free_bridge() {
+    let state = BRIDGE_STATE.lock().ok().and_then(|mut g| g.take());
+    if let Some(state) = state {
+        let bridge_size = std::mem::size_of::<MalphasDoubleBufferBridge>();
+        let command_bytes = (state.capacity as usize) * std::mem::size_of::<DartRenderCommand>();
+        crate::bridge::malphas_free(state.buffer_a as *mut u8, command_bytes);
+        crate::bridge::malphas_free(state.buffer_b as *mut u8, command_bytes);
+        crate::bridge::malphas_free(state.bridge as *mut u8, bridge_size);
+        // The Arc drops here, releasing the last reference.
+    }
+}
+
+pub(crate) fn bridge_state() -> Option<Arc<BridgeState>> {
+    BRIDGE_STATE.lock().ok().and_then(|g| g.as_ref().cloned())
+}
+
 // ---------------------------------------------------------------------------
 // Tick entry points.
 // ---------------------------------------------------------------------------
 pub(crate) fn process_engine_tick_sync(_dt_micros: u64) -> i32 {
+    process_engine_tick_internal();
     0
 }
 
@@ -113,46 +218,56 @@ pub(crate) fn process_engine_tick_internal() {
         Ordering::Relaxed,
     );
 
-    let bridge_addr = BRIDGE_ADDRESS.load(Ordering::SeqCst);
-    if bridge_addr == 0 {
-        return;
-    }
+    let bridge = match bridge_state() {
+        Some(b) => b,
+        None => return,
+    };
 
-    let bridge = bridge_addr as *mut MalphasDoubleBufferBridge;
-    let back_index = unsafe { (*bridge).atomic_back_index.load(Ordering::Acquire) };
-
-    let (commands_ptr, command_count_atomic_ptr) = unsafe {
+    let back_index = unsafe { (*bridge.bridge).atomic_back_index.load(Ordering::Acquire) };
+    let commands_ptr = if back_index == 0 {
+        bridge.buffer_a
+    } else {
+        bridge.buffer_b
+    };
+    let command_count_atomic_ptr = unsafe {
         if back_index == 0 {
-            (
-                (*bridge).buffer_a_commands,
-                &(*bridge).buffer_a_command_count,
-            )
+            &(*bridge.bridge).buffer_a_command_count
         } else {
-            (
-                (*bridge).buffer_b_commands,
-                &(*bridge).buffer_b_command_count,
-            )
+            &(*bridge.bridge).buffer_b_command_count
         }
     };
     if commands_ptr.is_null() {
         return;
     }
+    let max_capacity = bridge.capacity;
 
-    let max_capacity = MAX_COMMANDS_CAPACITY.load(Ordering::SeqCst);
+    // Compute real delta time, capped to avoid explosion after a pause.
+    let last_tick = LAST_TICK_MICROS.load(Ordering::Relaxed);
+    let dt_micros = if last_tick == 0 {
+        0
+    } else {
+        tick_start_micros.saturating_sub(last_tick).min(1_000_000)
+    };
+    LAST_TICK_MICROS.store(tick_start_micros, Ordering::Relaxed);
 
-    // Invoke all loaded .mxc systems with the current Silver Platter and the
-    // back buffer.  Systems mutate only their own internal SoA state and write
-    // render commands directly into the buffer.
+    // Drain any input events that arrived since the last tick.  The current ABI
+    // does not pass events to systems; they are consumed here to keep the queue
+    // bounded.
+    let _input_events = drain_input_events();
+
+    // Pin the MSP snapshot for the entire tick so refresh/unload cannot free it
+    // underneath the systems.
+    let msp_snapshot = MSP_MAP.load_full();
     let msp_tick_start = telemetry_now_micros();
     let mut written: u32 = 0;
-    if let Some((lookup_table, entity_count)) =
-        with_msp_map(|m| (m.lookup_table_ptr(), m.entity_count()))
-    {
+    if let Some(msp) = msp_snapshot.as_ref() {
+        let lookup_table = msp.lookup_table_ptr();
+        let entity_count = msp.entity_count();
         if !lookup_table.is_null() {
             tick_systems(
                 lookup_table,
                 entity_count,
-                0,
+                dt_micros,
                 commands_ptr,
                 max_capacity,
                 &mut written,
@@ -167,15 +282,17 @@ pub(crate) fn process_engine_tick_internal() {
 
     unsafe {
         command_count_atomic_ptr.store(written, Ordering::Release);
-        (*bridge).commands_written.store(written, Ordering::Release);
+        (*bridge.bridge)
+            .commands_written
+            .store(written, Ordering::Release);
     }
 
     HIT_TESTS_COUNT.store(0, Ordering::Relaxed);
     COMMANDS_GENERATED_COUNT.store(written as u64, Ordering::Relaxed);
 
-    let next_back = 1 - back_index;
+    let next_back = if back_index == 0 { 1 } else { 0 };
     unsafe {
-        (*bridge)
+        (*bridge.bridge)
             .atomic_back_index
             .store(next_back, Ordering::Release);
     }

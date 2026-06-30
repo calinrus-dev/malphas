@@ -93,10 +93,10 @@ String? _resolveSystemPath(String workspace, String packId) {
           : ['.mxc', '.so'];
   for (final ext in exts) {
     final candidates = [
+      '$workspace/flutter_app/motors/$packId$ext',
       '$workspace/examples/$packId/$packId$ext',
       '$workspace/packages/$packId$ext',
       '$workspace/$packId$ext',
-      '$workspace/flutter_app/motors/$packId$ext',
     ];
     for (final candidate in candidates) {
       if (File(candidate).existsSync()) return candidate;

@@ -1,13 +1,15 @@
 // Engine lifecycle internals, pulse synchronisation, FFI pointer delegates,
 // and the 64-byte aligned allocator exposed to Dart.
+use std::alloc::Layout;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
 use crate::msp_loader::unload_msp;
 use crate::pipeline::{
-    process_engine_tick_internal, telemetry_now_micros, DartRenderCommand,
-    MalphasDoubleBufferBridge, TextPayload, BRIDGE_ADDRESS, ENGINE_PAUSED, ENGINE_RUNNING,
-    LAST_PULSE_MICROS, MAX_COMMANDS_CAPACITY,
+    allocate_bridge, free_bridge, process_engine_tick_internal, telemetry_now_micros,
+    DartRenderCommand, MalphasDoubleBufferBridge, TextPayload, ENGINE_PAUSED, ENGINE_RUNNING,
+    LAST_PULSE_MICROS,
 };
 use crate::system_host::clear_systems;
 
@@ -20,6 +22,16 @@ pub(crate) static INIT_LOCK: Mutex<()> = Mutex::new(());
 /// ticks.  Dropping the sender (during shutdown) wakes the receiver so the
 /// thread can exit cleanly.
 static PULSE_SENDER: Mutex<Option<std::sync::mpsc::Sender<()>>> = Mutex::new(None);
+
+/// Registry of layouts allocated through `malphas_alloc`.  The key is the
+/// pointer address returned to the caller.  This lets `malphas_free` deallocate
+/// with the exact layout used at allocation time, regardless of what size the
+/// caller claims.
+static LAYOUT_REGISTRY: OnceLock<Mutex<HashMap<usize, Layout>>> = OnceLock::new();
+
+fn layout_registry() -> &'static Mutex<HashMap<usize, Layout>> {
+    LAYOUT_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 /// Number of background simulation threads currently alive.
 pub(crate) static ACTIVE_THREADS: AtomicUsize = AtomicUsize::new(0);
@@ -43,17 +55,9 @@ fn is_aligned<T>(ptr: *const T) -> bool {
     (ptr as usize).is_multiple_of(std::mem::align_of::<T>())
 }
 
-pub(crate) fn init_engine_internal(
-    bridge_ptr: *mut MalphasDoubleBufferBridge,
-    max_commands: u32,
-) -> i32 {
-    if bridge_ptr.is_null() {
-        return -1;
-    }
-    // The bridge must satisfy the 64-byte alignment required by the ARM64 ABI
-    // and by our #[repr(C, align(64))] structs.
-    if !is_aligned(bridge_ptr) {
-        return -1;
+pub(crate) fn init_engine_internal(max_commands: u32) -> *mut MalphasDoubleBufferBridge {
+    if max_commands == 0 {
+        return std::ptr::null_mut();
     }
 
     let _init_guard = INIT_LOCK.lock();
@@ -65,17 +69,22 @@ pub(crate) fn init_engine_internal(
         std::thread::yield_now();
     }
 
-    // 2. Publish new shared-memory handles.
-    BRIDGE_ADDRESS.store(bridge_ptr as usize, Ordering::SeqCst);
-    MAX_COMMANDS_CAPACITY.store(max_commands, Ordering::SeqCst);
+    // 2. Free any previous bridge owned by Rust.
+    free_bridge();
 
-    // 3. Create a fresh single-clock pulse channel for this session.
+    // 3. Allocate a new bridge and command buffers from Rust.
+    let bridge_ptr = match allocate_bridge(max_commands) {
+        Some(p) => p,
+        None => return std::ptr::null_mut(),
+    };
+
+    // 4. Create a fresh single-clock pulse channel for this session.
     let (pulse_tx, pulse_rx) = std::sync::mpsc::channel::<()>();
     if let Ok(mut guard) = PULSE_SENDER.lock() {
         *guard = Some(pulse_tx);
     }
 
-    // 4. Start the background simulation thread.  It no longer has its own
+    // 5. Start the background simulation thread.  It no longer has its own
     //    timer; Flutter drives every tick via `trigger_engine_pulse`.
     ENGINE_PAUSED.store(false, Ordering::SeqCst);
     ENGINE_RUNNING.store(true, Ordering::SeqCst);
@@ -108,7 +117,7 @@ pub(crate) fn init_engine_internal(
     // switch during app startup.
     let _ = ready_rx.recv();
 
-    0
+    bridge_ptr
 }
 
 pub(crate) fn shutdown_engine_internal() -> i32 {
@@ -123,10 +132,11 @@ pub(crate) fn shutdown_engine_internal() -> i32 {
     while ACTIVE_THREADS.load(Ordering::SeqCst) > 0 {
         std::thread::yield_now();
     }
-    BRIDGE_ADDRESS.store(0, Ordering::SeqCst);
 
     // By now the simulation thread has exited (ACTIVE_THREADS == 0), so no
-    // reader can observe the old state.  Drop the mapped MSP and loaded systems.
+    // reader can observe the old state.  Free the bridge/buffers owned by Rust,
+    // then drop the mapped MSP and loaded systems.
+    free_bridge();
     unload_msp();
     clear_systems();
     0
@@ -244,22 +254,32 @@ pub(crate) fn malphas_alloc(size: usize) -> *mut u8 {
     if size == 0 {
         return std::ptr::null_mut();
     }
-    let layout = match std::alloc::Layout::from_size_align(size, 64) {
+    let layout = match Layout::from_size_align(size, 64) {
         Ok(l) => l,
         Err(_) => return std::ptr::null_mut(),
     };
-    unsafe { std::alloc::alloc(layout) }
+    let ptr = unsafe { std::alloc::alloc(layout) };
+    if !ptr.is_null() {
+        if let Ok(mut guard) = layout_registry().lock() {
+            guard.insert(ptr as usize, layout);
+        }
+    }
+    ptr
 }
 
-pub(crate) fn malphas_free(ptr: *mut u8, size: usize) {
-    if ptr.is_null() || size == 0 {
+pub(crate) fn malphas_free(ptr: *mut u8, _size: usize) {
+    if ptr.is_null() {
         return;
     }
-    let layout = match std::alloc::Layout::from_size_align(size, 64) {
-        Ok(l) => l,
-        Err(_) => return,
+    let layout = match layout_registry().lock() {
+        Ok(mut guard) => guard.remove(&(ptr as usize)),
+        Err(_) => None,
     };
-    unsafe { std::alloc::dealloc(ptr, layout) }
+    if let Some(layout) = layout {
+        unsafe { std::alloc::dealloc(ptr, layout) }
+    }
+    // If the pointer is not in the registry we refuse to deallocate: the caller
+    // passed either a foreign pointer or a size/layout mismatch.
 }
 
 // ---------------------------------------------------------------------------
@@ -268,7 +288,6 @@ pub(crate) fn malphas_free(ptr: *mut u8, size: usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
 
     #[test]
     fn test_aligned_allocator_round_trip() {
@@ -286,13 +305,8 @@ mod tests {
 
     #[test]
     fn test_active_thread_lifecycle() {
-        let bridge = Arc::new(std::sync::Mutex::new(unsafe {
-            std::mem::zeroed::<crate::pipeline::MalphasDoubleBufferBridge>()
-        }));
-        let bridge_ptr =
-            &mut *bridge.lock().unwrap() as *mut crate::pipeline::MalphasDoubleBufferBridge;
-
-        assert_eq!(crate::init_engine(bridge_ptr, 2048), 0);
+        let bridge_ptr = crate::init_engine(2048);
+        assert!(!bridge_ptr.is_null());
         std::thread::sleep(std::time::Duration::from_millis(20));
         assert!(ACTIVE_THREADS.load(Ordering::SeqCst) > 0);
 
@@ -308,18 +322,9 @@ mod tests {
     }
 
     #[test]
-    fn test_init_engine_rejects_misaligned_pointers() {
-        let mut bridge =
-            unsafe { std::mem::zeroed::<crate::pipeline::MalphasDoubleBufferBridge>() };
-        let bridge_ptr: *mut crate::pipeline::MalphasDoubleBufferBridge = &mut bridge;
-
-        // Misaligned bridge pointer must be rejected.
-        assert_eq!(
-            unsafe { crate::init_engine(bridge_ptr.byte_add(1), 2048) },
-            -1
-        );
-        // Null bridge pointer must be rejected.
-        assert_eq!(crate::init_engine(std::ptr::null_mut(), 2048), -1);
+    fn test_init_engine_rejects_zero_commands() {
+        // Zero commands is invalid; the engine must refuse to start.
+        assert!(crate::init_engine(0).is_null());
     }
 
     #[test]

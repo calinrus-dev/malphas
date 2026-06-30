@@ -6,7 +6,7 @@ import 'package:flutter/foundation.dart';
 
 import 'types.dart';
 
-/// Zero-copy FFI gateway to the Rust `malphas_core` v2.7.0 engine.
+/// Zero-copy FFI gateway to the Rust `malphas_core` v2.7.5 engine.
 ///
 /// The old arena-based entity setup API has been removed.  Systems now own all
 /// simulation state; Flutter only drives the vsync pulse and reads the front
@@ -18,14 +18,8 @@ class MalphasBindings extends ChangeNotifier {
     _loadLibrary();
   }
 
-  static const int _bridgeSize = 64;
-  static const int _commandSize = 24;
-
   DynamicLibrary? _lib;
   Pointer<MalphasDoubleBufferBridge>? _bridge;
-  Pointer<DartRenderCommand>? _bufferA;
-  Pointer<DartRenderCommand>? _bufferB;
-  int _maxCommands = 0;
 
   bool _nativeAvailable = false;
   bool get isNativeAvailable => _nativeAvailable;
@@ -123,8 +117,6 @@ class MalphasBindings extends ChangeNotifier {
   late final _LoadMsp _loadMsp;
   late final _RefreshMsp _refreshMsp;
   late final _LoadSystem _loadSystem;
-  late final _GetBufferCommandCount _getBufferACommandCount;
-  late final _GetBufferCommandCount _getBufferBCommandCount;
   late final _GetBackIndex _getBackIndex;
   late final _GetCommandsWritten _getCommandsWritten;
   late final _GetMspEntityCount _getMspEntityCount;
@@ -134,6 +126,7 @@ class MalphasBindings extends ChangeNotifier {
   late final _VerifyEngineSignature _verifyEngineSignature;
   late final _VerifyBinaryIntegrity _verifyBinaryIntegrity;
   late final _ProcessInputEvent _processInputEvent;
+  late final _SetTrustAnchor _setTrustAnchor;
   late final _GetU64 _getVmTickMicros;
   late final _GetU64 _getPulseLatencyMicros;
   late final _GetU64 _getHitTestsCount;
@@ -157,10 +150,6 @@ class MalphasBindings extends ChangeNotifier {
     _refreshMsp = lib.lookupFunction<_LoadMspNative, _LoadMsp>('refresh_msp');
     _loadSystem =
         lib.lookupFunction<_LoadMspNative, _LoadSystem>('load_system');
-    _getBufferACommandCount = lib.lookupFunction<_GetBufferCommandCountNative,
-        _GetBufferCommandCount>('get_buffer_a_command_count');
-    _getBufferBCommandCount = lib.lookupFunction<_GetBufferCommandCountNative,
-        _GetBufferCommandCount>('get_buffer_b_command_count');
     _getBackIndex = lib
         .lookupFunction<_GetBackIndexNative, _GetBackIndex>('get_back_index');
     _getCommandsWritten =
@@ -183,6 +172,9 @@ class MalphasBindings extends ChangeNotifier {
     _processInputEvent =
         lib.lookupFunction<_ProcessInputEventNative, _ProcessInputEvent>(
             'process_input_event');
+    _setTrustAnchor =
+        lib.lookupFunction<_SetTrustAnchorNative, _SetTrustAnchor>(
+            'set_trust_anchor');
     _getVmTickMicros =
         lib.lookupFunction<_GetU64Native, _GetU64>('get_vm_tick_micros');
     _getPulseLatencyMicros =
@@ -196,57 +188,26 @@ class MalphasBindings extends ChangeNotifier {
   // ---------------------------------------------------------------------------
   // Engine lifecycle.
   // ---------------------------------------------------------------------------
-  /// Initialises the engine with a freshly allocated 64-byte aligned bridge and
-  /// two command buffers.  Returns `0` on success or a negative error code.
+  /// Initialises the engine and returns `0` on success or a negative error code.
+  ///
+  /// Rust allocates and owns the 64-byte aligned bridge and command buffers;
+  /// Dart only receives the pointer and must treat it as read-only.
   int initEngine({int maxCommands = 2048}) {
     if (!_nativeAvailable || _lib == null) return -1;
 
     shutdownEngine();
 
-    final bridgePtr = _malphasAlloc(_bridgeSize);
+    final bridgePtr = _initEngine(maxCommands);
     if (bridgePtr == nullptr) return -1;
     _bridge = bridgePtr.cast<MalphasDoubleBufferBridge>();
-
-    final commandBytes = maxCommands * _commandSize;
-    final bufferAPtr = _malphasAlloc(commandBytes);
-    final bufferBPtr = _malphasAlloc(commandBytes);
-    if (bufferAPtr == nullptr || bufferBPtr == nullptr) {
-      shutdownEngine();
-      return -1;
-    }
-    _bufferA = bufferAPtr.cast<DartRenderCommand>();
-    _bufferB = bufferBPtr.cast<DartRenderCommand>();
-    _maxCommands = maxCommands;
-
-    final bridge = _bridge!.ref;
-    bridge.bufferACommandCount = 0;
-    bridge.bufferBCommandCount = 0;
-    bridge.bufferACommands = _bufferA!;
-    bridge.bufferBCommands = _bufferB!;
-    bridge.atomicBackIndex = 0;
-    bridge.commandsWritten = 0;
-
-    return _initEngine(_bridge!, maxCommands);
+    return 0;
   }
 
-  /// Tears down the engine thread and releases the bridge/command buffers.
+  /// Tears down the engine thread and frees the Rust-owned bridge.
   int shutdownEngine() {
-    if (!_nativeAvailable || _bridge == null) return 0;
+    if (!_nativeAvailable) return 0;
     final result = _shutdownEngine();
-
-    if (_bufferA != null) {
-      _malphasFree(_bufferA!.cast<Uint8>(), _maxCommands * _commandSize);
-      _bufferA = null;
-    }
-    if (_bufferB != null) {
-      _malphasFree(_bufferB!.cast<Uint8>(), _maxCommands * _commandSize);
-      _bufferB = null;
-    }
-    if (_bridge != null) {
-      _malphasFree(_bridge!.cast<Uint8>(), _bridgeSize);
-      _bridge = null;
-    }
-    _maxCommands = 0;
+    _bridge = null;
     return result;
   }
 
@@ -292,16 +253,18 @@ class MalphasBindings extends ChangeNotifier {
   // ---------------------------------------------------------------------------
   Pointer<DartRenderCommand> get frontCommands {
     if (_bridge == null) return nullptr;
-    final backIndex = _getBackIndex(_bridge!);
-    return backIndex == 0 ? _bufferB! : _bufferA!;
+    final bridge = _bridge!.ref;
+    return bridge.atomicBackIndex == 0
+        ? bridge.bufferBCommands
+        : bridge.bufferACommands;
   }
 
   int get frontCount {
     if (_bridge == null) return 0;
-    final backIndex = _getBackIndex(_bridge!);
-    return backIndex == 0
-        ? _getBufferBCommandCount(_bridge!)
-        : _getBufferACommandCount(_bridge!);
+    final bridge = _bridge!.ref;
+    return bridge.atomicBackIndex == 0
+        ? bridge.bufferBCommandCount
+        : bridge.bufferACommandCount;
   }
 
   /// Legacy alias for tests that previously read `commandCount`.
@@ -352,6 +315,16 @@ class MalphasBindings extends ChangeNotifier {
     return _processInputEvent(type, x, y);
   }
 
+  /// Overrides the default test-only Ed25519 trust anchor used for `.msp` and
+  /// `.mxc` signature verification.  Returns `0` on success.
+  int setTrustAnchor(String publicKeyHex) {
+    if (!_nativeAvailable) return -1;
+    return using((arena) {
+      final cKey = publicKeyHex.toNativeUtf8(allocator: arena);
+      return _setTrustAnchor(cKey);
+    });
+  }
+
   int get vmTickMicros => _nativeAvailable ? _getVmTickMicros() : 0;
   int get pulseLatencyMicros => _nativeAvailable ? _getPulseLatencyMicros() : 0;
   int get hitTestsCount => _nativeAvailable ? _getHitTestsCount() : 0;
@@ -365,9 +338,8 @@ class MalphasBindings extends ChangeNotifier {
 // ---------------------------------------------------------------------------
 // Native / Dart function type definitions.
 // ---------------------------------------------------------------------------
-typedef _InitEngineNative = Int32 Function(
-    Pointer<MalphasDoubleBufferBridge>, Uint32);
-typedef _InitEngine = int Function(Pointer<MalphasDoubleBufferBridge>, int);
+typedef _InitEngineNative = Pointer<MalphasDoubleBufferBridge> Function(Uint32);
+typedef _InitEngine = Pointer<MalphasDoubleBufferBridge> Function(int);
 
 typedef _ShutdownEngineNative = Int32 Function();
 typedef _ShutdownEngine = int Function();
@@ -382,11 +354,6 @@ typedef _LoadMspNative = Int32 Function(Pointer<Utf8>);
 typedef _LoadMsp = int Function(Pointer<Utf8>);
 typedef _LoadSystem = int Function(Pointer<Utf8>);
 typedef _RefreshMsp = int Function(Pointer<Utf8>);
-
-typedef _GetBufferCommandCountNative = Uint32 Function(
-    Pointer<MalphasDoubleBufferBridge>);
-typedef _GetBufferCommandCount = int Function(
-    Pointer<MalphasDoubleBufferBridge>);
 
 typedef _GetBackIndexNative = Uint8 Function(
     Pointer<MalphasDoubleBufferBridge>);
@@ -419,6 +386,9 @@ typedef _VerifyBinaryIntegrity = int Function(Pointer<Utf8>, Pointer<Utf8>);
 
 typedef _ProcessInputEventNative = Int32 Function(Int32, Float, Float);
 typedef _ProcessInputEvent = int Function(int, double, double);
+
+typedef _SetTrustAnchorNative = Int32 Function(Pointer<Utf8>);
+typedef _SetTrustAnchor = int Function(Pointer<Utf8>);
 
 typedef _GetU64Native = Uint64 Function();
 typedef _GetU64 = int Function();

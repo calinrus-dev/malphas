@@ -1,4 +1,4 @@
-// Malphas Core v2.7.0 - Data-Oriented Design memory router.
+// Malphas Core v2.7.5 - Data-Oriented Design memory router.
 //
 // This crate is a C-ABI boundary; pointer arguments are validated inside each
 // function before they are dereferenced, so the not_unsafe_ptr_arg_deref lint
@@ -11,6 +11,11 @@ pub mod input;
 pub mod msp_loader;
 pub mod pipeline;
 pub mod system_host;
+
+mod integrity_policy;
+
+pub use integrity_policy::set_global_trust_anchor;
+use integrity_policy::IntegrityError;
 
 // The VM bytecode interpreter was deprecated in v2.7.0.  The module is kept
 // empty so existing imports do not break during the migration.
@@ -52,12 +57,29 @@ use crate::system_host::{
 // ---------------------------------------------------------------------------
 // Engine lifecycle.
 // ---------------------------------------------------------------------------
+/// Initialise the engine and return a pointer to the Rust-owned bridge.
+///
+/// The returned pointer must be treated as read-only by Dart and must remain
+/// valid until `shutdown_engine` returns.  Rust allocates and frees the bridge
+/// and command buffers.
 #[no_mangle]
-pub extern "C" fn init_engine(
-    bridge_ptr: *mut MalphasDoubleBufferBridge,
-    max_commands: u32,
-) -> i32 {
-    init_engine_internal(bridge_ptr, max_commands)
+pub extern "C" fn init_engine(max_commands: u32) -> *mut MalphasDoubleBufferBridge {
+    init_engine_internal(max_commands)
+}
+
+#[no_mangle]
+pub extern "C" fn set_trust_anchor(public_key_hex: *const c_char) -> i32 {
+    let hex = match crypto::c_str_to_str(public_key_hex) {
+        Some(s) => s,
+        None => return -1,
+    };
+    match set_global_trust_anchor(hex) {
+        Ok(()) => 0,
+        Err(IntegrityError::HexDecode(_)) => -2,
+        Err(IntegrityError::InvalidPublicKeyLength { .. }) => -3,
+        Err(IntegrityError::SignatureInvalid) => -4,
+        Err(_) => -5,
+    }
 }
 
 #[no_mangle]

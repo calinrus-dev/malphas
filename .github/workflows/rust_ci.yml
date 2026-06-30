@@ -29,8 +29,12 @@ jobs:
       - name: Check formatting
         run: cargo fmt -- --check
 
+      - name: Check version sync
+        shell: bash
+        run: bash scripts/check_version_sync.sh
+
       - name: Run Clippy
-        run: cargo clippy --release -- -D warnings
+        run: cargo clippy --release --all-targets -- -D warnings
 
       - name: Build release
         run: cargo build --release --locked
@@ -38,18 +42,23 @@ jobs:
       - name: Run tests
         run: cargo test --release --locked
 
+      - name: Run security tests
+        run: cargo test --release --locked --test security_tests
+
       - name: Sign native engine with test key
         shell: bash
         env:
-          TEST_SIGNING_KEY: ${{ secrets.TEST_SIGNING_KEY }}
+          MALPHAS_SIGNING_KEY: ${{ secrets.TEST_SIGNING_KEY }}
         run: |
-          if [ -z "$TEST_SIGNING_KEY" ]; then
-            echo "TEST_SIGNING_KEY secret is not set; skipping engine signing."
+          if [ -z "$MALPHAS_SIGNING_KEY" ]; then
+            echo "MALPHAS_SIGNING_KEY secret is not set; skipping engine signing."
             echo "Unsigned artifacts will still be uploaded."
             exit 0
           fi
-          if ! echo "$TEST_SIGNING_KEY" | grep -qxE '[0-9a-fA-F]{64}'; then
-            echo "Error: TEST_SIGNING_KEY must be a 64-character hex string."
+          key="${MALPHAS_SIGNING_KEY#0x}"
+          key="${key#0X}"
+          if ! echo "$key" | grep -qxE '[0-9a-fA-F]{64}'; then
+            echo "Error: MALPHAS_SIGNING_KEY must be a 64-character hex string (optional 0x/0X prefix)."
             exit 1
           fi
           CLI=./target/release/malphas-cli
@@ -58,7 +67,7 @@ jobs:
           fi
           for lib in target/release/libmalphas_core.so target/release/libmalphas_core.dylib target/release/malphas_core.dll; do
             if [ -f "$lib" ]; then
-              "$CLI" sign "$lib" "$TEST_SIGNING_KEY"
+              "$CLI" sign "$lib" "$key"
             fi
           done
 
@@ -97,4 +106,33 @@ jobs:
             target/release/bouncing_demo.dll
             target/release/libbouncing_demo.so
             target/release/libbouncing_demo.dylib
+          if-no-files-found: ignore
+
+      - name: Sign bouncing_demo system as .mxc
+        shell: bash
+        env:
+          MALPHAS_SIGNING_KEY: ${{ secrets.TEST_SIGNING_KEY }}
+        run: |
+          if [ -z "$MALPHAS_SIGNING_KEY" ]; then
+            echo "MALPHAS_SIGNING_KEY secret is not set; skipping .mxc signing."
+            exit 0
+          fi
+          CLI=./target/release/malphas-cli
+          if [ -f "$CLI.exe" ]; then
+            CLI="$CLI.exe"
+          fi
+          for sys in target/release/libbouncing_demo.so target/release/libbouncing_demo.dylib target/release/bouncing_demo.dll; do
+            if [ -f "$sys" ]; then
+              cp "$sys" bouncing_demo.mxc
+              "$CLI" sign bouncing_demo.mxc "$key"
+            fi
+          done
+
+      - name: Upload signed bouncing_demo .mxc
+        uses: actions/upload-artifact@v4
+        with:
+          name: bouncing_demo-mxc-${{ matrix.os }}
+          path: |
+            bouncing_demo.mxc
+            bouncing_demo.mxc.sig
           if-no-files-found: ignore

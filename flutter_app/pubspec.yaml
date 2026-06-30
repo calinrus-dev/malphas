@@ -1,7 +1,7 @@
 name: malphas_app
-description: "Malphas v2.7.0 — Multi-Architecture Android Deployment"
+description: "Malphas v2.7.5 — Fortress Hardening"
 publish_to: 'none'
-version: 2.7.0+1
+version: 2.7.5+1
 
 environment:
   sdk: '>=3.0.0 <4.0.0'

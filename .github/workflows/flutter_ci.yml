@@ -16,7 +16,17 @@ jobs:
       - name: Verify versions match across Cargo.toml, pubspec.yaml and README.md
         shell: bash
         run: |
-          CARGO_VERSION=$(grep -E '^version\s*=' Cargo.toml | head -1 | sed -E 's/.*=\s*"([^"]+)".*/\1/')
+          # Prefer cargo metadata for the workspace package version; fall back to
+          # a robust Cargo.toml parser if jq is unavailable.
+          CARGO_VERSION=""
+          if command -v jq >/dev/null 2>&1; then
+            CARGO_VERSION=$(cargo metadata --format-version 1 --no-deps 2>/dev/null | \
+              jq -r '.packages[] | select(.name=="malphas_core") | .version' 2>/dev/null)
+          fi
+          if [ -z "$CARGO_VERSION" ]; then
+            CARGO_VERSION=$(python3 -c "import tomllib,pathlib; \
+              print(tomllib.loads(pathlib.Path('Cargo.toml').read_text(encoding='utf-8'))['workspace']['package']['version'])")
+          fi
           PUBSPEC_VERSION=$(grep -E '^version:\s*' flutter_app/pubspec.yaml | sed -E 's/.*:\s*([^+]+).*/\1/')
           README_VERSION=$(grep -E '^# Malphas v[0-9]+\.[0-9]+\.[0-9]+' README.md | sed -E 's/.*v([0-9]+\.[0-9]+\.[0-9]+).*/\1/')
           echo "Cargo.toml:    $CARGO_VERSION"

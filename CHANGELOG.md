@@ -15,6 +15,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+## [2.7.5] - 2026-06-30
+
+### Added
+- **Fortress hardening**: Rust now owns the FFI bridge and command buffers; Flutter only receives a read-only pointer.
+- Ed25519 sidecar signature verification for `.msp` (`.msp.sig`) and `.mxc`/`.so`/`.dll` (`.sig`) files via a configurable global trust anchor.
+- Runtime sandbox for `.mxc` loading: only paths under `systems/`, `packages/`, or `motors/` are accepted.
+- Centralized `IntegrityPolicy` with streaming SHA-256, constant-time comparison, and a 256 MiB cap on signed files.
+- Secure ZIP extractor with compression-ratio, entry-count, total-size, and symlink defences.
+- `set_trust_anchor` FFI + Dart `setTrustAnchor` so Flutter can override the default test-only trust anchor at runtime.
+- Lockless input event queue with validation, coalescence, and per-frame draining.
+- `catch_unwind` panic isolation around system `init` and `tick`; misbehaving systems are tainted instead of crashing the engine.
+- `scripts/check_version_sync.sh` and CI step to keep Rust workspace and Flutter pubspec versions aligned.
+- Security integration test suite (`malphas_core/tests/security_tests.rs`) covering unsigned/invalid MSP signatures, unsigned/invalid system signatures, and sandbox path traversal rejection.
+
+### Changed
+- `init_engine` ABI break: now takes only `max_commands` and returns the Rust-allocated bridge pointer.
+- `malphas-cli sign` now signs the SHA-256 hash of the file, matching the core verifier.
+- `MalphasBindings.initEngine` updated to the Rust-owned bridge model; removed Dart-side bridge/buffer allocation.
+- `PrimitiveCanvas` front-buffer getters read `bufferACommands`/`bufferBCommands` directly from the bridge struct.
+- Bumped workspace version and `pubspec.yaml` to `2.7.5`.
+- Replaced the default test-only Ed25519 trust anchor with a freshly generated keypair.
+- `rust_ci.yml` now passes the signing key to `malphas-cli sign` and signs both the engine library and `bouncing_demo.mxc`.
+- `build_core.ps1` signs native artifacts when `MALPHAS_SIGNING_KEY` is present.
+
+### Fixed
+- Clippy `--all-targets -D warnings` is now clean.
+- Unused imports/dead code warnings across `malphas_core` cleaned up.
+
 ## [2.7.0] - 2026-06-30
 
 ### Added

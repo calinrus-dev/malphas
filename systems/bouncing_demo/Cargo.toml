@@ -1,6 +1,6 @@
 [package]
 name = "bouncing_demo"
-version = "2.7.0"
+version.workspace = true
 edition = "2021"
 authors = ["Calin Rus"]
 

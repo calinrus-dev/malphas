@@ -1,4 +1,4 @@
-//! Malphas package compiler and signer CLI (v2.7.0).
+//! Malphas package compiler and signer CLI (v2.7.5).
 //!
 //! Subcommands:
 //!   compile <manifest.json>  -- Build <pack_id>.msp and generate bindings.rs
@@ -10,6 +10,7 @@ mod manifest;
 
 use clap::{Parser, Subcommand};
 use ed25519_dalek::{Signer, SigningKey};
+use sha2::{Digest, Sha256};
 use std::error::Error;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -110,7 +111,8 @@ fn sign_file(file_path: &Path, private_key_hex: &str) -> Result<(), Box<dyn Erro
     let signing_key = SigningKey::from_bytes(&seed);
 
     let data = fs::read(file_path)?;
-    let signature = signing_key.sign(&data);
+    let hash = Sha256::digest(&data);
+    let signature = signing_key.sign(&hash);
 
     let sig_path = file_path.with_extension(
         file_path
@@ -155,7 +157,8 @@ mod tests {
         let verifying_key =
             VerifyingKey::from_bytes(&signing_key.verifying_key().to_bytes()).unwrap();
         let data = fs::read(&data_path).unwrap();
-        assert!(verifying_key.verify(&data, &signature).is_ok());
+        let hash = Sha256::digest(&data);
+        assert!(verifying_key.verify(&hash, &signature).is_ok());
 
         // 0x prefix must also be accepted.
         let data_path_0x = tmp_dir.join("payload_0x.bin");

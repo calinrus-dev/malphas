@@ -12,11 +12,13 @@ jobs:
   rust-core:
     name: Build native core artifacts
     uses: ./.github/workflows/rust_ci.yml
+    secrets: inherit
 
   flutter-windows:
     name: Build Flutter Windows release
     needs: rust-core
     uses: ./.github/workflows/flutter_windows_build.yml
+    secrets: inherit
 
   android-release:
     name: Build Android release artifacts

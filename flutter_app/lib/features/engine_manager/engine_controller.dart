@@ -13,9 +13,9 @@ class EngineController extends ChangeNotifier {
   // MALPHAS REINFORCED v2.4.3 — Ed25519 public key for engine
   // signature verification. This is the test key generated for local builds
   // and CI; it must match the private key used to sign the motor artifacts.
-  // Public key hex: e9cb56c4ed5850d6c2f1f1f697feb1e0f9b0b6bd9130a871bcd2ef287b78e963
+  // Public key hex: aac8adcae7707a961bd03e24c1196d2593ba62f491ab00c0dd20bfa9b284aa1c
   static const String _enginePublicKeyHex =
-      'e9cb56c4ed5850d6c2f1f1f697feb1e0f9b0b6bd9130a871bcd2ef287b78e963';
+      'aac8adcae7707a961bd03e24c1196d2593ba62f491ab00c0dd20bfa9b284aa1c';
   static String get publicKeyHex => _enginePublicKeyHex;
 
   static String _defaultBinaryName() {
@@ -140,7 +140,7 @@ class EngineController extends ChangeNotifier {
         MalphasEngine(
           id: 'embedded_native_core',
           name: 'Embedded Native Core',
-          version: 'v2.7.0',
+          version: 'v2.7.5',
           runtime: NativeRuntime.rust,
           binaryName: _defaultBinaryName(),
           sha256: 'Embedded (OS Verified)',

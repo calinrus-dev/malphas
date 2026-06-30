@@ -1,4 +1,4 @@
-//! Auto-generated `bindings.rs` codegen for Malphas v2.7.0 systems.
+//! Auto-generated `bindings.rs` codegen for Malphas v2.7.5 systems.
 //!
 //! The compiler writes an immutable Rust module containing every Entity ID and
 //! Tag mask declared in the workspace manifest.  Systems include this file so

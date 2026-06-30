@@ -1,8 +1,8 @@
-# Malphas Agent Instructions -- v2.7.0
+# Malphas Agent Instructions -- v2.7.5
 
 These rules define the design language, build/test workflow, FFI safety constraints, and agent conventions of the Malphas project. All agents modifying code, documentation, or system mechanics must follow them.
 
-Version v2.7.0 -- Data-Oriented Memory Router replaces the bytecode VM and the shared writable Arena with a flat memory router: MSP files are memory-mapped, MXC systems are native dynamic libraries, and Flutter only pulses the engine and reads raw render commands through FFI.
+Version v2.7.5 -- Fortress Hardening. The Data-Oriented Memory Router from v2.7.0 is now hardened: Rust owns the FFI bridge and command buffers, all native binaries require Ed25519 sidecar signatures, the input queue is lockless, and system panics are isolated with `catch_unwind`.
 
 ## 1. Terminal Aesthetic
 
@@ -75,9 +75,8 @@ Malphas shares memory between Dart and Rust. Breaking these rules causes crashes
 
 ### 7.1 Shared Memory Allocation
 
-- **All** shared-memory buffers (double-buffer bridge, command arrays) must be allocated through the exported Rust allocator:
-  - `malphas_alloc(size)`
-  - `malphas_free(ptr, size)`
+- The double-buffer bridge and command arrays are **owned by Rust**. Dart receives a read-only pointer from `init_engine(max_commands)` and must never allocate or free the bridge/buffers.
+- Use `malphas_alloc(size)` / `malphas_free(ptr, size)` only for auxiliary payloads that cross the FFI boundary, never for the bridge or command buffers.
 - Do **not** use `ffi.calloc` / `malloc` for shared memory. The system allocator may only provide 8-byte alignment. Our FFI allocator guarantees 64-byte alignment to prevent cache-line conflicts and keep strict ARM64/SSE alignments happy.
 - Free buffers with the **same size** that was passed to `malphas_alloc` so the Rust allocator can reconstruct the correct `Layout`.
 
@@ -90,11 +89,8 @@ Malphas shares memory between Dart and Rust. Breaking these rules causes crashes
 ### 7.3 Pointer Delegates
 
 - Dart must never perform pointer arithmetic on `MalphasDoubleBufferBridge` or copy nested structs by value.
-- Always use the exported getter functions:
-  - `get_buffer_a_commands(bridge)`
-  - `get_buffer_b_commands(bridge)`
-  - `get_buffer_a_command_count(bridge)`
-  - `get_buffer_b_command_count(bridge)`
+- Read front-buffer pointers and counts directly from the bridge struct fields (`bufferACommands`, `bufferBCommands`, `bufferACommandCount`, `bufferBCommandCount`, `atomicBackIndex`).
+- Use the exported getter functions for diagnostics only:
   - `get_back_index(bridge)`
   - `get_commands_written(bridge)`
 
@@ -134,6 +130,8 @@ Malphas shares memory between Dart and Rust. Breaking these rules causes crashes
 - The canonical compiler is `malphas-cli`, a Rust executable in `malphas_cli/`.
 - `MalphasPackageCompiler` in `flutter_app/lib/core/compiler/package_compiler.dart` is a thin wrapper that resolves the `malphas-cli` executable and invokes it with `compile <manifest.json>`.
 - The CLI produces `<pack_id>.msp` next to the manifest. It does **not** produce `.mxc`; system libraries are built by Cargo as `cdylib` crates.
+- The CLI `sign <file> <privkey>` command signs the SHA-256 hash of the file and writes `<file>.<ext>.sig` (or `<file>.sig` when there is no extension).
+- All native artifacts that the core loads (MSP, MXC, engine library) must carry a valid Ed25519 sidecar signature matching the configured trust anchor.
 - All binary sections must be padded to 64-byte alignment before the next section starts.
 - Real examples must live under `examples/` (e.g., `examples/bouncing_demo/manifest.json`). The Flutter package controller may compile or load them on startup instead of shipping synthetic placeholders.
 - Engine and CLI discovery must be dynamic: scan `flutter_app/motors/` at runtime and resolve the correct file extension per platform (`.so`, `.dylib`, `.dll`). Do not embed absolute paths in source code.

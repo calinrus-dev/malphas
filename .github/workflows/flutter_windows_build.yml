@@ -83,6 +83,36 @@ jobs:
             Write-Warning "bouncing_demo system not found; Windows example will not run."
           }
 
+      - name: Sign bouncing_demo.mxc for Windows example
+        shell: powershell
+        env:
+          MALPHAS_SIGNING_KEY: ${{ secrets.TEST_SIGNING_KEY }}
+        run: |
+          $key = $env:MALPHAS_SIGNING_KEY
+          if (-not $key) {
+            Write-Warning "TEST_SIGNING_KEY secret not set; skipping .mxc signing."
+            exit 0
+          }
+          $key = $key -replace '^0x', '' -replace '^0X', ''
+          if ($key -notmatch '^[0-9a-fA-F]{64}$') {
+            Write-Error "TEST_SIGNING_KEY must be a 64-character hex string."
+            exit 1
+          }
+          $cli = "target/release/malphas-cli.exe"
+          if (-not (Test-Path $cli -PathType Leaf)) {
+            $cli = "flutter_app/motors/malphas-cli.exe"
+          }
+          if (-not (Test-Path $cli -PathType Leaf)) {
+            Write-Warning "malphas-cli executable not found; skipping .mxc signing."
+            exit 0
+          }
+          foreach ($mxc in @("bouncing_demo.mxc", "flutter_app/bouncing_demo.mxc", "flutter_app/windows/runner/bouncing_demo.mxc", "examples/bouncing_demo/bouncing_demo.mxc")) {
+            if (Test-Path $mxc -PathType Leaf) {
+              & $cli sign $mxc $key
+              if ($LASTEXITCODE -ne 0) { Write-Warn "Failed to sign $mxc" }
+            }
+          }
+
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
