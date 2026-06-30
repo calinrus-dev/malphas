@@ -1,74 +1,94 @@
-# Malphas v2.7.5
-## Zero-Copy, Cache-Aligned, Native Memory Router
+# Malphas v2.7.5 — Fortress
 
-> **Malphas is not a game engine. It is not a framework. It is not a fantasy console.**
-> **It is a sovereign execution environment for data-oriented programs that refuse to die inside a managed runtime.**
+[![Rust CI](https://github.com/calinrus-dev/malphas/actions/workflows/rust_ci.yml/badge.svg)](https://github.com/calinrus-dev/malphas/actions/workflows/rust_ci.yml)
+[![Flutter CI](https://github.com/calinrus-dev/malphas/actions/workflows/flutter_ci.yml/badge.svg)](https://github.com/calinrus-dev/malphas/actions/workflows/flutter_ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Malphas is a high-performance Data-Oriented Design (DOD) engine that offloads all logic, state, and render production to native, memory-mapped code. It sits somewhere between a **fantasy console** — with its rigid creative constraints — and a **bare-metal execution environment** — with its demand for total memory sovereignty.
+> **Malphas is not a game engine, a framework, or a fantasy console.**
+> **It is a sovereign, data-oriented execution environment that keeps the hot path outside managed runtimes.**
 
-The difference is that Malphas does not pretend. There is no toy runtime, no cozy sandbox, no garbage collector holding your hand while it pauses your frame. There is only flat memory, cache lines, and native systems that execute with deterministic performance.
+Malphas is a high-performance **Data-Oriented Design (DOD)** runtime. All logic, state, and render production live in native, memory-mapped code. Flutter is treated as a passive display terminal; the Rust core owns every byte that matters.
 
-The core is Rust. The display terminal is Flutter. Between them stands a minimal C-ABI bridge that does not serialize, does not copy, and does not ask permission from a garbage collector.
+**v2.7.5 — Fortress** hardens the v2.7.0 Memory Router with:
 
-> **v2.7.5 — Fortress Hardening** keeps the v2.7.0 Memory Router pipeline and hardens it: Rust owns the FFI bridge, all native binaries are Ed25519-signed, the input queue is lockless, and misbehaving systems are isolated with `catch_unwind`. The pipeline remains: flat data on disk (`MSP`) → memory-mapped (`mmap`) → native systems (`MXC`) → raw render commands → screen.
+- Rust-owned FFI bridge and command buffers.
+- Ed25519 sidecar signatures for the engine, `.msp` packs, and `.mxc` systems.
+- Runtime sandbox that only loads systems from `systems/`, `packages/`, or `motors/`.
+- `catch_unwind` isolation for misbehaving systems.
+- Lockless input queue, real `dt`, and deterministic alignment validation.
+
+The pipeline stays the same:
+
+```text
+flat data on disk (MSP) → memory-mapped (mmap) → native systems (MXC) → raw render commands → screen
+```
 
 ---
 
-## 1. Executive Summary
+## Table of Contents
 
-Malphas treats memory as the primary interface. Data is not deserialized into objects; it is mapped into address space and routed to native systems as raw pointers. The result is a runtime where:
+1. [What Malphas Is](#what-malphas-is)
+2. [Architecture](#architecture)
+3. [Security Model](#security-model)
+4. [Build and Run](#build-and-run)
+5. [Example](#example)
+6. [Testing](#testing)
+7. [Verification Commands](#verification-commands)
+8. [Contributing](#contributing)
+9. [License](#license)
 
-- **Zero-copy** is the default, not an optimization.
-- **Cache alignment** is a first-class contract, not a comment.
+---
+
+## What Malphas Is
+
+Malphas treats memory as the primary interface. Data is not deserialized into objects; it is mapped into address space and routed to native systems as raw pointers.
+
+- **Zero-copy** is the default.
+- **Cache alignment** is a first-class contract.
 - **The hot path contains no objects, no methods, and no GC stalls.**
 - **Systems are dependency-free native libraries** that can outlive any UI framework.
-
-This architecture is designed to survive increasingly restricted mobile environments. While managed runtimes trade performance for convenience, Malphas keeps the critical path in native memory that the host OS cannot reinterpret, relocate, or collect.
 
 If you are still thinking in `object.update()`, you are in the wrong execution environment.
 
 ---
 
-## 2. The Architecture: The Triad
+## Architecture
 
-Malphas is composed of three inseparable layers. Each layer has exactly one responsibility and one contract with the next.
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                    MALPHAS v2.7.5 — SOVEREIGN RUNTIME                   │
-│                                                                         │
-│   ┌─────────────┐     ┌─────────────────┐     ┌─────────────────────┐  │
-│   │     MSP     │────▶│   Memory Router │────▶│        MXC          │ │
-│   │  (on disk)  │ mmap│   (Rust Core)   │     │  (native systems)   │ │
-│   └─────────────┘     └────────┬────────┘     └─────────────────────┘  │
-│                                │                                        │
-│                                ▼                                        │
-│                      ┌─────────────────────┐                            │
-│                      │   Silver Platter    │                            │
-│                      │  (flat pointer table)│                           │
-│                      └─────────────────────┘                            │
-│                                │                                        │
-│                                ▼                                        │
-│                      ┌─────────────────────┐                            │
-│                      │  MalphasDouble      │                            │
-│                      │  BufferBridge       │                            │
-│                      │  (FFI shared memory)│                            │
-│                      └─────────────────────┘                            │
-│                                │                                        │
-│                                ▼                                        │
-│                      ┌─────────────────────┐                            │
-│                      │   Flutter Canvas    │                            │
-│                      │    Blind Painter    │                            │
-│                      └─────────────────────┘                            │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
+```text
+┌─────────────────────────────────────────────────────────────────────┐
+│                  MALPHAS v2.7.5 — SOVEREIGN RUNTIME                 │
+│                                                                     │
+│   ┌────────────┐   ┌───────────────┐   ┌─────────────────────────┐ │
+│   │    MSP     │──▶│ Memory Router │──▶│          MXC            │ │
+│   │  (on disk) │mmap│  (Rust core) │   │   (native systems)      │ │
+│   └────────────┘   └───────┬───────┘   └─────────────────────────┘ │
+│                            │                                        │
+│                            ▼                                        │
+│                  ┌─────────────────────┐                            │
+│                  │   Silver Platter    │                            │
+│                  │ (flat pointer table)│                            │
+│                  └─────────────────────┘                            │
+│                            │                                        │
+│                            ▼                                        │
+│                  ┌─────────────────────┐                            │
+│                  │ MalphasDoubleBuffer │                            │
+│                  │     Bridge (FFI)    │                            │
+│                  └─────────────────────┘                            │
+│                            │                                        │
+│                            ▼                                        │
+│                  ┌─────────────────────┐                            │
+│                  │   Flutter Canvas    │                            │
+│                  │    (Blind Painter)  │                            │
+│                  └─────────────────────┘                            │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-### 2.1 MSP — Malphas Source Pack
+### MSP — Malphas Source Pack
 
-The MSP is the immutable data unit of Malphas. It is a rigid, 64-byte-aligned binary file that is **byte-identical on disk and in memory**.
+The MSP is the immutable data unit. It is a rigid, 64-byte-aligned binary file that is **byte-identical on disk and in memory**.
 
-```
+```text
 MSP File
 ├─ MspHeader                        64 bytes
 ├─ Entity Table                     entity_count × 64 bytes
@@ -79,7 +99,7 @@ MSP File
    ├─ Payload[0]
    ├─ Payload[1]
    ├─ ...
-   └─ Error Payload Reserve         64 KB (fallback for invalid IDs)
+   └─ Error Payload Reserve         64 KB
 ```
 
 ```rust
@@ -93,7 +113,7 @@ pub struct MspHeader {
     pub payload_section_size: u32,   // total payload bytes
     pub checksum: u64,               // deterministic integrity value
     pub _padding: [u8; 32],          // pad to 64 bytes
-}                                   // = 64 bytes, exactly 1 cache line
+}                                   // exactly 1 cache line
 
 #[repr(C, align(64))]
 pub struct MspEntityDescriptor {
@@ -103,17 +123,17 @@ pub struct MspEntityDescriptor {
     pub payload_offset: u32,         // byte offset into payload section
     pub payload_size: u32,           // byte length of payload
     pub _padding: [u8; 40],          // pad to 64 bytes
-}                                   // = 64 bytes, exactly 1 cache line
+}                                   // exactly 1 cache line
 ```
 
 Key properties:
 
 - **Entity ≠ Object.** An entity is a `u32` index. It has no methods, no vtable, and no lifecycle beyond its index.
-- **Payload ≠ Object.** A payload is a raw byte block. Its meaning is defined by the system that consumes it, not by a class hierarchy.
+- **Payload ≠ Object.** A payload is a raw byte block. Its meaning is defined by the system that consumes it.
 - **Loading is mapping.** The core loads an MSP with `mmap`. There is no parser, no allocator, and no deserialization step in the hot path.
-- **Immutable by contract.** Once mapped, the MSP is read-only. Systems that mutate it are broken and will be rejected.
+- **Immutable by contract.** Once mapped, the MSP is read-only.
 
-### 2.2 MXC — Malphas eXecutable Core
+### MXC — Malphas eXecutable Core
 
 An MXC is a native dynamic library (`dll` / `so` / `dylib`) built as a `cdylib`. It exports exactly two symbols and depends on nothing except the C ABI.
 
@@ -139,12 +159,12 @@ Contract:
 
 - `malphas_init_system` runs once, reserves the system's internal Structure-of-Arrays state, and returns `0` on success.
 - `malphas_tick` runs every frame. It reads from the Silver Platter, updates its own flat arrays, and writes `DartRenderCommand` structs into the provided back buffer.
-- **The system never writes to the MSP.** The MSP is sacred.
-- **The system never calls back into the core.** No dynamic dispatch, no runtime services, no framework hooks.
+- **The system never writes to the MSP.**
+- **The system never calls back into the core.**
 
 This makes an MXC a self-contained unit of execution. It can be compiled today, signed, shipped, and loaded tomorrow without recompiling the engine.
 
-### 2.3 The Memory Router — Rust Core
+### The Memory Router — Rust Core
 
 The Rust core has one job: keep the hot path as a straight line through memory.
 
@@ -154,16 +174,16 @@ When an MSP is loaded:
 2. The header and entity table are validated.
 3. The core builds the **Silver Platter**: a flat array of `*const u8` where index `i` points directly to the payload of entity `i`.
 
-```
+```text
 Silver Platter
-┌────────────────────────────────────────────────┐
-│ lookup_table[0]  ──────────────────▶ Payload[0] │
-│ lookup_table[1]  ──────────────────▶ Payload[1] │
-│ lookup_table[2]  ──────────────────▶ Payload[2] │
-│ ...                                            │
-│ lookup_table[N]  ──────────────────▶ Error     │
-│                                      Payload   │
-└────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────┐
+│ lookup_table[0]  ────────────────▶ Payload[0] │
+│ lookup_table[1]  ────────────────▶ Payload[1] │
+│ lookup_table[2]  ────────────────▶ Payload[2] │
+│ ...                                          │
+│ lookup_table[N]  ────────────────▶ Error     │
+│                                    Payload   │
+└──────────────────────────────────────────────┘
 ```
 
 A system performs a lookup with a single instruction:
@@ -172,13 +192,9 @@ A system performs a lookup with a single instruction:
 let payload: *const u8 = unsafe { *lookup_table.add(entity_id as usize) };
 ```
 
-No hash map. No binary search. No cache miss chain. The entity ID is the array index, and the array is contiguous. This is 0-cycle logical lookup time; the real cost is one cache-line fetch, which is unavoidable.
+No hash map. No binary search. No cache-miss chain. The entity ID is the array index, and the array is contiguous.
 
-The core also owns the double-buffer bridge, spawns the background tick thread, and enforces the ordering guarantees between Rust producer and Dart consumer.
-
----
-
-## 3. The Flutter FFI Bridge — The Blind Painter
+### The Flutter FFI Bridge — The Blind Painter
 
 Flutter is not part of the engine. It is a display terminal that happens to run on the same device.
 
@@ -191,28 +207,26 @@ Dart has no knowledge of entities, payloads, systems, or simulation logic. It kn
 ```rust
 #[repr(C, align(64))]
 pub struct MalphasDoubleBufferBridge {
-    pub buffer_a_command_count: AtomicU32,         // 4
-    pub _padding0: u32,                            // 4
-    pub buffer_a_commands: *mut DartRenderCommand, // 8
-    pub buffer_b_command_count: AtomicU32,         // 4
-    pub _padding1: u32,                            // 4
-    pub buffer_b_commands: *mut DartRenderCommand, // 8
-    pub atomic_back_index: AtomicU8,               // 1
-    pub _padding2: u8,                             // 1
-    pub _padding3: u8,                             // 1
-    pub _padding4: u8,                             // 1
-    pub commands_written: AtomicU32,               // 4
-    pub _padding5: u32,                            // 4
-    pub _padding6: u32,                            // 4
-    pub _padding7: u64,                            // 8
-    pub _padding8: u64,                            // 8
-}                                                  // = 64 bytes
-```
+    pub buffer_a_command_count: AtomicU32,
+    pub _padding0: u32,
+    pub buffer_a_commands: *mut DartRenderCommand,
+    pub buffer_b_command_count: AtomicU32,
+    pub _padding1: u32,
+    pub buffer_b_commands: *mut DartRenderCommand,
+    pub atomic_back_index: AtomicU8,
+    pub _padding2: u8,
+    pub _padding3: u8,
+    pub _padding4: u8,
+    pub commands_written: AtomicU32,
+    pub _padding5: u32,
+    pub _padding6: u32,
+    pub _padding7: u64,
+    pub _padding8: u64,
+}                                  // = 64 bytes
 
-```rust
 #[repr(C)]
 pub struct DartRenderCommand {
-    pub command_type: u8,   // 1 = rectangle, 2 = text marker
+    pub command_type: u8,   // 1 = rectangle
     pub layer: u8,          // paint order
     pub pad: u16,           // alignment
     pub x: f32,
@@ -223,9 +237,9 @@ pub struct DartRenderCommand {
 }                           // = 24 bytes
 ```
 
-### Frame sequence
+Frame sequence:
 
-```
+```text
 Flutter VSync
 │
 ├─▶ trigger_engine_pulse()
@@ -242,77 +256,31 @@ Flutter VSync
      └── Canvas.drawRect(commands[i])
 ```
 
-No `List<DartRenderCommand>`. No `jsonDecode`. No `copyWith`. No per-frame allocation. There is a pointer, an atomic count, and a `Canvas.drawRect`.
-
-This is the **Blind Painter** pattern: the UI renders what it is told to render, as fast as the memory bus allows, without understanding what it means. The Dart side does not own the data; it borrows a view into native memory for the duration of one paint.
+No `List<DartRenderCommand>`. No `jsonDecode`. No per-frame allocation. There is a pointer, an atomic count, and a `Canvas.drawRect`.
 
 ---
 
-## 4. Data-Oriented Workflow
+## Security Model
 
-A workspace starts as human-readable source files and ends as cache-perfect silicon binaries.
+v2.7.5 makes the supply chain auditable and the runtime fail-safe.
 
-```
-Workspace Source
-├── manifest.json              // human-readable entity declarations
-├── payload_0.bin              // raw entity data
-├── payload_1.bin
-└── ...
+| Asset | Protection |
+|-------|------------|
+| Engine library (`malphas_core`) | Ed25519 sidecar signature verified before Flutter loads it. |
+| MSP data pack | Ed25519 sidecar signature (`.msp.sig`) verified before `mmap`. |
+| MXC system library | Ed25519 sidecar signature (`.sig`) verified before `dlopen`. |
+| Trust anchor | Configurable at runtime via `setTrustAnchor` / `set_trust_anchor`. |
+| System loading | Path sandbox: only paths under `systems/`, `packages/`, or `motors/` are allowed. |
+| Panic isolation | `catch_unwind` around system `init` and `tick`; a panicking system is tainted, not the engine. |
+| Integrity utilities | Streaming SHA-256, constant-time comparison, ZIP bomb/symlink defences. |
 
-        │ malphas-cli compile
-        ▼
+The default trust anchor in the repository is a **test-only keypair**. Production releases must call `setTrustAnchor` with their own Ed25519 public key.
 
-Output Binaries
-├── package.msp                // 64-byte-aligned binary pack
-├── package.mxc                // native system library (cdylib)
-└── bindings.rs                // inlined entity/tag constants
-```
-
-The CLI:
-
-1. Reads the manifest and validates IDs, tag masks, and payload paths.
-2. Builds the MSP header and entity descriptors with exact 64-byte layout.
-3. Pads every payload to a 64-byte boundary.
-4. Reserves the trailing 64 KB error-payload region.
-5. Computes a deterministic checksum over the binary.
-6. Generates `bindings.rs` so systems can inline entity constants at `-O3`.
-
-The result is a binary that is ready to be `mmap`-ed and executed without further transformation.
+For local development you can set `MALPHAS_INSECURE_SKIP_VERIFY=1`. **Never use this in production.**
 
 ---
 
-## 5. Why This Survives
-
-Managed runtimes are not getting faster relative to hardware constraints. They are getting more restricted. Malphas sidesteps the problem by keeping the critical path outside the managed domain:
-
-- **Memory sovereignty.** Native memory mapped from a file cannot be relocated or collected by the host runtime.
-- **Framework decoupling.** An MXC depends only on the C ABI. If Flutter disappears, the systems survive.
-- **Deterministic cache behavior.** Every hot-path structure is sized to a cache line. No hidden allocations, no surprise pauses.
-- **Signature verification.** Engine binaries and MSP files can be signed and verified before load, making the supply chain auditable.
-- **No JIT dependency.** Systems are native machine code. They are not subject to interpretation, warmup, or sandboxing beyond the OS loader.
-
-The UI is replaceable. The data format is stable. The systems are sovereign.
-
----
-
-## 6. Technical Glossary
-
-| Term | Definition | What it is NOT |
-|---|---|---|
-| **Entity** | A relational `u32` (`entity_id`). An index into a flat table. | A class, object, GameObject, or component. |
-| **Payload** | A raw, 64-byte-aligned byte block pointed to by the Silver Platter. | An object, asset, or interface-bearing type. |
-| **Silver Platter** | A flat array of `*const u8` built at MSP load time. `lookup_table[entity_id]` yields the payload pointer. | A hash map, dictionary, tree, or runtime lookup structure. |
-| **System (.mxc)** | A native `cdylib` that consumes payloads and writes render commands. | A script, VM bytecode, class, or service locator. |
-| **MSP** | Malphas Source Pack. Immutable, 64-byte-aligned binary data file. | A scene file, JSON document, or archive. |
-| **MXC** | Malphas eXecutable Core. Stateless native dynamic library exporting `malphas_init_system` and `malphas_tick`. | A plugin that depends on engine internals. |
-| **Environment** | An MSP mapped into memory plus one or more loaded MXC systems. | A scene graph or object hierarchy. |
-| **FFI Bridge** | `MalphasDoubleBufferBridge`. A 64-byte shared-memory structure between Rust and Dart. | A message bus, event channel, or serialization protocol. |
-
-**Golden rule:** if you use the words "object", "method", "class", "component", or "skin" inside the core, you have lost the game.
-
----
-
-## 7. Build and Run
+## Build and Run
 
 ### Rust
 
@@ -324,18 +292,25 @@ cargo build --release --package bouncing_demo
 
 # Strict verification
 cargo fmt -- --check
-cargo clippy --release -- -D warnings
-cargo test --release
+cargo clippy --all-targets -- -D warnings
+cargo test --release --locked
 ```
 
 ### Example MSP
 
 ```bash
-# Build the MSP from the v2.7.0 manifest
-cargo run --release -p malphas_cli -- compile examples/bouncing_demo/manifest.json
+# Build the MSP from the manifest
+cargo run --release -p malphas-cli -- compile examples/bouncing_demo/manifest.json
 ```
 
 This generates `examples/bouncing_demo/bouncing_demo.msp` and `examples/bouncing_demo/bindings.rs`.
+
+To sign the artifacts for a non-test trust anchor:
+
+```bash
+export MALPHAS_SIGNING_KEY="<32-byte-hex-private-key>"
+cargo run --release -p malphas-cli -- sign examples/bouncing_demo/bouncing_demo.msp
+```
 
 ### Flutter
 
@@ -344,12 +319,58 @@ cd flutter_app
 flutter pub get
 flutter analyze --no-fatal-infos
 flutter test
-dart format .
+```
+
+### Cross-platform build scripts
+
+```bash
+# Linux / macOS / Git Bash on Windows
+./build.sh
+
+# Windows PowerShell
+.\build_core.ps1
+```
+
+Both scripts build `malphas_core`, `malphas_cli`, and `bouncing_demo`, timestamp the native motor, keep the three most recent motors, and deploy non-timestamped copies plus signatures to the workspace root and existing Flutter build directories.
+
+---
+
+## Example
+
+The repository includes a working `bouncing_demo` package under `examples/bouncing_demo/`:
+
+```bash
+./build_core.ps1                              # or ./build.sh
+cargo run --release -p malphas-cli -- compile examples/bouncing_demo/manifest.json
+cd flutter_app && flutter run
+```
+
+The Flutter workspace auto-loads the demo on startup: it initializes the engine, loads the MSP, loads the `.mxc` system, and pulses the engine on every VSync.
+
+---
+
+## Testing
+
+| Suite | Command |
+|-------|---------|
+| Rust formatting | `cargo fmt -- --check` |
+| Rust lints | `cargo clippy --all-targets -- -D warnings` |
+| Rust tests | `cargo test --release --locked` |
+| Security tests | `cargo test --release --locked --test security_tests` |
+| Flutter analyze | `cd flutter_app && flutter analyze --no-fatal-infos` |
+| Flutter format | `cd flutter_app && dart format --set-exit-if-changed .` |
+| Flutter tests | `cd flutter_app && flutter test` |
+
+On Linux and macOS, set `LD_LIBRARY_PATH` so Flutter tests can find the motor:
+
+```bash
+export LD_LIBRARY_PATH="$PWD/flutter_app/motors:$LD_LIBRARY_PATH"
+cd flutter_app && flutter test
 ```
 
 ---
 
-## 8. Architectural Verification Commands
+## Verification Commands
 
 ```bash
 # No broken alignments
@@ -366,19 +387,36 @@ grep -n "size_of::<MalphasDoubleBufferBridge>()" malphas_core/src/pipeline.rs
 
 ---
 
-## 9. Contribution Contract
+## Glossary
 
-If you send a PR:
+| Term | Definition | What it is NOT |
+|------|------------|----------------|
+| **Entity** | A relational `u32` (`entity_id`). An index into a flat table. | A class, object, GameObject, or component. |
+| **Payload** | A raw, 64-byte-aligned byte block pointed to by the Silver Platter. | An object, asset, or interface-bearing type. |
+| **Silver Platter** | A flat array of `*const u8` built at MSP load time. | A hash map, dictionary, tree, or runtime lookup structure. |
+| **System (.mxc)** | A native `cdylib` that consumes payloads and writes render commands. | A script, VM bytecode, class, or service locator. |
+| **MSP** | Malphas Source Pack. Immutable, 64-byte-aligned binary data file. | A scene file, JSON document, or archive. |
+| **MXC** | Malphas eXecutable Core. Stateless native dynamic library exporting `malphas_init_system` and `malphas_tick`. | A plugin that depends on engine internals. |
+| **Environment** | An MSP mapped into memory plus one or more loaded MXC systems. | A scene graph or object hierarchy. |
+| **FFI Bridge** | `MalphasDoubleBufferBridge`. A 64-byte shared-memory structure between Rust and Dart. | A message bus, event channel, or serialization protocol. |
+
+**Golden rule:** if you use the words "object", "method", "class", "component", or "skin" inside the core, you have lost the game.
+
+---
+
+## Contributing
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the full process.
+
+In short:
 
 1. Every shared structure must be `#[repr(C)]` or `#[repr(C, align(64))]` and its size must be a multiple of 64.
 2. No `.mxc` system may mutate the MSP or make FFI calls back into the core during `tick`.
 3. Dart only reads pointers; it never builds objects per frame.
-4. `cargo fmt`, `cargo clippy --release -- -D warnings`, `cargo test --release`, `flutter analyze`, and `flutter test` must pass.
-
-Read `CONTRIBUTING.md` for the full process.
+4. `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo test --release --locked`, `flutter analyze`, and `flutter test` must pass.
 
 ---
 
-## 10. License
+## License
 
-MIT — see `LICENSE`.
+MIT — see [`LICENSE`](LICENSE).

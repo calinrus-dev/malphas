@@ -183,3 +183,11 @@ Malphas shares memory between Dart and Rust. Breaking these rules causes crashes
 - All Dart source files must be formatted with the project's bundled `dart format`.
 - Run `cd flutter_app && dart format --set-exit-if-changed .` before considering Flutter work complete.
 - Do not mix formatting-only changes with logic changes in the same commit unless the logic change is tiny.
+
+## 16. Threat Model and Trust Boundaries
+
+- The runtime trusts only the configured Ed25519 trust anchor. Every loaded native binary (engine, `.msp`, `.mxc`) must carry a valid sidecar signature.
+- The runtime does **not** trust Flutter with bridge ownership. Dart receives a read-only pointer and must never allocate, free, or write into the bridge or command buffers.
+- The runtime does **not** trust arbitrary file-system paths. `.mxc` loading is sandboxed to `systems/`, `packages/`, and `motors/`.
+- The runtime does **not** trust loaded systems. Each system `init` and `tick` is wrapped in `catch_unwind`; a panicking or overflowing system is tainted and skipped.
+- `MALPHAS_INSECURE_SKIP_VERIFY` is a debug-only escape hatch. Agents must not rely on it in production code or release workflows.

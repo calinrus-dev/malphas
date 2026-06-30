@@ -50,8 +50,8 @@ All Rust commands run from the repository root. Flutter commands run from
 ```bash
 # Rust
 cargo fmt -- --check
-cargo clippy --release -- -D warnings
-cargo test --release
+cargo clippy --all-targets -- -D warnings
+cargo test --release --locked
 
 # Flutter
 cd flutter_app
@@ -100,7 +100,8 @@ Before requesting a review, verify the items that apply to your change:
 - [ ] The change is limited to the workstream scope and does not touch unrelated files.
 - [ ] Rust code passes `cargo fmt -- --check`.
 - [ ] Rust code passes `cargo clippy --release -- -D warnings`.
-- [ ] Rust tests pass with `cargo test --release`.
+- [ ] Rust tests pass with `cargo test --release --locked`.
+- [ ] Security tests pass with `cargo test --release --locked --test security_tests`.
 - [ ] Dart code is formatted with `dart format --set-exit-if-changed .`.
 - [ ] Flutter analyze passes with `flutter analyze --no-fatal-infos --no-fatal-warnings`.
 - [ ] Flutter tests pass with `flutter test` (Linux/macOS require `LD_LIBRARY_PATH`).
@@ -133,3 +134,16 @@ Use the GitHub issue templates in `.github/ISSUE_TEMPLATE/`. Include:
 Do not commit private signing keys. The repository uses the `TEST_SIGNING_KEY`
 GitHub secret in CI. If you discover a security issue, please report it privately
 instead of opening a public issue.
+
+### Threat model
+
+- The runtime trusts only the configured Ed25519 trust anchor. Every loaded
+  native binary (engine, `.msp`, `.mxc`) must carry a valid sidecar signature.
+- The runtime does **not** trust the Flutter UI with bridge ownership; Dart only
+  receives a read-only pointer to the front buffer.
+- The runtime does **not** trust arbitrary file-system paths; `.mxc` loading is
+  sandboxed to `systems/`, `packages/`, and `motors/`.
+- The runtime does **not** trust loaded systems; panics and buffer overflows are
+  isolated with `catch_unwind` and tainting.
+- `MALPHAS_INSECURE_SKIP_VERIFY` is a debug-only escape hatch and must never be
+  enabled in production.

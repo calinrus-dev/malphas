@@ -1,5 +1,7 @@
 # Malphas v2.7.5 — "Fortress" Master Implementation Plan
 
+> Status: **implemented** as of tag `v2.7.5`. This document is kept as a historical record of the hardening effort.
+>
 > Goal: transform Malphas v2.7.0 into a sovereign, hardened, and deterministically predictable runtime: memory-safe across the FFI boundary, cryptographically verifiable supply chain, race-free engine lifecycle, and a Flutter/Core ecosystem aligned to the byte.
 
 ---
@@ -305,79 +307,79 @@ This phase is **blocking**. Without it, everything else is lipstick on a crash.
 ## 4. Actionable TODO List
 
 ### Phase 0 — Memory Safety / Lifecycle
-- [ ] 0.1 Replace `RwLock<Option<MspMap>>` with `ArcSwapOption<MspMap>` in `msp_loader.rs`.
-- [ ] 0.2 Hold `Arc<MspMap>` snapshot for the entire `process_engine_tick_internal`.
-- [ ] 0.3 Switch MSP to read-only `Mmap` in `msp_loader.rs`.
-- [ ] 0.4 Design `BridgeState` with `Arc` and Rust ownership.
-- [ ] 0.5 Change `init_engine` to allocate bridge+buffers internally.
-- [ ] 0.6 Change `shutdown_engine` to free bridge+buffers from Rust.
-- [ ] 0.7 Make buffer pointers immutable after init (or atomic).
-- [ ] 0.8 Implement layout registry for `malphas_alloc/free`.
-- [ ] 0.9 Remove `panic = "abort"` from root `Cargo.toml`.
-- [ ] 0.10 Add `catch_unwind` in `load_system::init` and `tick_systems`.
+- [x] 0.1 Replace `RwLock<Option<MspMap>>` with `ArcSwapOption<MspMap>` in `msp_loader.rs`.
+- [x] 0.2 Hold `Arc<MspMap>` snapshot for the entire `process_engine_tick_internal`.
+- [x] 0.3 Switch MSP to read-only `Mmap` in `msp_loader.rs`.
+- [x] 0.4 Design `BridgeState` with `Arc` and Rust ownership.
+- [x] 0.5 Change `init_engine` to allocate bridge+buffers internally.
+- [x] 0.6 Change `shutdown_engine` to free bridge+buffers from Rust.
+- [x] 0.7 Make buffer pointers immutable after init (or atomic).
+- [x] 0.8 Implement layout registry for `malphas_alloc/free`.
+- [x] 0.9 Remove `panic = "abort"` from root `Cargo.toml`.
+- [x] 0.10 Add `catch_unwind` in `load_system::init` and `tick_systems`.
 
 ### Phase 1 — Integrity
-- [ ] 1.1 Create `integrity_policy.rs` module with constant-time comparison.
-- [ ] 1.2 Modify `verify_binary_integrity` to use `subtle`.
-- [ ] 1.3 Add size limit and streaming hash to `verify_engine_signature`.
-- [ ] 1.4 Add automatic MSP signing to `malphas-cli compile`.
-- [ ] 1.5 Verify MSP signature in `load_msp_file`.
-- [ ] 1.6 Verify MXC signature before `Library::new`.
-- [ ] 1.7 Implement path sandbox in `load_system`.
-- [ ] 1.8 Harden `extract_zip_package`.
+- [x] 1.1 Create `integrity_policy.rs` module with constant-time comparison.
+- [x] 1.2 Modify `verify_binary_integrity` to use `subtle`.
+- [x] 1.3 Add size limit and streaming hash to `verify_engine_signature`.
+- [x] 1.4 Add automatic MSP signing to `malphas-cli compile`.
+- [x] 1.5 Verify MSP signature in `load_msp_file`.
+- [x] 1.6 Verify MXC signature before `Library::new`.
+- [x] 1.7 Implement path sandbox in `load_system`.
+- [x] 1.8 Harden `extract_zip_package`.
 
 ### Phase 2 — Runtime
-- [ ] 2.1 Make `tick_systems` clamp-safe against excessive `written`.
-- [ ] 2.2 Calculate real `dt_micros` with maximum clamp.
-- [ ] 2.3 Implement lock-free input ring buffer and consume it in tick.
-- [ ] 2.4 Read header/descriptors with `read_unaligned`.
-- [ ] 2.5 Validate MSP section alignment and ordering.
+- [x] 2.1 Make `tick_systems` clamp-safe against excessive `written`.
+- [x] 2.2 Calculate real `dt_micros` with maximum clamp.
+- [x] 2.3 Implement lock-free input ring buffer and consume it in tick.
+- [x] 2.4 Read header/descriptors with `read_unaligned`.
+- [x] 2.5 Validate MSP section alignment and ordering.
 
 ### Phase 3 — Flutter
-- [ ] 3.1 Adapt `malphas_bindings.dart` to the new lifecycle.
-- [ ] 3.2 Implement safe hot-swap (shutdown → reload → init).
-- [ ] 3.3 Add `abi_version` to bridge and verify it.
-- [ ] 3.4 Fix MSP parser in `package_controller.dart`.
-- [ ] 3.5 Fix `createAndCompilePackage` to generate a valid manifest.
-- [ ] 3.6 Load public key from asset/config.
-- [ ] 3.7 Validate workspace root path (sandbox).
-- [ ] 3.8 Include `.so` in Android jniLibs and clean up permissions.
+- [x] 3.1 Adapt `malphas_bindings.dart` to the new lifecycle.
+- [x] 3.2 Implement safe hot-swap (shutdown → reload → init).
+- [x] 3.3 Add `abi_version` to bridge and verify it.
+- [x] 3.4 Fix MSP parser in `package_controller.dart`.
+- [x] 3.5 Fix `createAndCompilePackage` to generate a valid manifest.
+- [x] 3.6 Load public key from asset/config.
+- [x] 3.7 Validate workspace root path (sandbox).
+- [x] 3.8 Include `.so` in Android jniLibs and clean up permissions.
 
 ### Phase 4 — CLI
-- [ ] 4.1 Add `pack_id` to header and bump `MSP_VERSION`.
-- [ ] 4.2 Make checksum/signature cover header+body.
-- [ ] 4.3 Validate `payload_file` against path traversal.
-- [ ] 4.4 Change CLI sign to `--key-file` / env var.
-- [ ] 4.5 Escape `pack_id` in `bindings_codegen.rs`.
-- [ ] 4.6 Remove dead dependencies and update `zip`.
+- [x] 4.1 Add `pack_id` to header and bump `MSP_VERSION`.
+- [x] 4.2 Make checksum/signature cover header+body.
+- [x] 4.3 Validate `payload_file` against path traversal.
+- [x] 4.4 Change CLI sign to `--key-file` / env var.
+- [x] 4.5 Escape `pack_id` in `bindings_codegen.rs`.
+- [x] 4.6 Remove dead dependencies and update `zip`.
 
 ### Phase 5 — CI/CD
-- [ ] 5.1 Make `cargo clippy --all-targets -- -D warnings` pass.
-- [ ] 5.2 Fix version-sync in `flutter_ci.yml`.
-- [ ] 5.3 Use environment variable for `TEST_SIGNING_KEY`.
-- [ ] 5.4 Sign `.mxc` in CI.
-- [ ] 5.5 Add security tests to the workflow.
-- [ ] 5.6 Resolve duplicate artifact upload in `release.yml`.
+- [x] 5.1 Make `cargo clippy --all-targets -- -D warnings` pass.
+- [x] 5.2 Fix version-sync in `flutter_ci.yml`.
+- [x] 5.3 Use environment variable for `TEST_SIGNING_KEY`.
+- [x] 5.4 Sign `.mxc` in CI.
+- [x] 5.5 Add security tests to the workflow.
+- [x] 5.6 Resolve duplicate artifact upload in `release.yml`.
 
 ### Phase 6 — Documentation
-- [ ] 6.1 Update `README.md` with new architecture and contracts.
-- [ ] 6.2 Add migration guide to `CHANGELOG.md`.
-- [ ] 6.3 Document threat model in `CONTRIBUTING.md`.
+- [x] 6.1 Update `README.md` with new architecture and contracts.
+- [x] 6.2 Add migration guide to `CHANGELOG.md`.
+- [x] 6.3 Document threat model in `CONTRIBUTING.md`.
 
 ---
 
 ## 5. Acceptance Criteria for v2.7.5
 
-- [ ] `cargo fmt -- --check` passes.
-- [ ] `cargo clippy --release --all-targets -- -D warnings` passes.
-- [ ] `cargo test --release --locked` passes, including new security tests.
-- [ ] `flutter analyze --no-fatal-infos` passes.
-- [ ] `flutter test` passes.
-- [ ] No MSP is mapped in writable mode.
-- [ ] No `.mxc` or engine is loaded without a valid Ed25519 signature.
-- [ ] `valgrind` / Miri / AddressSanitizer report no UAF/UB in integration tests where applicable.
-- [ ] Hot-swap leaves no orphan threads or old library handles.
-- [ ] Dead dependencies removed and `cargo tree` audited.
+- [x] `cargo fmt -- --check` passes.
+- [x] `cargo clippy --release --all-targets -- -D warnings` passes.
+- [x] `cargo test --release --locked` passes, including new security tests.
+- [x] `flutter analyze --no-fatal-infos` passes.
+- [x] `flutter test` passes.
+- [x] No MSP is mapped in writable mode.
+- [x] No `.mxc` or engine is loaded without a valid Ed25519 signature.
+- [x] `valgrind` / Miri / AddressSanitizer report no UAF/UB in integration tests where applicable.
+- [x] Hot-swap leaves no orphan threads or old library handles.
+- [x] Dead dependencies removed and `cargo tree` audited.
 
 ---
 
@@ -392,6 +394,13 @@ This phase is **blocking**. Without it, everything else is lipstick on a crash.
 | Android `.so` increases app size | Optional: download verified ABI on first launch. |
 
 ---
+
+## 8. Completion Notes
+
+- All implementation phases were finished and tagged as `v2.7.5`.
+- The security integration test suite covers unsigned MSPs, malformed signatures, wrong-key signatures, unsigned systems, sandbox path traversal, and wrong-key system signatures.
+- Panic isolation via `catch_unwind` works for panics originating inside the same Rust module. On Windows, unwinding across a dynamically loaded Rust `.dll` aborts the process, so full cross-DLL panic isolation is not currently enforced. A future improvement would run systems in a separate worker process.
+- The default trust anchor remains test-only. Production builds must override it with `setTrustAnchor` / `set_trust_anchor`.
 
 ## 7. Definition of "Engineering Art"
 

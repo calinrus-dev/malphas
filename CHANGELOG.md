@@ -43,6 +43,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Clippy `--all-targets -D warnings` is now clean.
 - Unused imports/dead code warnings across `malphas_core` cleaned up.
 
+### Threat Model
+- The runtime trusts the configured Ed25519 trust anchor for every native binary it loads (engine, `.msp`, `.mxc`).
+- The runtime does **not** trust the Flutter UI: it only receives a read-only pointer to the front buffer and cannot allocate or free the bridge.
+- The runtime does **not** trust the host file system: `.mxc` paths are sandboxed to `systems/`, `packages/`, and `motors/`.
+- The runtime does **not** trust third-party systems: each system is wrapped in `catch_unwind` and is tainted on panic or overflow.
+- `MALPHAS_INSECURE_SKIP_VERIFY` is a debug-only escape hatch and must never be enabled in production.
+
+### Migrating from v2.7.0
+- Replace `init_engine(...)` calls with the new single-argument signature: `init_engine(max_commands)`.
+- Remove any Dart-side allocation of `MalphasDoubleBufferBridge` or command buffers; Rust now owns them.
+- Sign your `.msp` and `.mxc` files with `malphas-cli sign` or set `MALPHAS_SIGNING_KEY` during `./build.sh` / `.\build_core.ps1`.
+- Provide a production Ed25519 public key via `setTrustAnchor` / `set_trust_anchor` before loading signed assets.
+- For local development only, set `MALPHAS_INSECURE_SKIP_VERIFY=1`.
+
 ## [2.7.0] - 2026-06-30
 
 ### Added
