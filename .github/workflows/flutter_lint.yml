@@ -76,6 +76,59 @@ jobs:
             echo "Signed bouncing_demo.mxc not found; skipping placement."
           fi
 
+      - name: Download CLI executable
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
+        continue-on-error: true
+        with:
+          name: malphas-cli-ubuntu-latest
+          path: flutter_app/native-cli/
+
+      - name: Place CLI binary where tests find it
+        shell: bash
+        run: |
+          mkdir -p motors
+          if [ -f native-cli/malphas-cli ]; then
+            cp native-cli/malphas-cli motors/malphas-cli
+            chmod +x motors/malphas-cli
+          fi
+
+      - name: Compile bouncing_demo manifest with downloaded CLI
+        shell: bash
+        env:
+          MALPHAS_SIGNING_KEY: ${{ secrets.TEST_SIGNING_KEY }}
+        run: |
+          if [ -z "$MALPHAS_SIGNING_KEY" ] || [ ! -f motors/malphas-cli ]; then
+            echo "TEST_SIGNING_KEY or CLI not available; skipping manifest compilation."
+            exit 0
+          fi
+          export LD_LIBRARY_PATH="${{ github.workspace }}/flutter_app/motors"
+          ./motors/malphas-cli compile ../examples/bouncing_demo/manifest.json
+
+      - name: Derive test trust anchor
+        shell: bash
+        env:
+          MALPHAS_SIGNING_KEY: ${{ secrets.TEST_SIGNING_KEY }}
+        run: |
+          if [ -z "$MALPHAS_SIGNING_KEY" ]; then
+            echo "PUBKEY=" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          if [ -f motors/malphas-cli ]; then
+            PUBKEY=$(./motors/malphas-cli pubkey --signing-key-env MALPHAS_SIGNING_KEY)
+            echo "PUBKEY=$PUBKEY" >> "$GITHUB_ENV"
+          else
+            echo "CLI not found; cannot derive trust anchor"
+            echo "PUBKEY=" >> "$GITHUB_ENV"
+          fi
+
+      - name: Write test trust anchor asset
+        shell: bash
+        run: |
+          if [ -n "$PUBKEY" ]; then
+            mkdir -p assets
+            printf '%s\n' "$PUBKEY" > assets/trust_anchor.pem
+          fi
+
       - name: Set up Flutter
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
