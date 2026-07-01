@@ -4,7 +4,7 @@ import 'dart:typed_data';
 
 /// Output of a `malphas-cli compile` invocation.
 ///
-/// In v2.9.0 the CLI only produces the `.msp` Silver Platter.  The `.mxc`
+/// In v2.10.0 the CLI only produces the `.msp` Silver Platter.  The `.mxc`
 /// system library is a Rust `cdylib` built separately by Cargo.
 class CompileOutput {
   final Uint8List mspBytes;

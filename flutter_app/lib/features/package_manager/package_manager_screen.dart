@@ -4,6 +4,8 @@ import '../../core/models/flat_models.dart';
 import '../../core/services/payload_decode_service.dart';
 import 'package_controller.dart';
 import 'package_creator_screen.dart';
+import 'folder_tree_screen.dart';
+import 'payload_grid_screen.dart';
 import '../hub/environment_model.dart';
 
 enum HubViewMode { packageList, objectGrid }
@@ -38,6 +40,92 @@ class _PackageManagerPanelState extends State<PackageManagerPanel> {
   void initState() {
     super.initState();
     _controller.init();
+  }
+
+  Future<void> _compileAndExportActivePackage() async {
+    final pack = _activePack;
+    if (pack == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          backgroundColor: Color(0xff161616),
+          content: Text('Select a package first.',
+              style: TextStyle(fontFamily: 'Courier', fontSize: 11)),
+        ),
+      );
+      return;
+    }
+
+    final packEntities =
+        _controller.entities.where((e) => e.packageId == pack.id).toList();
+    final packPayloads = _controller.payloads
+        .where((p) => packEntities.any((e) => e.id == p.entityId))
+        .toList();
+    final packTags = _controller.tags
+        .where((t) => packEntities.any((e) => e.id == t.entityId))
+        .toList();
+    final packProperties = _controller.properties
+        .where((p) => packEntities.any((e) => e.id == p.entityId))
+        .toList();
+
+    final manifest = {
+      'pack_id': pack.id,
+      'name': pack.name,
+      'version': pack.version,
+      'author': pack.author,
+      'description': pack.description,
+      'entities': packEntities.map((ent) {
+        final entProps = packProperties
+            .where((p) => p.entityId == ent.id)
+            .fold<Map<String, String>>({}, (acc, p) {
+          acc[p.key] = p.value;
+          return acc;
+        });
+        final entTags = packTags
+            .where((t) => t.entityId == ent.id)
+            .map((t) => {'name': t.name, 'isPublic': t.isPublic})
+            .toList();
+        final entPayloads = packPayloads
+            .where((p) => p.entityId == ent.id)
+            .map((p) => {
+                  'id': p.id,
+                  'name': p.name,
+                  'assetPath': p.assetPath,
+                  'version': p.version,
+                })
+            .toList();
+        return {
+          'entity_id': ent.id,
+          'name': ent.name,
+          'category': ent.category,
+          'tags': entTags,
+          'payloads': entPayloads,
+          'properties': entProps,
+        };
+      }).toList(),
+    };
+
+    try {
+      final path = await _controller.compileAndExportPackage(pack.id, manifest);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: const Color(0xff161616),
+            content: Text('Compiled to $path',
+                style: const TextStyle(fontFamily: 'Courier', fontSize: 11)),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: const Color(0xff161616),
+            content: Text('Compile failed: $e',
+                style: const TextStyle(fontFamily: 'Courier', fontSize: 11)),
+          ),
+        );
+      }
+    }
   }
 
   void _showFilterBottomSheet(List<String> tags, ThemeData theme) {
@@ -142,22 +230,68 @@ class _PackageManagerPanelState extends State<PackageManagerPanel> {
                 fontWeight: FontWeight.bold,
               ),
             ),
-            IconButton(
-              icon: Icon(
-                Icons.add_box_outlined,
-                color: theme.primaryColor,
-                size: 22,
-              ),
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => PackageCreatorScreen(
-                      activeEnvironment: widget.environment,
-                    ),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  icon: Icon(
+                    Icons.folder_outlined,
+                    color: theme.primaryColor,
+                    size: 20,
                   ),
-                );
-              },
+                  tooltip: 'Folders & Tags',
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const FolderTreeScreen(),
+                      ),
+                    );
+                  },
+                ),
+                IconButton(
+                  icon: Icon(
+                    Icons.grid_view_outlined,
+                    color: theme.primaryColor,
+                    size: 20,
+                  ),
+                  tooltip: 'Payload Grid',
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const PayloadGridScreen(),
+                      ),
+                    );
+                  },
+                ),
+                IconButton(
+                  icon: Icon(
+                    Icons.build_outlined,
+                    color: theme.primaryColor,
+                    size: 20,
+                  ),
+                  tooltip: 'Compile & Export',
+                  onPressed: _compileAndExportActivePackage,
+                ),
+                IconButton(
+                  icon: Icon(
+                    Icons.add_box_outlined,
+                    color: theme.primaryColor,
+                    size: 22,
+                  ),
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => PackageCreatorScreen(
+                          activeEnvironment: widget.environment,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ],
             ),
           ],
         ),
@@ -434,7 +568,8 @@ class _PackageManagerPanelState extends State<PackageManagerPanel> {
               _controller.properties.where((p) => p.entityId == o.id);
           final kind = entProps
               .firstWhere((p) => p.key == 'kind',
-                  orElse: () => const EntityProperty(0, 'kind', 'rectangle'))
+                  orElse: () => const EntityProperty(
+                      entityId: 0, key: 'kind', value: 'rectangle'))
               .value;
           final entTags = _controller.tags.where((t) => t.entityId == o.id);
 
@@ -549,7 +684,8 @@ class _PackageManagerPanelState extends State<PackageManagerPanel> {
               _controller.properties.where((p) => p.entityId == o.id);
           final kind = entProps
               .firstWhere((p) => p.key == 'kind',
-                  orElse: () => const EntityProperty(0, 'kind', 'rectangle'))
+                  orElse: () => const EntityProperty(
+                      entityId: 0, key: 'kind', value: 'rectangle'))
               .value;
           final entTags = _controller.tags.where((t) => t.entityId == o.id);
 

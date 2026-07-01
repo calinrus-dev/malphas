@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import '../../core/models/flat_models.dart';
+import '../../core/state/entity_store.dart';
 import '../../core/compiler/package_compiler.dart';
 import '../../core/services/app_state_persistence_service.dart';
 
@@ -14,14 +15,12 @@ class _ParsedPackageResult {
   final List<Entity> entities;
   final List<EntityPayload> payloads;
   final List<EntityTag> tags;
-  final List<EntityProperty> properties;
 
   const _ParsedPackageResult({
     required this.package,
     required this.entities,
     required this.payloads,
     required this.tags,
-    required this.properties,
   });
 }
 
@@ -35,28 +34,24 @@ class PackageController extends ChangeNotifier {
       LinkedHashMap<String, ui.Image>();
 
   final List<EntityPackage> _registry = [];
-  final List<Entity> _entities = [];
-  final List<EntityPayload> _payloads = [];
-  final List<EntityTag> _tags = [];
-  final List<EntityProperty> _properties = [];
+  final EntityStore _store = EntityStore();
 
   final AppStatePersistenceService _persistence = AppStatePersistenceService();
   bool _initialized = false;
   String? _workspaceRootOverride;
 
-  List<Entity> get entities => List.unmodifiable(_entities);
-  List<EntityPayload> get payloads => List.unmodifiable(_payloads);
-  List<EntityTag> get tags => List.unmodifiable(_tags);
-  List<EntityProperty> get properties => List.unmodifiable(_properties);
+  EntityStore get store => _store;
+  List<Entity> get entities => _store.entities.whereType<Entity>().toList();
+  List<EntityPayload> get payloads =>
+      _store.payloads.whereType<EntityPayload>().toList();
+  List<EntityTag> get tags => _store.tags;
+  List<EntityProperty> get properties => _store.properties;
 
   /// Clears the in-memory registry and resets the initialization flag.
   /// Intended for tests; do not call in production.
   void reset() {
     _registry.clear();
-    _entities.clear();
-    _payloads.clear();
-    _tags.clear();
-    _properties.clear();
+    _store.clear();
     _initialized = false;
     notifyListeners();
   }
@@ -172,8 +167,8 @@ class PackageController extends ChangeNotifier {
                 result.package.coverImagePath,
                 isLoaded,
               );
-              _registerPackageData(pack, result.entities, result.payloads,
-                  result.tags, result.properties);
+              _registerPackageData(
+                  pack, result.entities, result.payloads, result.tags);
             }
           }
         }
@@ -194,8 +189,8 @@ class PackageController extends ChangeNotifier {
               result.package.coverImagePath,
               isLoaded,
             );
-            _registerPackageData(pack, result.entities, result.payloads,
-                result.tags, result.properties);
+            _registerPackageData(
+                pack, result.entities, result.payloads, result.tags);
           }
         }
       }
@@ -213,26 +208,34 @@ class PackageController extends ChangeNotifier {
     List<Entity> packEntities,
     List<EntityPayload> packPayloads,
     List<EntityTag> packTags,
-    List<EntityProperty> packProperties,
   ) {
     _registry.removeWhere((p) => p.id == pack.id);
-    _entities.removeWhere((e) => e.packageId == pack.id);
-    final entIds = packEntities.map((e) => e.id).toSet();
-    _payloads.removeWhere((p) => entIds.contains(p.entityId));
-    _tags.removeWhere((t) => entIds.contains(t.entityId));
-    _properties.removeWhere((prop) => entIds.contains(prop.entityId));
 
     _registry.add(pack);
-    _entities.addAll(packEntities);
-    _payloads.addAll(packPayloads);
-    _tags.addAll(packTags);
-    _properties.addAll(packProperties);
+    for (final entity in packEntities) {
+      _store.setEntity(entity);
+    }
+    for (final payload in packPayloads) {
+      _store.setPayload(payload);
+    }
+    for (final tag in packTags) {
+      _store.addTag(tag);
+    }
   }
 
   Future<void> _persistRegistry() async {
     await _persistence.saveRegistryIds(
       _registry.where((p) => p.isLoaded).map((p) => p.id).toList(),
     );
+  }
+
+  int _tagMaskFromName(String name) {
+    final lower = name.toLowerCase();
+    if (lower.contains('render')) return 1;
+    if (lower.contains('physics')) return 2;
+    if (lower.contains('input')) return 4;
+    if (lower.contains('audio')) return 8;
+    return 16;
   }
 
   /// Parses a valid MLPS binary and returns a [_ParsedPackageResult] containing relational tables.
@@ -296,7 +299,6 @@ class PackageController extends ChangeNotifier {
       final List<Entity> parsedEntities = [];
       final List<EntityTag> parsedTags = [];
       final List<EntityPayload> parsedPayloads = [];
-      final List<EntityProperty> parsedProperties = [];
 
       const descriptorSize = 64;
       for (int i = 0; i < entitiesCount; i++) {
@@ -306,18 +308,18 @@ class PackageController extends ChangeNotifier {
         }
 
         final entId = data.getUint32(entryOffset, Endian.little);
-
-        parsedEntities.add(
-          Entity(
-            entId,
-            packId,
-            'Voxel_Entity_$entId',
-            'Compiled Archetype',
-            0,
-          ),
-        );
-        parsedTags.add(EntityTag(entId, 'Zero-Copy', true));
-        parsedProperties.add(EntityProperty(entId, 'ID', '$entId'));
+        parsedEntities.add(Entity(
+          id: entId,
+          packageId: packId,
+          name: 'Entity $entId',
+          category: 'MSP',
+          activePayloadId: 0,
+        ));
+        parsedTags.add(EntityTag(
+          entityId: entId,
+          name: 'entity_$entId',
+          bitmask: 1 << (entId % 64),
+        ));
       }
 
       if (manifestFile != null) {
@@ -335,7 +337,6 @@ class PackageController extends ChangeNotifier {
           final List<Entity> richEntities = [];
           final List<EntityTag> richTags = [];
           final List<EntityPayload> richPayloads = [];
-          final List<EntityProperty> richProperties = [];
 
           final manifestEntities =
               manifestJson['entities'] ?? manifestJson['objects'];
@@ -345,28 +346,6 @@ class PackageController extends ChangeNotifier {
                   entJson['entity_id'] ?? entJson['object_id'] ?? entJson['id'];
               final intId =
                   idVal is int ? idVal : (int.tryParse(idVal.toString()) ?? 1);
-              final nameVal = entJson['name'] as String? ?? 'Entity $intId';
-              final categoryVal =
-                  entJson['category'] as String? ?? 'Compiled Archetype';
-
-              final props = Map<String, dynamic>.from(
-                  entJson['properties'] as Map? ?? {});
-              props.forEach((k, v) {
-                richProperties.add(EntityProperty(intId, k, v.toString()));
-              });
-
-              if (entJson['tags'] is List) {
-                for (var t in entJson['tags']) {
-                  if (t is String) {
-                    richTags.add(EntityTag(intId, t, true));
-                  } else if (t is Map) {
-                    richTags.add(EntityTag(intId, t['name'] as String,
-                        t['isPublic'] as bool? ?? true));
-                  }
-                }
-              } else {
-                richTags.add(EntityTag(intId, 'Zero-Copy', true));
-              }
 
               final manifestPayloads = entJson['payloads'] ?? entJson['skins'];
               int activePayloadId = 0;
@@ -375,11 +354,11 @@ class PackageController extends ChangeNotifier {
                   final s = manifestPayloads[pIdx];
                   final payloadId = pIdx + 1;
                   richPayloads.add(EntityPayload(
-                    payloadId,
-                    intId,
-                    s['name'] as String? ?? 'Payload $payloadId',
-                    s['assetPath'] as String? ?? 'none',
-                    s['version'] as String? ?? '1.0',
+                    id: payloadId,
+                    entityId: intId,
+                    name: s['name'] as String? ?? 'Payload $payloadId',
+                    assetPath: s['assetPath'] as String? ?? 'none',
+                    type: s['type'] as String? ?? 'binary',
                   ));
                   if (s['assetPath'] != null &&
                       s['assetPath'] != 'none' &&
@@ -389,12 +368,28 @@ class PackageController extends ChangeNotifier {
                 }
               }
 
+              int tagMask = 1;
+              if (entJson['tags'] is List) {
+                for (var t in entJson['tags']) {
+                  final label = t is String
+                      ? t
+                      : (t is Map ? t['name'] as String? : null);
+                  if (label != null) {
+                    tagMask |= _tagMaskFromName(label);
+                  }
+                }
+              }
+              richTags.add(EntityTag(
+                entityId: intId,
+                name: 'entity_$intId',
+                bitmask: tagMask,
+              ));
               richEntities.add(Entity(
-                intId,
-                packId,
-                nameVal,
-                categoryVal,
-                activePayloadId,
+                id: intId,
+                packageId: packId,
+                name: entJson['name'] as String? ?? 'Entity $intId',
+                category: entJson['category'] as String? ?? 'Dynamic Sprite',
+                activePayloadId: activePayloadId,
               ));
             }
           }
@@ -414,8 +409,6 @@ class PackageController extends ChangeNotifier {
             entities: richEntities.isNotEmpty ? richEntities : parsedEntities,
             payloads: richPayloads,
             tags: richTags.isNotEmpty ? richTags : parsedTags,
-            properties:
-                richProperties.isNotEmpty ? richProperties : parsedProperties,
           );
         } catch (_) {
           // Fallback if manifest is malformed
@@ -437,7 +430,6 @@ class PackageController extends ChangeNotifier {
         entities: parsedEntities,
         payloads: parsedPayloads,
         tags: parsedTags,
-        properties: parsedProperties,
       );
     } catch (e) {
       return null;
@@ -525,23 +517,21 @@ class PackageController extends ChangeNotifier {
 
   Future<void> deletePackage(String id) async {
     _registry.removeWhere((p) => p.id == id);
-    _entities.removeWhere((e) => e.packageId == id);
+    _store.removePackageData(id);
     await _persistRegistry();
     notifyListeners();
   }
 
   void updateEntityActivePayload(int entityId, int activePayloadId) {
-    final index = _entities.indexWhere((e) => e.id == entityId);
-    if (index != -1) {
-      final e = _entities[index];
-      _entities[index] = Entity(
-        e.id,
-        e.packageId,
-        e.name,
-        e.category,
-        activePayloadId,
-      );
-      notifyListeners();
+    final entity = _store.getEntity(entityId);
+    if (entity != null) {
+      _store.setEntity(Entity(
+        id: entity.id,
+        packageId: entity.packageId,
+        name: entity.name,
+        category: entity.category,
+        activePayloadId: activePayloadId,
+      ));
     }
   }
 
@@ -549,10 +539,14 @@ class PackageController extends ChangeNotifier {
   Future<void> preloadSkins(EntityPackage pack) async {
     await disposeSkins();
 
-    final packEntities =
-        _entities.where((e) => e.packageId == pack.id).map((e) => e.id).toSet();
-    final packPayloads =
-        _payloads.where((p) => packEntities.contains(p.entityId));
+    final packEntities = _store.entities
+        .whereType<Entity>()
+        .where((e) => e.packageId == pack.id)
+        .map((e) => e.id)
+        .toSet();
+    final packPayloads = _store.payloads
+        .whereType<EntityPayload>()
+        .where((p) => packEntities.contains(p.entityId));
 
     for (final payload in packPayloads) {
       final path = payload.assetPath;
@@ -644,11 +638,12 @@ class PackageController extends ChangeNotifier {
             final destFile = File('${spritesDir.path}/$filename');
             await srcFile.copy(destFile.path);
             processedPayloads.add(EntityPayload(
-              s.id,
-              s.entityId,
-              s.name,
-              'packages/$packId/sprites/$filename',
-              s.version,
+              id: s.id,
+              entityId: s.entityId,
+              name: s.name,
+              assetPath: 'packages/$packId/sprites/$filename',
+              type: s.type,
+              version: s.version,
             ));
           } else {
             processedPayloads.add(s);
@@ -734,11 +729,12 @@ class PackageController extends ChangeNotifier {
       await payloadFile.writeAsBytes(payloadBytes);
 
       compilerProcessedPayloads.add(EntityPayload(
-        ent.activePayloadId == 0 ? 1 : ent.activePayloadId,
-        ent.id,
-        'Payload ${ent.id}',
-        'packages/$packId/$payloadFileName',
-        '1.0',
+        id: ent.activePayloadId == 0 ? 1 : ent.activePayloadId,
+        entityId: ent.id,
+        name: 'Payload ${ent.id}',
+        assetPath: 'packages/$packId/$payloadFileName',
+        type: 'binary',
+        version: '1.0',
       ));
 
       strippedEntities.add({
@@ -780,13 +776,41 @@ class PackageController extends ChangeNotifier {
     await init();
   }
 
-  int _tagMaskFromName(String name) {
-    // Simple deterministic bit mapping for tag names.
-    final lower = name.toLowerCase();
-    if (lower.contains('render')) return 1;
-    if (lower.contains('physics')) return 2;
-    if (lower.contains('input')) return 4;
-    if (lower.contains('audio')) return 8;
-    return 16;
+  /// Compiles an arbitrary package manifest via [MalphasPackageCompiler] and
+  /// exports the resulting `.msp` to `packages/`.
+  ///
+  /// Returns the path of the generated `.msp` file on success. Throws on
+  /// compilation error or missing CLI.
+  Future<String> compileAndExportPackage(
+    String packId,
+    Map<String, dynamic> manifest, {
+    Directory? sourceDir,
+  }) async {
+    final compiler = MalphasPackageCompiler();
+    if (!await compiler.isCliAvailable()) {
+      throw Exception('malphas-cli is not available');
+    }
+
+    final workspace = resolveWorkspaceRoot();
+    final packagesDir = Directory('$workspace/packages');
+    if (!packagesDir.existsSync()) {
+      packagesDir.createSync(recursive: true);
+    }
+
+    final output =
+        await compiler.compilePackage(manifest, sourceDir: sourceDir);
+    final mspPath = '${packagesDir.path}/$packId.msp';
+    await File(mspPath).writeAsBytes(output.mspBytes);
+
+    // Persist the rich manifest next to the binary for UI consumption.
+    final manifestPath = '${packagesDir.path}/$packId.manifest.json';
+    await File(manifestPath).writeAsString(jsonEncode(manifest));
+
+    // Refresh registry so the new package is immediately available.
+    _initialized = false;
+    await init();
+    notifyListeners();
+
+    return mspPath;
   }
 }

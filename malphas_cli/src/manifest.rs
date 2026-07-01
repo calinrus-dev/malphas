@@ -1,4 +1,4 @@
-//! Typed manifest schema for the Malphas v2.9.0 workspace compiler.
+//! Typed manifest schema for the Malphas v2.10.0 workspace compiler.
 //!
 //! A workspace is a directory that contains:
 //!   * `manifest.json`   — this file.

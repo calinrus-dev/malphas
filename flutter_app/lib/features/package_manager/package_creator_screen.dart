@@ -50,24 +50,28 @@ class _PackageCreatorScreenState extends State<PackageCreatorScreen> {
     setState(() {
       _objects.add(
         Entity(
-          nextId,
-          '',
-          'Entity $nextId',
-          'Dynamic Sprite',
-          0,
+          id: nextId,
+          packageId: '',
+          name: 'Entity $nextId',
+          category: 'Dynamic Sprite',
+          activePayloadId: 0,
         ),
       );
-      _tags.add(EntityTag(nextId, 'Interactive', true));
+      _tags.add(EntityTag(entityId: nextId, name: 'Interactive'));
       _properties.addAll([
-        EntityProperty(nextId, 'kind', 'rectangle'),
-        EntityProperty(nextId, 'x', '${100.0 + (nextId * 40.0)}'),
-        EntityProperty(nextId, 'y', '${100.0 + (nextId * 40.0)}'),
-        EntityProperty(nextId, 'width', '80.0'),
-        EntityProperty(nextId, 'height', '80.0'),
-        EntityProperty(nextId, 'speedX', '${3.0 + nextId}'),
-        EntityProperty(nextId, 'speedY', '${2.0 + nextId}'),
-        EntityProperty(nextId, 'color', '0xFF00FFCC'),
-        EntityProperty(nextId, 'text', 'BLOCK'),
+        EntityProperty(entityId: nextId, key: 'kind', value: 'rectangle'),
+        EntityProperty(
+            entityId: nextId, key: 'x', value: '${100.0 + (nextId * 40.0)}'),
+        EntityProperty(
+            entityId: nextId, key: 'y', value: '${100.0 + (nextId * 40.0)}'),
+        EntityProperty(entityId: nextId, key: 'width', value: '80.0'),
+        EntityProperty(entityId: nextId, key: 'height', value: '80.0'),
+        EntityProperty(
+            entityId: nextId, key: 'speedX', value: '${3.0 + nextId}'),
+        EntityProperty(
+            entityId: nextId, key: 'speedY', value: '${2.0 + nextId}'),
+        EntityProperty(entityId: nextId, key: 'color', value: '0xFF00FFCC'),
+        EntityProperty(entityId: nextId, key: 'text', value: 'BLOCK'),
       ]);
     });
   }
@@ -250,7 +254,7 @@ class _PackageCreatorScreenState extends State<PackageCreatorScreen> {
                       .split(',')
                       .map((t) => t.trim())
                       .where((t) => t.isNotEmpty)
-                      .map((t) => EntityTag(obj.id, t, true))
+                      .map((t) => EntityTag(entityId: obj.id, name: t))
                       .toList();
                   _tags.addAll(newTags);
 
@@ -259,11 +263,11 @@ class _PackageCreatorScreenState extends State<PackageCreatorScreen> {
                     activePayloadId = 1;
                     _payloads.add(
                       EntityPayload(
-                        1,
-                        obj.id,
-                        'Skin ${obj.name}',
-                        skinPathCtrl.text.trim(),
-                        '1.0',
+                        id: 1,
+                        entityId: obj.id,
+                        name: 'Skin ${obj.name}',
+                        assetPath: skinPathCtrl.text.trim(),
+                        version: '1.0',
                       ),
                     );
                   }
@@ -275,15 +279,16 @@ class _PackageCreatorScreenState extends State<PackageCreatorScreen> {
                     newProps[key] = ctrl.text.trim();
                   });
                   newProps.forEach((k, v) {
-                    _properties.add(EntityProperty(obj.id, k, v));
+                    _properties.add(
+                        EntityProperty(entityId: obj.id, key: k, value: v));
                   });
 
                   _objects[index] = Entity(
-                    obj.id,
-                    '',
-                    nameCtrl.text.trim(),
-                    categoryCtrl.text.trim(),
-                    activePayloadId,
+                    id: obj.id,
+                    packageId: '',
+                    name: nameCtrl.text.trim(),
+                    category: categoryCtrl.text.trim(),
+                    activePayloadId: activePayloadId,
                   );
                 });
                 Navigator.pop(context);
@@ -367,9 +372,13 @@ class _PackageCreatorScreenState extends State<PackageCreatorScreen> {
             final mspFile = File('$workspace/packages/$packId.msp');
             final systemFile = _resolveSystemFile(workspace, packId);
             if (mspFile.existsSync()) {
-              final loadResult = bindings.loadMsp(mspFile.path);
-              if (loadResult == 0 && systemFile != null) {
-                bindings.loadSystem(systemFile);
+              try {
+                bindings.loadMsp(mspFile.path);
+                if (systemFile != null) {
+                  bindings.loadSystem(systemFile);
+                }
+              } on FFIException catch (e) {
+                debugPrint('Live run failed: ${e.message}');
               }
               final pack = _controller
                   .getAllPackages()
@@ -645,7 +654,9 @@ class _PackageCreatorScreenState extends State<PackageCreatorScreen> {
                                               p.entityId == obj.id &&
                                               p.key == 'kind',
                                           orElse: () => const EntityProperty(
-                                              0, 'kind', 'rectangle'))
+                                              entityId: 0,
+                                              key: 'kind',
+                                              value: 'rectangle'))
                                       .value;
                                   final tagList = _tags
                                       .where((t) => t.entityId == obj.id)

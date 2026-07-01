@@ -1,4 +1,4 @@
-//! Malphas package compiler and signer CLI (v2.9.0).
+//! Malphas package compiler and signer CLI (v2.10.0).
 //!
 //! Subcommands:
 //!   compile <manifest.json>  -- Build <pack_id>.msp and generate bindings.rs

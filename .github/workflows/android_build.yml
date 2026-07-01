@@ -24,17 +24,12 @@ jobs:
         with:
           workspaces: "."
 
-      - name: Install Android NDK r26c
-        run: |
-          NDK_URL="https://dl.google.com/android/repository/android-ndk-r26c-linux.zip"
-          EXPECTED_SHA256="6d38b603a4152b8470f393d1f7132bc6b1fd3b73b6172599056eb5f91b359252"
-          curl --fail -L -o "$RUNNER_TEMP/ndk.zip" "$NDK_URL"
-          echo "$EXPECTED_SHA256  $RUNNER_TEMP/ndk.zip" | sha256sum -c -
-          unzip -q "$RUNNER_TEMP/ndk.zip" -d "$RUNNER_TEMP/ndk"
-          NDK_HOME="$RUNNER_TEMP/ndk/android-ndk-r26c"
-          echo "ANDROID_NDK_HOME=$NDK_HOME" >> "$GITHUB_ENV"
-          echo "ANDROID_NDK_ROOT=$NDK_HOME" >> "$GITHUB_ENV"
-          echo "$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin" >> "$GITHUB_PATH"
+      - name: Install Android NDK r26d
+        uses: nttld/setup-ndk@afb4c9964b521afb97c864b7d40b11e6911bd410 # v1.5.0
+        with:
+          ndk-version: r26d
+          add-to-path: true
+          link-to-sdk: false
 
       - name: Cross-Compile Android Engines
         shell: bash

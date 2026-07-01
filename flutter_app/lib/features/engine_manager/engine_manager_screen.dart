@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'engine_controller.dart';
+import 'hot_swap_panel.dart';
 import 'models.dart';
 
 class EngineManagerPanel extends StatefulWidget {
@@ -100,6 +101,8 @@ class _EngineManagerPanelState extends State<EngineManagerPanel> {
                   ],
                 ),
               ),
+              const SizedBox(height: 14),
+              const HotSwapPanel(),
               const SizedBox(height: 14),
               Expanded(
                 child: ListView.builder(

@@ -4,9 +4,49 @@ import 'dart:io';
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
 
+import '../services/desktop_path_service.dart';
 import 'types.dart';
 
-/// Zero-copy FFI gateway to the Rust `malphas_core` v2.9.0 engine.
+/// Exception thrown when an FFI call returns a non-zero error code.
+///
+/// Error codes are contractually agreed between Dart and Rust. Positive codes
+/// are generally informational; negative codes are failures that must surface
+/// to the caller.
+class FFIException implements Exception {
+  final int code;
+  final String message;
+  final String? call;
+
+  const FFIException(this.code, this.message, {this.call});
+
+  @override
+  String toString() => 'FFIException(code=$code, call=$call, message=$message)';
+}
+
+/// Maps a negative FFI error code to a human-readable message.
+String _ffiErrorMessage(int code) {
+  if (code == -1) return 'ERR_INVALID_ARGUMENT';
+  if (code == -2) return 'ERR_BRIDGE_NULL';
+  if (code == -10) return 'ERR_ABI_MISMATCH';
+  if (code == -120) return 'ERR_MSP_SIGNATURE_MISSING';
+  if (code == -121) return 'ERR_MSP_SIGNATURE_INVALID';
+  if (code == -210) return 'ERR_SYSTEM_SANDBOX';
+  if (code == -211) return 'ERR_SYSTEM_SIGNATURE_MISSING';
+  if (code == -212) return 'ERR_SYSTEM_SIGNATURE_INVALID';
+  return 'ERR_NATIVE ($code)';
+}
+
+/// Throws [FFIException] if [code] indicates failure.
+///
+/// A code of zero means success. Positive codes are preserved and returned.
+int _checkFfi(int code, String call) {
+  if (code < 0) {
+    throw FFIException(code, _ffiErrorMessage(code), call: call);
+  }
+  return code;
+}
+
+/// Zero-copy FFI gateway to the Rust `malphas_core` v2.10.0 engine.
 ///
 /// The old arena-based entity setup API has been removed.  Systems now own all
 /// simulation state; Flutter only drives the vsync pulse and reads the front
@@ -38,6 +78,8 @@ class MalphasBindings extends ChangeNotifier {
 
   void _reloadNativeLibrary(String path) {
     try {
+      shutdownEngine();
+      _lib?.close();
       final newLib = DynamicLibrary.open(path);
       _lib = newLib;
       _nativeAvailable = true;
@@ -85,15 +127,31 @@ class MalphasBindings extends ChangeNotifier {
       binaryName = 'libmalphas_core.so';
     }
 
+    final candidates = <String>[];
+
+    // 1. Sandboxed desktop path (production).
+    if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+      final sandboxed = DesktopPathService.validatedMotorPathSync(binaryName);
+      if (sandboxed != null) {
+        candidates.add(sandboxed);
+      }
+    }
+
+    // 2. Workspace-relative paths (development).
     final workspace = _findWorkspaceRoot();
-    return [
-      if (workspace != null) '$workspace/flutter_app/motors/$binaryName',
-      if (workspace != null) '$workspace/target/release/$binaryName',
-      if (workspace != null)
+    if (workspace != null) {
+      candidates.addAll([
+        '$workspace/flutter_app/motors/$binaryName',
+        '$workspace/target/release/$binaryName',
         '$workspace/malphas_core/target/release/$binaryName',
-      if (workspace != null) '$workspace/$binaryName',
-      binaryName,
-    ];
+        '$workspace/$binaryName',
+      ]);
+    }
+
+    // 3. System search (fallback).
+    candidates.add(binaryName);
+
+    return candidates;
   }
 
   String? _findWorkspaceRoot() {
@@ -123,9 +181,11 @@ class MalphasBindings extends ChangeNotifier {
   late _LoadMsp _loadMsp;
   late _RefreshMsp _refreshMsp;
   late _LoadSystem _loadSystem;
-  late _GetBackIndex _getBackIndex;
   late _GetCommandsWritten _getCommandsWritten;
   late _GetFrontBufferSnapshot _getFrontBufferSnapshot;
+  late _GetBufferCommandCount _getBufferACommandCount;
+  late _GetBufferCommandCount _getBufferBCommandCount;
+  late _GetAbiVersion _getAbiVersion;
   late _GetMspEntityCount _getMspEntityCount;
   late _GetLoadedSystemCount _getLoadedSystemCount;
   late _MalphasAlloc _malphasAlloc;
@@ -156,13 +216,17 @@ class MalphasBindings extends ChangeNotifier {
     _refreshMsp = lib.lookupFunction<_LoadMspNative, _LoadMsp>('refresh_msp');
     _loadSystem =
         lib.lookupFunction<_LoadMspNative, _LoadSystem>('load_system');
-    _getBackIndex = lib
-        .lookupFunction<_GetBackIndexNative, _GetBackIndex>('get_back_index');
     _getCommandsWritten =
         lib.lookupFunction<_GetCommandsWrittenNative, _GetCommandsWritten>(
             'get_commands_written');
     _getFrontBufferSnapshot = lib.lookupFunction<_GetFrontBufferSnapshotNative,
         _GetFrontBufferSnapshot>('get_front_buffer_snapshot');
+    _getBufferACommandCount = lib.lookupFunction<_GetBufferCommandCountNative,
+        _GetBufferCommandCount>('get_buffer_a_command_count');
+    _getBufferBCommandCount = lib.lookupFunction<_GetBufferCommandCountNative,
+        _GetBufferCommandCount>('get_buffer_b_command_count');
+    _getAbiVersion = lib.lookupFunction<_GetAbiVersionNative, _GetAbiVersion>(
+        'get_abi_version');
     _getMspEntityCount =
         lib.lookupFunction<_GetMspEntityCountNative, _GetMspEntityCount>(
             'get_msp_entity_count');
@@ -198,36 +262,46 @@ class MalphasBindings extends ChangeNotifier {
   ///
   /// Rust allocates and owns the 64-byte aligned bridge and command buffers;
   /// Dart only receives the pointer and must treat it as read-only.
-  /// ABI version expected by this Dart binding.  Must match the Rust core.
-  static const int _expectedAbiVersion = 0x02090000;
-
-  int initEngine({int maxCommands = 2048}) {
-    if (!_nativeAvailable || _lib == null) return -1;
+  ///
+  /// Rust allocates and owns the 64-byte aligned bridge and command buffers.
+  /// Dart receives only the pointer and must treat it as read-only. All atomic
+  /// state reads go through FFI getters.
+  ///
+  /// Throws [FFIException] on any failure.
+  void initEngine({int maxCommands = 2048}) {
+    if (!_nativeAvailable || _lib == null) {
+      throw const FFIException(-1, 'Native library not loaded',
+          call: 'init_engine');
+    }
 
     shutdownEngine();
 
     final bridgePtr = _initEngine(maxCommands);
-    if (bridgePtr == nullptr) return -1;
+    if (bridgePtr == nullptr) {
+      throw const FFIException(-2, 'Bridge allocation failed',
+          call: 'init_engine');
+    }
     _bridge = bridgePtr.cast<MalphasDoubleBufferBridge>();
 
-    final abiVersion = _bridge!.ref.abiVersion;
-    if (abiVersion != _expectedAbiVersion) {
-      debugPrint(
-        'MalphasBindings: ABI mismatch (expected 0x${_expectedAbiVersion.toRadixString(16)}, got 0x${abiVersion.toRadixString(16)})',
-      );
+    // ABI version is read through an FFI getter so Dart never dereferences
+    // bridge fields directly. It is validated before any shared memory is used.
+    final abiVersion = _getAbiVersion();
+    if (abiVersion != bridgeAbiVersion) {
       shutdownEngine();
-      return -2;
+      throw FFIException(
+        -10,
+        'ABI mismatch (expected 0x${bridgeAbiVersion.toRadixString(16)}, '
+        'got 0x${abiVersion.toRadixString(16)})',
+        call: 'init_engine',
+      );
     }
-
-    return 0;
   }
 
   /// Tears down the engine thread and frees the Rust-owned bridge.
-  int shutdownEngine() {
-    if (!_nativeAvailable) return 0;
-    final result = _shutdownEngine();
+  void shutdownEngine() {
+    if (!_nativeAvailable) return;
+    _shutdownEngine();
     _bridge = null;
-    return result;
   }
 
   int pauseEngine(bool paused) =>
@@ -242,28 +316,40 @@ class MalphasBindings extends ChangeNotifier {
   // ---------------------------------------------------------------------------
   // MSP / system loading.
   // ---------------------------------------------------------------------------
-  int loadMsp(String path) {
-    if (!_nativeAvailable) return -1;
-    return using((arena) {
+  /// Loads an MSP binary. Throws [FFIException] on failure.
+  void loadMsp(String path) {
+    if (!_nativeAvailable) {
+      throw const FFIException(-1, 'Native library not loaded',
+          call: 'load_msp');
+    }
+    using((arena) {
       final cPath = path.toNativeUtf8(allocator: arena);
-      return _loadMsp(cPath);
+      _checkFfi(_loadMsp(cPath), 'load_msp');
     });
   }
 
   /// Hot-swaps the mapped MSP without unloading loaded `.mxc` systems.
-  int refreshMsp(String path) {
-    if (!_nativeAvailable) return -1;
-    return using((arena) {
+  /// Throws [FFIException] on failure.
+  void refreshMsp(String path) {
+    if (!_nativeAvailable) {
+      throw const FFIException(-1, 'Native library not loaded',
+          call: 'refresh_msp');
+    }
+    using((arena) {
       final cPath = path.toNativeUtf8(allocator: arena);
-      return _refreshMsp(cPath);
+      _checkFfi(_refreshMsp(cPath), 'refresh_msp');
     });
   }
 
-  int loadSystem(String path) {
-    if (!_nativeAvailable) return -1;
-    return using((arena) {
+  /// Loads an MXC system library. Throws [FFIException] on failure.
+  void loadSystem(String path) {
+    if (!_nativeAvailable) {
+      throw const FFIException(-1, 'Native library not loaded',
+          call: 'load_system');
+    }
+    using((arena) {
       final cPath = path.toNativeUtf8(allocator: arena);
-      return _loadSystem(cPath);
+      _checkFfi(_loadSystem(cPath), 'load_system');
     });
   }
 
@@ -305,7 +391,11 @@ class MalphasBindings extends ChangeNotifier {
   int get commandsWritten =>
       _bridge == null ? 0 : _getCommandsWritten(_bridge!);
 
-  int get backIndex => _bridge == null ? 0 : _getBackIndex(_bridge!);
+  int get bufferACommandCount =>
+      _bridge == null ? 0 : _getBufferACommandCount(_bridge!);
+
+  int get bufferBCommandCount =>
+      _bridge == null ? 0 : _getBufferBCommandCount(_bridge!);
 
   // ---------------------------------------------------------------------------
   // Aligned allocator.
@@ -345,12 +435,15 @@ class MalphasBindings extends ChangeNotifier {
   }
 
   /// Overrides the default test-only Ed25519 trust anchor used for `.msp` and
-  /// `.mxc` signature verification.  Returns `0` on success.
-  int setTrustAnchor(String publicKeyHex) {
-    if (!_nativeAvailable) return -1;
-    return using((arena) {
+  /// `.mxc` signature verification. Throws [FFIException] on failure.
+  void setTrustAnchor(String publicKeyHex) {
+    if (!_nativeAvailable) {
+      throw const FFIException(-1, 'Native library not loaded',
+          call: 'set_trust_anchor');
+    }
+    using((arena) {
       final cKey = publicKeyHex.toNativeUtf8(allocator: arena);
-      return _setTrustAnchor(cKey);
+      _checkFfi(_setTrustAnchor(cKey), 'set_trust_anchor');
     });
   }
 
@@ -383,10 +476,6 @@ typedef _LoadMsp = int Function(Pointer<Utf8>);
 typedef _LoadSystem = int Function(Pointer<Utf8>);
 typedef _RefreshMsp = int Function(Pointer<Utf8>);
 
-typedef _GetBackIndexNative = Uint8 Function(
-    Pointer<MalphasDoubleBufferBridge>);
-typedef _GetBackIndex = int Function(Pointer<MalphasDoubleBufferBridge>);
-
 typedef _GetCommandsWrittenNative = Uint32 Function(
     Pointer<MalphasDoubleBufferBridge>);
 typedef _GetCommandsWritten = int Function(Pointer<MalphasDoubleBufferBridge>);
@@ -401,6 +490,14 @@ typedef _GetFrontBufferSnapshot = Pointer<DartRenderCommand> Function(
   Pointer<Uint8>,
   Pointer<Uint32>,
 );
+
+typedef _GetBufferCommandCountNative = Uint32 Function(
+    Pointer<MalphasDoubleBufferBridge>);
+typedef _GetBufferCommandCount = int Function(
+    Pointer<MalphasDoubleBufferBridge>);
+
+typedef _GetAbiVersionNative = Uint32 Function();
+typedef _GetAbiVersion = int Function();
 
 typedef _GetMspEntityCountNative = Uint32 Function();
 typedef _GetMspEntityCount = int Function();

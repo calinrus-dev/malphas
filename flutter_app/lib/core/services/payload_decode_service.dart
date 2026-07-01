@@ -1,3 +1,4 @@
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
@@ -5,11 +6,13 @@ import 'dart:typed_data';
 
 import '../models/flat_models.dart';
 
+/// Classification of a payload after decoding.
+enum PayloadType { image, json, text, binary, audio }
+
 /// Result of decoding an [EntityPayload] off the main thread.
 ///
-/// Image decoding (turning bytes into a [ui.Image]) still happens on the main
-/// thread because Flutter's image codecs must run there.  This service only
-/// performs I/O and lightweight parsing inside the isolate.
+/// Image byte data is returned here; conversion to [ui.Image] must still happen
+/// on the main thread because Flutter's image codecs are UI-isolate bound.
 class DecodedPayload {
   final PayloadType type;
   final String name;
@@ -26,30 +29,60 @@ class DecodedPayload {
   });
 }
 
-enum PayloadType { image, json, text, binary }
-
 /// Lightweight service that resolves payload files in a Dart [Isolate].
+///
+/// Results are cached in an LRU cache (max 100 items) so fast scrolling through
+/// a large payload grid does not repeat I/O work.
 class PayloadDecodeService {
+  static const int _maxCacheSize = 100;
+  static final LinkedHashMap<int, DecodedPayload> _cache =
+      LinkedHashMap<int, DecodedPayload>();
+
   const PayloadDecodeService();
 
   /// Reads and classifies the payload referenced by [payload].
   ///
-  /// The file read (and JSON parsing when applicable) runs in [Isolate.run]
-  /// so the UI isolate stays responsive while scrolling through a large grid.
+  /// The file read and classification run in [Isolate.run]. The result is
+  /// cached by payload id so repeated lookups are cheap.
   Future<DecodedPayload> decodePayload(EntityPayload payload) async {
+    final cached = _cache[payload.id];
+    if (cached != null) {
+      _promote(payload.id);
+      return cached;
+    }
+
     final path = payload.assetPath;
     if (path.isEmpty || path == 'none') {
-      return DecodedPayload(
+      final result = DecodedPayload(
         type: PayloadType.binary,
         name: payload.name,
         textPreview: 'No asset',
       );
+      _put(payload.id, result);
+      return result;
     }
 
-    return Isolate.run(() => _decodeInIsolate(
+    final result = await Isolate.run(() => _decodeInIsolate(
           name: payload.name,
           path: path,
         ));
+    _put(payload.id, result);
+    return result;
+  }
+
+  /// Clears the decode cache.
+  void clearCache() => _cache.clear();
+
+  void _promote(int id) {
+    final value = _cache.remove(id);
+    if (value != null) _cache[id] = value;
+  }
+
+  void _put(int id, DecodedPayload payload) {
+    while (_cache.length >= _maxCacheSize && _cache.isNotEmpty) {
+      _cache.remove(_cache.keys.first);
+    }
+    _cache[id] = payload;
   }
 
   static DecodedPayload _decodeInIsolate({
@@ -58,7 +91,6 @@ class PayloadDecodeService {
   }) {
     var file = File(path);
     if (!file.existsSync()) {
-      // Try resolving against the repository root if the relative path fails.
       final current = Directory.current.path;
       file = File('$current/$path');
     }
@@ -111,6 +143,20 @@ class PayloadDecodeService {
           name: name,
           path: path,
           bytes: bytes,
+        );
+      }
+
+      if (lower.endsWith('.mp3') ||
+          lower.endsWith('.wav') ||
+          lower.endsWith('.ogg') ||
+          lower.endsWith('.flac') ||
+          lower.endsWith('.aac')) {
+        return DecodedPayload(
+          type: PayloadType.audio,
+          name: name,
+          path: path,
+          bytes: bytes,
+          textPreview: '${bytes.length} bytes',
         );
       }
 

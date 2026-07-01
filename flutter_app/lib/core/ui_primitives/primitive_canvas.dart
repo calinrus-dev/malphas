@@ -1,4 +1,5 @@
 import 'dart:ffi' as ffi;
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
@@ -7,16 +8,21 @@ import '../ffi/types.dart';
 
 /// Zero-copy native render target.
 ///
-/// The painter reads [MalphasBindings.frontCommands] directly from the shared
-/// double-buffer bridge on every vsync.  No command list is copied into Dart
-/// memory; the only data moved is the handful of fields read by the GPU-bound
-/// [Canvas] operations.
+/// The painter reads the front buffer directly from the shared double-buffer
+/// bridge on every vsync. No command list is copied into Dart memory; the only
+/// data moved is the handful of fields read by the GPU-bound [Canvas] ops.
 class PrimitiveCanvas extends StatefulWidget {
   final MalphasBindings bindings;
+
+  /// Optional external repaint source. When provided, the canvas does NOT pulse
+  /// the engine itself; it only paints in response to this notifier. This lets
+  /// a parent [EngineController] own the single vsync ticker.
+  final Listenable? repaint;
 
   const PrimitiveCanvas({
     super.key,
     required this.bindings,
+    this.repaint,
   });
 
   @override
@@ -25,28 +31,31 @@ class PrimitiveCanvas extends StatefulWidget {
 
 class _PrimitiveCanvasState extends State<PrimitiveCanvas>
     with SingleTickerProviderStateMixin {
-  late final Ticker _ticker;
-  late final ValueNotifier<int> _frame;
+  Ticker? _ticker;
+  ValueNotifier<int>? _frame;
+
+  Listenable get _repaint => widget.repaint ?? _frame!;
 
   @override
   void initState() {
     super.initState();
-    _frame = ValueNotifier<int>(0);
-    _ticker = createTicker(_onTick);
-    _ticker.start();
+    if (widget.repaint == null) {
+      _frame = ValueNotifier<int>(0);
+      _ticker = createTicker(_onTick)..start();
+    }
   }
 
   void _onTick(Duration elapsed) {
     // Drive the Rust simulation thread once per vsync and bump the frame
     // notifier so the CustomPaint repaints without rebuilding the widget.
     widget.bindings.triggerEnginePulse();
-    _frame.value++;
+    _frame!.value++;
   }
 
   @override
   void dispose() {
-    _ticker.dispose();
-    _frame.dispose();
+    _ticker?.dispose();
+    _frame?.dispose();
     super.dispose();
   }
 
@@ -55,7 +64,7 @@ class _PrimitiveCanvasState extends State<PrimitiveCanvas>
     return CustomPaint(
       painter: _PrimitivePainter(
         bindings: widget.bindings,
-        repaint: _frame,
+        repaint: _repaint,
       ),
       size: Size.infinite,
     );
@@ -82,6 +91,7 @@ class _PrimitivePainter extends CustomPainter {
       Paint()..color = const Color(0xff0a0a0a),
     );
 
+    // Atomic snapshot: one FFI call pins the front buffer pointer and count.
     final snapshot = _bindings.getFrontBufferSnapshot();
     final commands = snapshot.commands;
     final count = snapshot.count;
@@ -91,11 +101,16 @@ class _PrimitivePainter extends CustomPainter {
     final scaleY = size.height / _logicalHeight;
 
     for (int i = 0; i < count; i++) {
-      final cmd = commands[i];
-      if (cmd.commandType == 1) {
+      final cmd = (commands + i).ref;
+      final type = cmd.type;
+      if (type == 1) {
         _drawRectangle(canvas, cmd, scaleX, scaleY);
-      } else if (cmd.commandType == 2) {
-        _drawTextFallback(canvas, cmd, scaleX, scaleY);
+      } else if (type == 2) {
+        _drawText(canvas, cmd, scaleX, scaleY);
+      } else if (type == 3) {
+        _drawSpritePlaceholder(canvas, cmd, scaleX, scaleY);
+      } else if (type == 4) {
+        _drawCircle(canvas, cmd, scaleX, scaleY);
       }
     }
   }
@@ -113,25 +128,66 @@ class _PrimitivePainter extends CustomPainter {
       cmd.height * scaleY,
     );
     final paint = Paint()
-      ..color = Color(cmd.colorRgba)
+      ..color = Color(cmd.color)
       ..style = PaintingStyle.fill;
     canvas.drawRect(rect, paint);
   }
 
-  void _drawTextFallback(
+  void _drawCircle(
     Canvas canvas,
     DartRenderCommand cmd,
     double scaleX,
     double scaleY,
   ) {
-    // Systems are responsible for text content in v2.9.0.  Without an arena
-    // atlas we render a small placeholder marker so text commands are still
-    // visible during development.
     final center = Offset(cmd.x * scaleX, cmd.y * scaleY);
+    final radius = (cmd.width * scaleX) / 2;
     final paint = Paint()
-      ..color = Color(cmd.colorRgba)
+      ..color = Color(cmd.color)
       ..style = PaintingStyle.fill;
-    canvas.drawCircle(center, 3.0, paint);
+    canvas.drawCircle(center, radius, paint);
+  }
+
+  void _drawSpritePlaceholder(
+    Canvas canvas,
+    DartRenderCommand cmd,
+    double scaleX,
+    double scaleY,
+  ) {
+    final rect = Rect.fromLTWH(
+      cmd.x * scaleX,
+      cmd.y * scaleY,
+      cmd.width * scaleX,
+      cmd.height * scaleY,
+    );
+    final paint = Paint()
+      ..color = Color(cmd.color).withValues(alpha: 0.5)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5;
+    canvas.drawRect(rect, paint);
+  }
+
+  void _drawText(
+    Canvas canvas,
+    DartRenderCommand cmd,
+    double scaleX,
+    double scaleY,
+  ) {
+    final text = cmd.payloadId != 0 ? 'T${cmd.payloadId}' : 'TXT';
+    final builder = ui.ParagraphBuilder(ui.ParagraphStyle(
+      textAlign: TextAlign.left,
+      fontSize: 10,
+    ));
+    builder.pushStyle(ui.TextStyle(
+      color: Color(cmd.color),
+      fontFamily: 'Courier',
+    ));
+    builder.addText(text);
+    final paragraph = builder.build()
+      ..layout(const ui.ParagraphConstraints(width: 200));
+    canvas.drawParagraph(
+      paragraph,
+      Offset(cmd.x * scaleX, cmd.y * scaleY),
+    );
   }
 
   @override

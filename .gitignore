@@ -4,6 +4,8 @@ target/
 
 # Secrets and local environment
 .env
+.env.local
+.secrets/
 *.pem
 *.key
 

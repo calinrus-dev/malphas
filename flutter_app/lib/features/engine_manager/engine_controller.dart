@@ -1,24 +1,46 @@
 import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart';
+import '../../core/services/trust_anchor_service.dart';
+import '../hub/environment_model.dart';
+import '../package_manager/package_controller.dart';
 import 'models.dart';
 import '../../core/ffi/malphas_bindings.dart';
 
+/// Orchestrates the native engine lifecycle for a single [MalphasEnvironment].
+///
+/// The controller is a singleton because the Rust engine itself is a single
+/// global instance. All engine state transitions are centralized here so that
+/// start/stop/hot-swap are deterministic and no orphan threads remain.
 class EngineController extends ChangeNotifier {
   static final EngineController _instance = EngineController._internal();
   factory EngineController() => _instance;
-
   EngineController._internal();
 
-  /// Ed25519 public key used to verify engine signatures.
-  ///
-  /// This value is supplied at build time via
-  /// `--dart-define=MALPHAS_TRUST_ANCHOR=...`.  Release builds must provide a
-  /// real production key; when the define is missing the engine is reported as
-  /// corrupt.
-  static const String _trustAnchorHex =
-      String.fromEnvironment('MALPHAS_TRUST_ANCHOR');
-  static String get publicKeyHex => _trustAnchorHex;
+  final MalphasBindings _bindings = MalphasBindings();
+  final PackageController _packageController = PackageController();
+
+  MalphasBindings get bindings => _bindings;
+
+  String? _trustAnchorHex;
+  String? get trustAnchorHex => _trustAnchorHex;
+
+  MalphasEnvironment? _activeEnvironment;
+  MalphasEnvironment? get activeEnvironment => _activeEnvironment;
+
+  bool isLoading = false;
+  bool isRunning = false;
+  String? errorMessage;
+
+  Ticker? _ticker;
+  final ValueNotifier<int> frameNotifier = ValueNotifier<int>(0);
+
+  int get entityCount => _bindings.getMspEntityCount();
+  int get loadedSystemCount => _bindings.getLoadedSystemCount();
+  int get vmTickMicros => _bindings.vmTickMicros;
+  int get commandsGeneratedCount => _bindings.commandsGeneratedCount;
 
   static String _defaultBinaryName() {
     if (Platform.isWindows) return 'malphas_core.dll';
@@ -40,7 +62,6 @@ class EngineController extends ChangeNotifier {
   ];
 
   String activeEngineId = 'eng_liquid_01';
-  final MalphasBindings _bindings = MalphasBindings();
 
   MalphasEngine get activeEngine => engines.firstWhere(
         (e) => e.id == activeEngineId,
@@ -58,6 +79,233 @@ class EngineController extends ChangeNotifier {
             : engines.first,
       );
   List<MalphasEngine> getAllEngines() => engines;
+
+  /// Loads the Ed25519 public trust anchor.
+  ///
+  /// Priority:
+  /// 1. Secure storage (platform keyring/keystore/keychain).
+  /// 2. Build-time asset `assets/trust_anchor.pem`.
+  /// 3. `MALPHAS_TRUST_ANCHOR` compile-time define.
+  Future<String?> loadTrustAnchor() async {
+    // 1. Secure storage (with a defensive timeout so widget tests never hang
+    // waiting for a platform plugin).
+    try {
+      final fromStorage = await TrustAnchorService.retrieve()
+          .timeout(const Duration(milliseconds: 100));
+      if (fromStorage != null && fromStorage.isNotEmpty) {
+        _trustAnchorHex = fromStorage;
+        return _trustAnchorHex;
+      }
+    } catch (e) {
+      debugPrint('TrustAnchorService retrieval failed: $e');
+    }
+
+    // 2. Build-time asset.
+    try {
+      final pem = await rootBundle.loadString('assets/trust_anchor.pem');
+      _trustAnchorHex = pem.replaceAll(RegExp(r'\s+'), '');
+      return _trustAnchorHex;
+    } catch (_) {}
+
+    // 3. Compile-time define.
+    // ignore: do_not_use_environment
+    const fromEnv = String.fromEnvironment('MALPHAS_TRUST_ANCHOR');
+    if (fromEnv.isNotEmpty) {
+      _trustAnchorHex = fromEnv;
+      return _trustAnchorHex;
+    }
+
+    _trustAnchorHex = null;
+    return null;
+  }
+
+  /// Persists a user-provided trust anchor to secure storage.
+  Future<void> saveTrustAnchor(String publicKeyHex) async {
+    final cleaned = publicKeyHex.replaceAll(RegExp(r'\s+'), '');
+    await TrustAnchorService.store(cleaned);
+    _trustAnchorHex = cleaned;
+    notifyListeners();
+  }
+
+  /// Configures the native engine trust anchor when one is available.
+  ///
+  /// The engine will still reject signed assets at load time if no anchor is
+  /// configured, so this method does not throw when the anchor is missing. It
+  /// merely keeps the existing test flow intact.
+  Future<void> _ensureTrustAnchor() async {
+    final anchor = await loadTrustAnchor();
+    if (anchor != null && anchor.isNotEmpty) {
+      _bindings.setTrustAnchor(anchor);
+    }
+  }
+
+  /// Loads [env] into the native engine and starts the vsync pulse.
+  ///
+  /// Sequence:
+  /// 1. Trust anchor verification.
+  /// 2. initEngine(maxCommands: 65536).
+  /// 3. loadMsp for the first package id.
+  /// 4. loadSystem for the engine binary (if any).
+  /// 5. Start Ticker -> triggerEnginePulse every frame.
+  Future<void> loadEnvironment(
+    MalphasEnvironment env,
+    TickerProvider vsync,
+  ) async {
+    if (isLoading) return;
+    isLoading = true;
+    errorMessage = null;
+    notifyListeners();
+
+    try {
+      if (!_bindings.isNativeAvailable) {
+        throw Exception('Native motor is not available in this environment');
+      }
+
+      await _ensureTrustAnchor();
+
+      _bindings.initEngine(maxCommands: 65536);
+
+      final packageIds =
+          env.packageIds.isNotEmpty ? env.packageIds : const ['bouncing_demo'];
+      final mspPath = _resolveMspPath(packageIds.first);
+      if (mspPath == null) {
+        throw Exception(
+            'AUTO-LOAD ERROR: MSP not found for ${packageIds.first}');
+      }
+      _bindings.loadMsp(mspPath);
+
+      final systemPath = _resolveSystemPath(env.engineId ?? packageIds.first);
+      if (systemPath != null) {
+        _bindings.loadSystem(systemPath);
+      }
+
+      _activeEnvironment = env;
+      isRunning = true;
+      _startPulse(vsync);
+    } on FFIException catch (e) {
+      errorMessage = 'Engine error: ${e.message} (${e.code})';
+      isRunning = false;
+    } catch (e) {
+      errorMessage = 'Engine error: $e';
+      isRunning = false;
+    } finally {
+      isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  /// Stops the vsync pulse and shuts down the engine.
+  void unloadEnvironment() {
+    _stopPulse();
+    _bindings.shutdownEngine();
+    _activeEnvironment = null;
+    isRunning = false;
+    errorMessage = null;
+    notifyListeners();
+  }
+
+  /// Hot-swaps the mapped MSP without stopping the running system.
+  void reloadMsp(String packId) {
+    if (!isRunning) return;
+    final path = _resolveMspPath(packId);
+    if (path == null) {
+      errorMessage = 'MSP not found for $packId';
+      notifyListeners();
+      return;
+    }
+    try {
+      _bindings.refreshMsp(path);
+    } on FFIException catch (e) {
+      errorMessage = 'MSP reload failed: ${e.message} (${e.code})';
+      notifyListeners();
+    }
+  }
+
+  /// Full system reload: shutdown -> re-init -> reload MSP/system -> restart pulse.
+  Future<void> reloadSystem(TickerProvider vsync) async {
+    final env = _activeEnvironment;
+    if (env == null) return;
+
+    _stopPulse();
+    _bindings.shutdownEngine();
+
+    isLoading = true;
+    errorMessage = null;
+    notifyListeners();
+
+    try {
+      _bindings.initEngine(maxCommands: 65536);
+
+      final packageIds =
+          env.packageIds.isNotEmpty ? env.packageIds : const ['bouncing_demo'];
+      final mspPath = _resolveMspPath(packageIds.first);
+      if (mspPath != null) _bindings.loadMsp(mspPath);
+
+      final systemPath = _resolveSystemPath(env.engineId ?? packageIds.first);
+      if (systemPath != null) _bindings.loadSystem(systemPath);
+
+      isRunning = true;
+      _startPulse(vsync);
+    } on FFIException catch (e) {
+      errorMessage = 'System reload failed: ${e.message} (${e.code})';
+      isRunning = false;
+    } catch (e) {
+      errorMessage = 'System reload failed: $e';
+      isRunning = false;
+    } finally {
+      isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  void _startPulse(TickerProvider vsync) {
+    _stopPulse();
+    _ticker = vsync.createTicker(_onTick)..start();
+  }
+
+  void _stopPulse() {
+    _ticker?.dispose();
+    _ticker = null;
+  }
+
+  void _onTick(Duration elapsed) {
+    _bindings.triggerEnginePulse();
+    frameNotifier.value++;
+  }
+
+  String? _resolveMspPath(String packId) {
+    final workspace = _packageController.resolveWorkspaceRoot();
+    final candidates = [
+      '$workspace/examples/$packId/$packId.msp',
+      '$workspace/packages/$packId.msp',
+    ];
+    for (final candidate in candidates) {
+      if (File(candidate).existsSync()) return candidate;
+    }
+    return null;
+  }
+
+  String? _resolveSystemPath(String packId) {
+    final workspace = _packageController.resolveWorkspaceRoot();
+    final exts = Platform.isWindows
+        ? ['.mxc', '.dll']
+        : Platform.isMacOS
+            ? ['.mxc', '.dylib']
+            : ['.mxc', '.so'];
+
+    for (final ext in exts) {
+      final candidates = [
+        '$workspace/flutter_app/motors/$packId$ext',
+        '$workspace/examples/$packId/$packId$ext',
+        '$workspace/packages/$packId$ext',
+        '$workspace/$packId$ext',
+      ];
+      for (final candidate in candidates) {
+        if (File(candidate).existsSync()) return candidate;
+      }
+    }
+    return null;
+  }
 
   /// Computes the SHA-256 hex digest of [file].
   String computeSha256(File file) {
@@ -77,24 +325,17 @@ class EngineController extends ChangeNotifier {
     }
 
     final engine = engines[index];
-
-    // Resolve workspace root directory dynamically
     final workspace = fullWorkspacePath ?? Directory.current.path;
 
     String targetPath;
-
-    // If the engine id is itself an existing binary path (discovered by scan),
-    // use it directly.
     final idAsFile = File(engine.id);
     if (idAsFile.existsSync()) {
       targetPath = engine.id;
     } else {
-      // Construct target paths
       targetPath = Platform.isWindows
           ? "$workspace\\malphas_core\\target\\release\\${engine.binaryName}"
           : "$workspace/malphas_core/target/release/${engine.binaryName}";
 
-      // Check fallback location (e.g. root workspace or app folder) if release target doesn't exist
       if (!File(targetPath).existsSync()) {
         targetPath = Platform.isWindows
             ? "$workspace\\${engine.binaryName}"
@@ -102,16 +343,12 @@ class EngineController extends ChangeNotifier {
       }
     }
 
-    // Compute the real SHA-256 of the resolved binary.
     final binaryFile = File(targetPath);
     if (binaryFile.existsSync()) {
       engines[index].sha256 = computeSha256(binaryFile);
     }
 
-    // MALPHAS REINFORCED v2.2 Phase 6 — Ed25519 signature verification.
-    // A companion .sig file must exist next to the engine binary and a trust
-    // anchor must have been configured at build time.
-    if (_trustAnchorHex.isEmpty) {
+    if (_trustAnchorHex == null || _trustAnchorHex!.isEmpty) {
       engines[index].status = EngineStatus.corrupt;
       return;
     }
@@ -127,20 +364,15 @@ class EngineController extends ChangeNotifier {
     final result = _bindings.verifyEngineSignature(
       targetPath,
       signatureHex,
-      _trustAnchorHex,
+      _trustAnchorHex!,
     );
 
-    if (result == 0) {
-      engines[index].status = EngineStatus.standby;
-    } else {
-      engines[index].status = EngineStatus.corrupt;
-    }
+    engines[index].status =
+        result == 0 ? EngineStatus.standby : EngineStatus.corrupt;
     notifyListeners();
   }
 
-  /// Scans the workspace for native Malphas engine binaries and populates
-  /// [engines] with one entry per discovered file. The original fallback entry
-  /// is kept only when no binary is found.
+  /// Scans the workspace for native Malphas engine binaries.
   void scanAvailableEngines([String? workspace]) {
     if (Platform.isAndroid || Platform.isIOS) {
       engines.clear();
@@ -148,7 +380,7 @@ class EngineController extends ChangeNotifier {
         MalphasEngine(
           id: 'embedded_native_core',
           name: 'Embedded Native Core',
-          version: 'v2.9.0',
+          version: 'v2.10.0',
           runtime: NativeRuntime.rust,
           binaryName: _defaultBinaryName(),
           sha256: 'Embedded (OS Verified)',
@@ -174,7 +406,6 @@ class EngineController extends ChangeNotifier {
       }
     }
 
-    // 1. flutter_app/motors/malphas_core_*.{dll,so,dylib}
     final motorsDir = Directory(
       '$root${Platform.pathSeparator}flutter_app${Platform.pathSeparator}motors',
     );
@@ -189,7 +420,6 @@ class EngineController extends ChangeNotifier {
       }
     }
 
-    // 2. target/release/{malphas_core.dll,libmalphas_core.so,libmalphas_core.dylib}
     final releaseDir = Directory(
       '$root${Platform.pathSeparator}target${Platform.pathSeparator}release',
     );
@@ -209,7 +439,6 @@ class EngineController extends ChangeNotifier {
       }
     }
 
-    // 3. workspace root {malphas_core.dll,libmalphas_core.so,libmalphas_core.dylib}
     final rootNames = Platform.isWindows
         ? ['malphas_core.dll']
         : Platform.isMacOS
@@ -259,12 +488,7 @@ class EngineController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Atomically swaps the active engine.
-  ///
-  /// The implementation is consistent: it shuts down the current engine,
-  /// reloads the native core from the requested binary path, reinitialises the
-  /// FFI bridge, re-verifies its signature, and only marks the engine as active
-  /// when the signature check passes.
+  /// Atomically swaps the active engine binary.
   bool hotSwapEngine(String id) {
     final targetIndex = engines.indexWhere((e) => e.id == id);
     if (targetIndex == -1) return false;
@@ -287,9 +511,10 @@ class EngineController extends ChangeNotifier {
         return false;
       }
 
-      final initResult = _bindings.initEngine();
-      if (initResult != 0) {
-        debugPrint('hotSwapEngine init failed for "$id": code $initResult');
+      try {
+        _bindings.initEngine();
+      } on FFIException catch (e) {
+        debugPrint('hotSwapEngine init failed for "$id": ${e.message}');
         engines[targetIndex].status = EngineStatus.corrupt;
         notifyListeners();
         return false;
@@ -315,13 +540,10 @@ class EngineController extends ChangeNotifier {
     return false;
   }
 
-  /// Resolves the filesystem path of an engine binary for hot-swap reload.
   String? _resolveSourcePath(MalphasEngine engine) {
-    // Already a discovered absolute path.
     final idAsFile = File(engine.id);
     if (idAsFile.existsSync()) return engine.id;
 
-    // Fallback synthetic engine: look next to the workspace root.
     final workspace = Directory.current.path;
     final binaryName = engine.binaryName;
     final candidates = Platform.isWindows
@@ -337,5 +559,12 @@ class EngineController extends ChangeNotifier {
       if (File(candidate).existsSync()) return candidate;
     }
     return null;
+  }
+
+  @override
+  void dispose() {
+    _stopPulse();
+    frameNotifier.dispose();
+    super.dispose();
   }
 }
