@@ -147,7 +147,7 @@ jobs:
             echo "Trust anchor not available; running tests with signature verification skipped."
             export MALPHAS_INSECURE_SKIP_VERIFY=1
           fi
-          flutter test
+          flutter test -j 1
 
       - name: Verify Dart format
         run: dart format --set-exit-if-changed .

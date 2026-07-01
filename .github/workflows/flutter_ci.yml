@@ -220,4 +220,4 @@ jobs:
             echo "Trust anchor not available; running tests with signature verification skipped."
             export MALPHAS_INSECURE_SKIP_VERIFY=1
           fi
-          xvfb-run -a flutter test --dart-define=MALPHAS_TRUST_ANCHOR="$PUBKEY"
+          xvfb-run -a flutter test -j 1 --dart-define=MALPHAS_TRUST_ANCHOR="$PUBKEY"
