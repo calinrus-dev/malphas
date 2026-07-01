@@ -1,4 +1,4 @@
-//! End-to-end integration test for the Malphas FFI core v2.10.0.
+//! End-to-end integration test for the Malphas FFI core v3.0.0.
 //!
 //! Exercises the full lifecycle: init → load MSP → load signed bouncing_demo.mxc →
 //! trigger pulse → shutdown, verifying that the system produces render
@@ -127,6 +127,7 @@ fn build_test_msp(path: &std::path::Path) {
 
     let descriptor = MspEntityDescriptor {
         entity_id: 0,
+        payload_type_id: malphas_core::payload_schema::PAYLOAD_TYPE_PHYSICS_BODY,
         tag_mask: 1,
         payload_offset: 0,
         payload_size: payload_bytes.len() as u32,
@@ -177,6 +178,7 @@ fn header_as_bytes(header: &MspHeader) -> [u8; 64] {
 fn descriptor_as_bytes(descriptor: &MspEntityDescriptor) -> [u8; 64] {
     let mut buf = [0u8; 64];
     buf[0..4].copy_from_slice(&descriptor.entity_id.to_le_bytes());
+    buf[4..8].copy_from_slice(&descriptor.payload_type_id.to_le_bytes());
     buf[8..16].copy_from_slice(&descriptor.tag_mask.to_le_bytes());
     buf[16..20].copy_from_slice(&descriptor.payload_offset.to_le_bytes());
     buf[20..24].copy_from_slice(&descriptor.payload_size.to_le_bytes());

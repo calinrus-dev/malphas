@@ -137,7 +137,7 @@ pub fn extract_zip_package(zip_path: *const c_char, output_dir: *const c_char) -
 
     let canonical_dest = match std::fs::canonicalize(dest_path) {
         Ok(p) => p,
-        Err(_) => dest_path.to_path_buf(),
+        Err(_) => return -5,
     };
 
     let mut total_uncompressed: u64 = 0;

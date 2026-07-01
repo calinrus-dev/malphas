@@ -89,6 +89,8 @@ void main() {
       return;
     }
 
+    _seedTrustAnchor(bindings);
+
     await PackageController().init();
 
     final workspace = PackageController().resolveWorkspaceRoot();
@@ -116,4 +118,21 @@ void main() {
 
     expect(find.textContaining('AUTO-LOAD ERROR'), findsNothing);
   });
+}
+
+void _seedTrustAnchor(MalphasBindings bindings) {
+  const candidates = [
+    'flutter_app/assets/trust_anchor.pem',
+    'assets/trust_anchor.pem',
+  ];
+  for (final path in candidates) {
+    final file = File(path);
+    if (file.existsSync()) {
+      final key = file.readAsStringSync().replaceAll(RegExp(r'\s+'), '');
+      if (key.isNotEmpty) {
+        bindings.setTrustAnchor(key);
+        return;
+      }
+    }
+  }
 }

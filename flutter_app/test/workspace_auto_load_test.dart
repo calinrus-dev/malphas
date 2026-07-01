@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:malphas_app/core/ffi/malphas_bindings.dart';
 import 'package:malphas_app/core/services/app_state_persistence_service.dart';
+import 'package:malphas_app/features/engine_manager/engine_controller.dart';
 import 'package:malphas_app/features/hub/environment_model.dart';
 import 'package:malphas_app/features/package_manager/package_controller.dart';
 import 'package:malphas_app/features/workspace/workspace_screen.dart';
@@ -15,6 +16,9 @@ void main() {
     AppStatePersistenceService().setDocumentsDirectoryOverride(
       persistenceDir.path,
     );
+    PackageController().reset();
+    EngineController().unloadEnvironment();
+    EngineController().errorMessage = null;
   });
 
   tearDown(() {
@@ -35,18 +39,22 @@ void main() {
       return;
     }
 
+    _seedTrustAnchor(bindings);
+
     // Ensure the bouncing_demo package is compiled and registered.
     await PackageController().init();
 
     final workspace = PackageController().resolveWorkspaceRoot();
     final mspFile = File('$workspace/examples/bouncing_demo/bouncing_demo.msp');
-    final mspSigFile = File('$workspace/examples/bouncing_demo/bouncing_demo.msp.sig');
+    final mspSigFile =
+        File('$workspace/examples/bouncing_demo/bouncing_demo.msp.sig');
     if (!mspFile.existsSync()) {
       markTestSkipped('bouncing_demo.msp not found at ${mspFile.path}');
       return;
     }
     if (!mspSigFile.existsSync()) {
-      markTestSkipped('bouncing_demo.msp.sig not found; signed package required');
+      markTestSkipped(
+          'bouncing_demo.msp.sig not found; signed package required');
       return;
     }
 
@@ -108,4 +116,21 @@ String? _resolveSystemPath(String workspace, String packId) {
     }
   }
   return null;
+}
+
+void _seedTrustAnchor(MalphasBindings bindings) {
+  const candidates = [
+    'flutter_app/assets/trust_anchor.pem',
+    'assets/trust_anchor.pem',
+  ];
+  for (final path in candidates) {
+    final file = File(path);
+    if (file.existsSync()) {
+      final key = file.readAsStringSync().replaceAll(RegExp(r'\s+'), '');
+      if (key.isNotEmpty) {
+        bindings.setTrustAnchor(key);
+        return;
+      }
+    }
+  }
 }

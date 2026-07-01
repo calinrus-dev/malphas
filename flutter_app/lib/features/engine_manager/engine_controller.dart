@@ -3,6 +3,7 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
+import '../../core/services/payload_decode_service.dart';
 import '../../core/services/trust_anchor_service.dart';
 import '../hub/environment_model.dart';
 import '../package_manager/package_controller.dart';
@@ -380,7 +381,7 @@ class EngineController extends ChangeNotifier {
         MalphasEngine(
           id: 'embedded_native_core',
           name: 'Embedded Native Core',
-          version: 'v2.10.0',
+          version: 'v3.0.0',
           runtime: NativeRuntime.rust,
           binaryName: _defaultBinaryName(),
           sha256: 'Embedded (OS Verified)',
@@ -565,6 +566,8 @@ class EngineController extends ChangeNotifier {
   void dispose() {
     _stopPulse();
     frameNotifier.dispose();
+    _packageController.disposeSkins();
+    const PayloadDecodeService().clearCache();
     super.dispose();
   }
 }

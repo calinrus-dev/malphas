@@ -1,4 +1,4 @@
-//! Security-focused integration tests for Malphas v2.10.0.
+//! Security-focused integration tests for Malphas v3.0.0.
 //!
 //! Covers signature enforcement and sandbox path validation for `.msp` and `.mxc`.
 //!
@@ -7,17 +7,18 @@
 //! Tests run with `MALPHAS_INSECURE_SKIP_VERIFY=0` (strict mode) by default
 //! because the code under test only skips verification when that env var is set.
 //!
-//! `reject_unsigned_msp`, `reject_msp_with_malformed_signature`, and
-//! `reject_msp_signed_with_wrong_key` rely on a trust anchor being configured.
-//! In debug/test builds the core provides a default test anchor; in a release
-//! build without the `test-anchor` feature, set `MALPHAS_INSECURE_SKIP_VERIFY=0`
-//! and provide a real anchor via `malphas_core::set_global_trust_anchor` or these
-//! tests will fail.
+//! `reject_unsigned_msp`, `reject_msp_with_malformed_signature`,
+//! `reject_msp_signed_with_wrong_key`, `reject_unsigned_system`, and
+//! `reject_system_signed_with_wrong_key` rely on a trust anchor being configured.
+//! These tests generate an ephemeral Ed25519 keypair and install it as the
+//! global trust anchor at runtime.  Run the test suite with the `test-anchor`
+//! feature, or call `ensure_test_anchor()` in any signature test that needs it.
 //!
 //! The system signature tests create their own ephemeral Ed25519 keys and do not
 //! need the repository's `TEST_SIGNING_KEY` secret.
 
 use std::io::Write;
+use std::sync::OnceLock;
 
 use ed25519_dalek::{Signer, SigningKey};
 use malphas_core::msp_loader::{
@@ -32,6 +33,26 @@ const ERR_MSP_SIGNATURE_INVALID: i32 = -121;
 const ERR_SYSTEM_SANDBOX: i32 = -210;
 const ERR_SYSTEM_SIGNATURE_MISSING: i32 = -211;
 const ERR_SYSTEM_SIGNATURE_INVALID: i32 = -212;
+
+static TEST_SIGNING_BYTES: OnceLock<[u8; 32]> = OnceLock::new();
+static TEST_ANCHOR_HEX: OnceLock<String> = OnceLock::new();
+
+/// Configure the global trust anchor with a deterministic per-process test key.
+///
+/// The key is generated once; subsequent calls are idempotent.  All signature
+/// tests that need a trust anchor must call this helper before loading MSPs or
+/// systems.
+fn ensure_test_anchor() -> SigningKey {
+    let bytes = TEST_SIGNING_BYTES.get_or_init(|| {
+        let signing_key = SigningKey::generate(&mut OsRng);
+        let anchor_hex = hex::encode(signing_key.verifying_key().to_bytes());
+        let _ = TEST_ANCHOR_HEX.set(anchor_hex);
+        signing_key.to_bytes()
+    });
+    let anchor_hex = TEST_ANCHOR_HEX.get().expect("test anchor hex is set");
+    malphas_core::set_global_trust_anchor(anchor_hex).expect("test anchor must be valid");
+    SigningKey::from_bytes(bytes)
+}
 
 #[repr(C, align(64))]
 #[derive(Clone, Copy)]
@@ -147,6 +168,7 @@ fn build_test_msp(path: &std::path::Path) {
 
     let descriptor = MspEntityDescriptor {
         entity_id: 0,
+        payload_type_id: malphas_core::payload_schema::PAYLOAD_TYPE_PHYSICS_BODY,
         tag_mask: 1,
         payload_offset: 0,
         payload_size: payload_bytes.len() as u32,
@@ -197,6 +219,7 @@ fn header_as_bytes(header: &MspHeader) -> [u8; 64] {
 fn descriptor_as_bytes(descriptor: &MspEntityDescriptor) -> [u8; 64] {
     let mut buf = [0u8; 64];
     buf[0..4].copy_from_slice(&descriptor.entity_id.to_le_bytes());
+    buf[4..8].copy_from_slice(&descriptor.payload_type_id.to_le_bytes());
     buf[8..16].copy_from_slice(&descriptor.tag_mask.to_le_bytes());
     buf[16..20].copy_from_slice(&descriptor.payload_offset.to_le_bytes());
     buf[20..24].copy_from_slice(&descriptor.payload_size.to_le_bytes());
@@ -246,6 +269,7 @@ fn load_system_in_sandbox(rel_path: &std::path::Path, work_dir: &std::path::Path
 
 #[test]
 fn reject_unsigned_msp() {
+    let _ = ensure_test_anchor();
     let msp_path =
         std::env::temp_dir().join(format!("malphas_sec_unsigned_{}.msp", std::process::id()));
     build_test_msp(&msp_path);
@@ -258,6 +282,7 @@ fn reject_unsigned_msp() {
 
 #[test]
 fn reject_msp_with_malformed_signature() {
+    let _ = ensure_test_anchor();
     let msp_path =
         std::env::temp_dir().join(format!("malphas_sec_bad_sig_{}.msp", std::process::id()));
     build_test_msp(&msp_path);
@@ -272,6 +297,7 @@ fn reject_msp_with_malformed_signature() {
 
 #[test]
 fn reject_msp_signed_with_wrong_key() {
+    let _ = ensure_test_anchor();
     let msp_path =
         std::env::temp_dir().join(format!("malphas_sec_wrong_key_{}.msp", std::process::id()));
     build_test_msp(&msp_path);
@@ -360,6 +386,7 @@ fn reject_system_symlink_outside_sandbox() {
 
 #[test]
 fn reject_unsigned_system() {
+    let _ = ensure_test_anchor();
     let lib_path = ensure_system_built();
     let (work_dir, systems_dir) = make_sandbox_workdir("unsigned");
     let sandboxed = systems_dir.join(lib_path.file_name().unwrap());
@@ -383,6 +410,7 @@ fn reject_unsigned_system() {
 
 #[test]
 fn reject_system_signed_with_wrong_key() {
+    let _ = ensure_test_anchor();
     let lib_path = ensure_system_built();
     let (work_dir, systems_dir) = make_sandbox_workdir("wrong_key");
     let sandboxed = systems_dir.join(lib_path.file_name().unwrap());

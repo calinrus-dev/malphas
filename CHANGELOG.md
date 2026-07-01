@@ -1,5 +1,38 @@
 # Changelog
 
+## [3.0.0] — Production-Ready Sovereign Runtime
+
+### Added
+- Runtime telemetry service: RAM budget, MSP mmap diagnostics, optional GPS via `geolocator`.
+- Telemetry overlay in workspace with settings toggles and persisted user preferences.
+- Memory budget enforcement in `malphas_core`: atomic reservation/release rejects oversize MSPs.
+- mmap diagnostics exposed through FFI: mapped size, Silver Platter build time, command timing.
+- Skippable splash screen with version/build display and first-launch detection.
+- First-run onboarding flow with workspace directory selection and trust-anchor guidance.
+- Reusable themed widgets: `MalphasCard`, `MalphasLoadingIndicator`, `MalphasEmptyState`, `MalphasIconButton`, `MalphasTag`.
+- Empty states and loading skeletons on Hub and Workspace screens.
+- Accessibility labels and tooltips on icon buttons and telemetry toggles.
+- Byte-bounded LRU caches for decoded payloads and sprite `ui.Image` instances.
+- `malphas_cli` developer commands: `keygen`, `verify`, `init`, `build-system`.
+- Environment bundle commands: `environment bundle`, `environment list`, `environment unbundle`.
+- User-configurable workspace directory with cross-platform fallback via `path_provider`.
+
+### Changed
+- Bumped ABI version to `0x03000000` and MSP version to `4`.
+- `DartRenderCommand` and `MalphasDoubleBufferBridge` locked at 64 bytes, 64-byte aligned.
+- `bouncing_demo` system uses typed payload schema and input-aware `malphas_tick_with_input`.
+- Settings screen grouped into workspace directory and telemetry sections.
+- Updated `docs/FFI_CONTRACT.md` to reflect the 64-byte render command layout.
+
+### Fixed
+- Flutter workspace tests now seed the trust anchor directly so signed artifacts load end-to-end.
+- Native release artifacts rebuilt and re-signed against the repository trust anchor.
+- Engine controller disposes image caches and payload decode caches on teardown.
+
+### Security
+- Test trust anchor fallback gated behind the `test-anchor` Cargo feature only.
+- All distributed `.msp`, `.mxc`, and engine binaries re-signed with the current Ed25519 trust anchor.
+
 ## [2.10.0] — Hardened Frontend & Zero-Copy Blind Painter
 
 ### Added

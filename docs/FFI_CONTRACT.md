@@ -1,7 +1,7 @@
 # FFI Contract
 
 This document is the authoritative specification of the Rust/Dart FFI boundary
-for Malphas v2.10.0.  Both sides must keep these layouts, alignments, and memory
+for Malphas v3.0.0.  Both sides must keep these layouts, alignments, and memory
 ordering guarantees in lockstep.
 
 ## `MalphasDoubleBufferBridge`
@@ -48,32 +48,34 @@ pub struct MalphasDoubleBufferBridge {
 ## `DartRenderCommand`
 
 ```rust
-#[repr(C)]
+#[repr(C, align(64))]
 pub struct DartRenderCommand {
-    pub command_type: u8,   // byte  0
-    pub layer: u8,          // byte  1
-    pub pad: u16,           // bytes 2..4
-    pub x: f32,             // bytes 4..8
-    pub y: f32,             // bytes 8..12
-    pub width: f32,         // bytes 12..16
-    pub height: f32,        // bytes 16..20
-    pub color_rgba: u32,    // bytes 20..24
-} // Total: 24 bytes, 4-byte aligned.
+    pub cmd_type: u32,   // bytes  0.. 4
+    pub entity_id: u32,  // bytes  4.. 8
+    pub x: f32,          // bytes  8..12
+    pub y: f32,          // bytes 12..16
+    pub width: f32,      // bytes 16..20
+    pub height: f32,     // bytes 20..24
+    pub color: u32,      // bytes 24..28
+    pub payload_id: u32, // bytes 28..32
+    pub _padding: [u32; 8], // bytes 32..64
+} // Total: 64 bytes, 64-byte aligned.
 ```
 
 | Field | Offset | Size | Meaning |
 |-------|--------|------|---------|
-| `command_type` | 0 | 1 | `1` = rectangle; `2` = text. |
-| `layer` | 1 | 1 | Paint order; lower values first. |
-| `pad` | 2 | 2 | Alignment padding; must be zero. |
-| `x` | 4 | 4 | Rectangle: top-left X.  Text: text length in code units. |
-| `y` | 8 | 4 | Rectangle: top-left Y.  Text: font size / style. |
-| `width` | 12 | 4 | Rectangle: width.  Text: low 32 bits of `Pointer<TextPayload>`. |
-| `height` | 16 | 4 | Rectangle: height.  Text: high 32 bits of `Pointer<TextPayload>`. |
-| `color_rgba` | 20 | 4 | Packed `0xAARRGGBB` color. |
+| `cmd_type` | 0 | 4 | `1` = rectangle; `2` = text; `3` = sprite. |
+| `entity_id` | 4 | 4 | Source entity identifier. |
+| `x` | 8 | 4 | Rectangle: top-left X.  Text: font size / style. |
+| `y` | 12 | 4 | Rectangle: top-left Y.  Text: reserved. |
+| `width` | 16 | 4 | Rectangle: width.  Text/Sprite: low 32 bits of payload pointer. |
+| `height` | 20 | 4 | Rectangle: height.  Text/Sprite: high 32 bits of payload pointer. |
+| `color` | 24 | 4 | Packed `0xAARRGGBB` color. |
+| `payload_id` | 28 | 4 | Asset or payload slot reference. |
+| `_padding` | 32 | 32 | Reserved; must be zero. |
 
-- **Total size:** 24 bytes.
-- **Alignment:** 4 bytes.
+- **Total size:** 64 bytes.
+- **Alignment:** 64 bytes.
 - Dart must not perform pointer arithmetic on the command array; use
   `Pointer<DartRenderCommand>.elementAt(i)` with the count returned by Rust.
 
@@ -101,14 +103,14 @@ before the flip.
 The bridge embeds `BRIDGE_ABI_VERSION`:
 
 ```rust
-pub const BRIDGE_ABI_VERSION: u32 = 0x02100000;
+pub const BRIDGE_ABI_VERSION: u32 = 0x03000000;
 ```
 
 Format: `0xMMmmpp00`, where `MM` = major, `mm` = minor, `pp` = patch.  For
-v2.10.0 this is `0x02100000`.
+v3.0.0 this is `0x03000000`.
 
 `initEngine` in Dart must read `bridge.abiVersion` (or call a Rust getter) and
-refuse to run if the value is not `0x02100000`.  A mismatch means the Dart
+refuse to run if the value is not `0x03000000`.  A mismatch means the Dart
 binding and the native library are out of sync and the layout is not safe to
 use.
 
@@ -246,7 +248,7 @@ Dart must never:
 When modifying the Rust/Dart boundary:
 
 - [ ] Keep `MalphasDoubleBufferBridge` exactly 64 bytes and 64-byte aligned.
-- [ ] Keep `DartRenderCommand` exactly 24 bytes and 4-byte aligned.
+- [ ] Keep `DartRenderCommand` exactly 64 bytes and 64-byte aligned.
 - [ ] Update `BRIDGE_ABI_VERSION` whenever either layout changes.
 - [ ] Mirror every field order change in both `pipeline.rs` and `types.dart`.
 - [ ] Use only atomic getters with Acquire/Release ordering for shared fields.

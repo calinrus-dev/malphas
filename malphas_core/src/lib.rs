@@ -1,4 +1,4 @@
-// Malphas Core v2.10.0 - Data-Oriented Design memory router.
+// Malphas Core v3.0.0 - Data-Oriented Design memory router.
 //
 // This crate is a C-ABI boundary; pointer arguments are validated inside each
 // function before they are dereferenced, so the not_unsafe_ptr_arg_deref lint
@@ -8,7 +8,9 @@
 pub mod bridge;
 pub mod crypto;
 pub mod input;
+pub mod memory_budget;
 pub mod msp_loader;
+pub mod payload_schema;
 pub mod pipeline;
 pub mod system_host;
 
@@ -37,6 +39,7 @@ use crate::crypto::{
     verify_engine_signature as verify_engine_signature_internal,
 };
 use crate::input::process_input_event as process_input_event_internal;
+use crate::memory_budget::{budget_limit_bytes, budget_used_bytes};
 use crate::msp_loader::{
     get_msp_entity_count_internal, get_msp_lookup_table_internal,
     load_msp_file as load_msp_file_internal, refresh_msp_file as refresh_msp_file_internal,
@@ -53,7 +56,7 @@ use crate::system_host::{
 // ---------------------------------------------------------------------------
 // Engine lifecycle.
 // ---------------------------------------------------------------------------
-/// Initialise the engine and return a pointer to the Rust-owned bridge.
+/// Initialize the engine and return a pointer to the Rust-owned bridge.
 ///
 /// The returned pointer must be treated as read-only by Dart and must remain
 /// valid until `shutdown_engine` returns.  Rust allocates and frees the bridge
@@ -294,4 +297,27 @@ pub extern "C" fn extract_zip_package(zip_path: *const c_char, output_dir: *cons
 #[no_mangle]
 pub extern "C" fn process_engine_tick(dt_micros: u64) -> i32 {
     crate::pipeline::process_engine_tick_sync(dt_micros)
+}
+
+// ---------------------------------------------------------------------------
+// Memory budget and mmap diagnostics.
+// ---------------------------------------------------------------------------
+#[no_mangle]
+pub extern "C" fn get_memory_budget_used_bytes() -> u64 {
+    budget_used_bytes() as u64
+}
+
+#[no_mangle]
+pub extern "C" fn get_memory_budget_limit_bytes() -> u64 {
+    budget_limit_bytes() as u64
+}
+
+#[no_mangle]
+pub extern "C" fn get_msp_mapped_size_bytes() -> u64 {
+    crate::msp_loader::with_msp_map(|m| m.mapped_size_bytes()).unwrap_or(0)
+}
+
+#[no_mangle]
+pub extern "C" fn get_msp_build_time_micros() -> u64 {
+    crate::msp_loader::with_msp_map(|m| m.build_time_micros()).unwrap_or(0)
 }

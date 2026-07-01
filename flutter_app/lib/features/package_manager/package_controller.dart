@@ -4,11 +4,11 @@ import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:path_provider/path_provider.dart';
 import '../../core/models/flat_models.dart';
 import '../../core/state/entity_store.dart';
 import '../../core/compiler/package_compiler.dart';
 import '../../core/services/app_state_persistence_service.dart';
+import '../../core/services/user_workspace_directory_service.dart';
 
 class _ParsedPackageResult {
   final EntityPackage package;
@@ -30,15 +30,20 @@ class PackageController extends ChangeNotifier {
   PackageController._internal();
 
   static const int _maxSkinImages = 32;
+  static const int _maxSkinImageBytes = 128 * 1024 * 1024; // 128 MB
   static final LinkedHashMap<String, ui.Image> skinImages =
       LinkedHashMap<String, ui.Image>();
+  static int _skinImageBytes = 0;
 
   final List<EntityPackage> _registry = [];
   final EntityStore _store = EntityStore();
 
   final AppStatePersistenceService _persistence = AppStatePersistenceService();
+  final UserWorkspaceDirectoryService _userWorkspace =
+      UserWorkspaceDirectoryService();
   bool _initialized = false;
   String? _workspaceRootOverride;
+  String? _resolvedWorkspaceRoot;
 
   EntityStore get store => _store;
   List<Entity> get entities => _store.entities.whereType<Entity>().toList();
@@ -60,24 +65,35 @@ class PackageController extends ChangeNotifier {
   /// tests; do not call in production.
   void setWorkspaceRootOverride(String path) {
     _workspaceRootOverride = path;
+    _resolvedWorkspaceRoot = path;
   }
 
   void clearWorkspaceRootOverride() {
     _workspaceRootOverride = null;
+    _resolvedWorkspaceRoot = null;
   }
 
   Future<void> updateWorkspaceRoot(String? path) async {
-    _workspaceRootOverride = path;
-    await _persistence.saveWorkspaceRootOverride(path);
+    if (path == null) {
+      await _userWorkspace.resetToDefault();
+    } else {
+      await _userWorkspace.setUserWorkspaceDirectory(path);
+    }
+    _workspaceRootOverride = null;
+    _resolvedWorkspaceRoot = null;
     _initialized = false;
     await init();
   }
 
-  /// Resolves the repository root. If the current working directory is
-  /// `flutter_app/`, walks up one level so that `examples/` and `packages/`
-  /// are found consistently in tests and CI.
+  /// Resolves the user workspace root where packages and systems are stored.
+  ///
+  /// Priority:
+  /// 1. In-memory test override.
+  /// 2. Cached root resolved during [init].
+  /// 3. Repository root detection (development fallback).
   String resolveWorkspaceRoot() {
     if (_workspaceRootOverride != null) return _workspaceRootOverride!;
+    if (_resolvedWorkspaceRoot != null) return _resolvedWorkspaceRoot!;
 
     final current = Directory.current.path;
     final separator = Platform.pathSeparator;
@@ -103,9 +119,13 @@ class PackageController extends ChangeNotifier {
       final savedOverride = await _persistence.loadWorkspaceRootOverride();
       if (savedOverride != null && savedOverride.isNotEmpty) {
         _workspaceRootOverride = savedOverride;
-      } else if (Platform.isAndroid || Platform.isIOS) {
-        final docDir = await getApplicationDocumentsDirectory();
-        _workspaceRootOverride = docDir.path;
+      }
+
+      if (_workspaceRootOverride != null) {
+        _resolvedWorkspaceRoot = _workspaceRootOverride;
+      } else {
+        _resolvedWorkspaceRoot =
+            await _userWorkspace.resolveUserWorkspaceRoot();
       }
 
       final workspace = resolveWorkspaceRoot();
@@ -152,24 +172,25 @@ class PackageController extends ChangeNotifier {
 
       // Scan examples/**/*.msp
       final examplesDir = Directory('$workspace/examples');
-      if (examplesDir.existsSync()) {
-        for (final entity in examplesDir.listSync(recursive: true)) {
-          if (entity is File && entity.path.toLowerCase().endsWith('.msp')) {
-            final result = _parseMspPackage(entity);
-            if (result != null) {
-              final isLoaded = persistedIds.contains(result.package.id);
-              final pack = EntityPackage(
-                result.package.id,
-                result.package.name,
-                result.package.version,
-                result.package.author,
-                result.package.description,
-                result.package.coverImagePath,
-                isLoaded,
-              );
-              _registerPackageData(
-                  pack, result.entities, result.payloads, result.tags);
-            }
+      if (!examplesDir.existsSync()) {
+        examplesDir.createSync(recursive: true);
+      }
+      for (final entity in examplesDir.listSync(recursive: true)) {
+        if (entity is File && entity.path.toLowerCase().endsWith('.msp')) {
+          final result = _parseMspPackage(entity);
+          if (result != null) {
+            final isLoaded = persistedIds.contains(result.package.id);
+            final pack = EntityPackage(
+              result.package.id,
+              result.package.name,
+              result.package.version,
+              result.package.author,
+              result.package.description,
+              result.package.coverImagePath,
+              isLoaded,
+            );
+            _registerPackageData(
+                pack, result.entities, result.payloads, result.tags);
           }
         }
       }
@@ -236,6 +257,87 @@ class PackageController extends ChangeNotifier {
     if (lower.contains('input')) return 4;
     if (lower.contains('audio')) return 8;
     return 16;
+  }
+
+  /// Build a 64-byte aligned payload blob from typed entity properties.
+  ///
+  /// The `physics_body` layout matches the `EntityPayload` struct consumed by
+  /// the built-in `bouncing_demo` system.  Other payload types are stored as
+  /// opaque 64-byte placeholders for now.
+  Uint8List _buildPayloadBytes(
+    String payloadType,
+    int entityId,
+    Map<String, String> props,
+  ) {
+    const payloadSize = 64;
+    final bytes = Uint8List(payloadSize);
+    final data = ByteData.view(bytes.buffer);
+
+    switch (payloadType) {
+      case 'physics_body':
+        final tagMask = int.tryParse(props['tagMask'] ?? '1') ?? 1;
+        final x = double.tryParse(props['x'] ?? '0') ?? 0.0;
+        final y = double.tryParse(props['y'] ?? '0') ?? 0.0;
+        final width = double.tryParse(props['width'] ?? '10') ?? 10.0;
+        final height = double.tryParse(props['height'] ?? '10') ?? 10.0;
+        final speedX = double.tryParse(props['speedX'] ?? '0') ?? 0.0;
+        final speedY = double.tryParse(props['speedY'] ?? '0') ?? 0.0;
+        final color = _parseHexColor(props['color'] ?? '0xFF00FFCC');
+        final flags = int.tryParse(props['flags'] ?? '0') ?? 0;
+        final minX = double.tryParse(props['minX'] ?? '0') ?? 0.0;
+        final maxX = double.tryParse(props['maxX'] ?? '1000') ?? 1000.0;
+        final minY = double.tryParse(props['minY'] ?? '0') ?? 0.0;
+        final maxY = double.tryParse(props['maxY'] ?? '1000') ?? 1000.0;
+
+        data.setUint64(0, tagMask, Endian.little);
+        data.setFloat32(8, x, Endian.little);
+        data.setFloat32(12, y, Endian.little);
+        data.setFloat32(16, width, Endian.little);
+        data.setFloat32(20, height, Endian.little);
+        data.setFloat32(24, speedX, Endian.little);
+        data.setFloat32(28, speedY, Endian.little);
+        data.setUint32(32, color, Endian.little);
+        data.setUint32(36, flags, Endian.little);
+        data.setFloat32(40, minX, Endian.little);
+        data.setFloat32(44, maxX, Endian.little);
+        data.setFloat32(48, minY, Endian.little);
+        data.setFloat32(52, maxY, Endian.little);
+      default:
+        // Opaque placeholder: entity id header plus JSON properties.
+        data.setUint32(0, entityId, Endian.little);
+        final propText = utf8.encode(jsonEncode(props));
+        final copyLength = propText.length > payloadSize - 4
+            ? payloadSize - 4
+            : propText.length;
+        bytes.setRange(4, 4 + copyLength, propText);
+    }
+
+    return bytes;
+  }
+
+  int _parseHexColor(String hex) {
+    var cleaned = hex.trim().replaceFirst('0x', '').replaceFirst('0X', '');
+    if (cleaned.length == 6) cleaned = 'FF$cleaned';
+    return int.tryParse(cleaned, radix: 16) ?? 0xFF00FFCC;
+  }
+
+  String _payloadTypeNameFromId(int id) {
+    switch (id) {
+      case 1:
+        return 'rectangle';
+      case 2:
+        return 'sprite';
+      case 3:
+        return 'sound';
+      case 4:
+        return 'text';
+      case 5:
+        return 'physics_body';
+      case 6:
+        return 'transform';
+      default:
+        return 'unknown';
+    }
   }
 
   /// Parses a valid MLPS binary and returns a [_ParsedPackageResult] containing relational tables.
@@ -308,11 +410,13 @@ class PackageController extends ChangeNotifier {
         }
 
         final entId = data.getUint32(entryOffset, Endian.little);
+        final payloadTypeId = data.getUint32(entryOffset + 4, Endian.little);
+        final payloadTypeName = _payloadTypeNameFromId(payloadTypeId);
         parsedEntities.add(Entity(
           id: entId,
           packageId: packId,
           name: 'Entity $entId',
-          category: 'MSP',
+          category: payloadTypeName,
           activePayloadId: 0,
         ));
         parsedTags.add(EntityTag(
@@ -536,7 +640,7 @@ class PackageController extends ChangeNotifier {
   }
 
   /// Preloads skins/sprites for the active package into unmanaged C++ memory (ui.Image).
-  Future<void> preloadSkins(EntityPackage pack) async {
+  Future<void> preloadPayloads(EntityPackage pack) async {
     await disposeSkins();
 
     final packEntities = _store.entities
@@ -570,20 +674,34 @@ class PackageController extends ChangeNotifier {
     }
   }
 
+  static int _imageSizeBytes(ui.Image image) {
+    return image.width * image.height * 4;
+  }
+
   void _putSkinImage(String path, ui.Image image) {
     if (skinImages.containsKey(path)) {
-      // Move to most-recently-used position.
-      skinImages.remove(path);
+      // Move to most-recently-used position and refresh byte accounting.
+      final old = skinImages.remove(path);
+      if (old != null) _skinImageBytes -= _imageSizeBytes(old);
     }
-    while (skinImages.length >= _maxSkinImages && skinImages.isNotEmpty) {
+
+    final incoming = _imageSizeBytes(image);
+    while (skinImages.isNotEmpty &&
+        (skinImages.length >= _maxSkinImages ||
+            _skinImageBytes + incoming > _maxSkinImageBytes)) {
       final evicted = skinImages.remove(skinImages.keys.first);
-      try {
-        evicted?.dispose();
-      } catch (_) {
-        // Safe check
+      if (evicted != null) {
+        _skinImageBytes -= _imageSizeBytes(evicted);
+        try {
+          evicted.dispose();
+        } catch (_) {
+          // Safe check
+        }
       }
     }
+
     skinImages[path] = image;
+    _skinImageBytes += incoming;
   }
 
   /// Explicitly disposes of all loaded ui.Image structures to free native RAM.
@@ -596,6 +714,7 @@ class PackageController extends ChangeNotifier {
       }
     }
     skinImages.clear();
+    _skinImageBytes = 0;
   }
 
   /// Compiles a custom package and registers it.
@@ -706,26 +825,18 @@ class PackageController extends ChangeNotifier {
 
     final strippedEntities = <Map<String, dynamic>>[];
     for (final ent in entities) {
-      // Generate a minimal aligned payload blob derived from the entity
-      // properties so the compiler has a real asset to embed.
+      // Collect the entity's typed properties.
       final entProps = properties
           .where((p) => p.entityId == ent.id)
           .fold<Map<String, String>>({}, (acc, p) {
         acc[p.key] = p.value;
         return acc;
       });
+      final payloadType = entProps['payloadType'] ?? 'unknown';
       final payloadFileName = 'entity_${ent.id}.bin';
       final payloadFile = File('${compileDir.path}/$payloadFileName');
 
-      const payloadSize = 64;
-      final payloadBytes = Uint8List(payloadSize);
-      // Encode a tiny header so the payload is deterministic and not all zeros.
-      final idBytes = ByteData(4)..setUint32(0, ent.id, Endian.little);
-      payloadBytes.setRange(0, 4, idBytes.buffer.asUint8List());
-      final propText = utf8.encode(jsonEncode(entProps));
-      final copyLength =
-          propText.length > payloadSize - 4 ? payloadSize - 4 : propText.length;
-      payloadBytes.setRange(4, 4 + copyLength, propText);
+      final payloadBytes = _buildPayloadBytes(payloadType, ent.id, entProps);
       await payloadFile.writeAsBytes(payloadBytes);
 
       compilerProcessedPayloads.add(EntityPayload(
@@ -733,7 +844,7 @@ class PackageController extends ChangeNotifier {
         entityId: ent.id,
         name: 'Payload ${ent.id}',
         assetPath: 'packages/$packId/$payloadFileName',
-        type: 'binary',
+        type: payloadType,
         version: '1.0',
       ));
 
@@ -743,6 +854,7 @@ class PackageController extends ChangeNotifier {
                 .where((t) => t.entityId == ent.id)
                 .fold<int>(0, (mask, t) => mask | _tagMaskFromName(t.name)) |
             1,
+        'payload_type': payloadType,
         'payload_file': payloadFileName,
       });
     }

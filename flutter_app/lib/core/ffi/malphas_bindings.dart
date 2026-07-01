@@ -46,7 +46,7 @@ int _checkFfi(int code, String call) {
   return code;
 }
 
-/// Zero-copy FFI gateway to the Rust `malphas_core` v2.10.0 engine.
+/// Zero-copy FFI gateway to the Rust `malphas_core` v3.0.0 engine.
 ///
 /// The old arena-based entity setup API has been removed.  Systems now own all
 /// simulation state; Flutter only drives the vsync pulse and reads the front
@@ -197,6 +197,10 @@ class MalphasBindings extends ChangeNotifier {
   late _GetU64 _getVmTickMicros;
   late _GetU64 _getPulseLatencyMicros;
   late _GetU64 _getCommandsGeneratedCount;
+  late _GetU64 _getMemoryBudgetUsedBytes;
+  late _GetU64 _getMemoryBudgetLimitBytes;
+  late _GetU64 _getMspMappedSizeBytes;
+  late _GetU64 _getMspBuildTimeMicros;
 
   void _bindFunctions() {
     if (_lib == null) return;
@@ -253,12 +257,20 @@ class MalphasBindings extends ChangeNotifier {
         lib.lookupFunction<_GetU64Native, _GetU64>('get_pulse_latency_micros');
     _getCommandsGeneratedCount = lib
         .lookupFunction<_GetU64Native, _GetU64>('get_commands_generated_count');
+    _getMemoryBudgetUsedBytes = lib
+        .lookupFunction<_GetU64Native, _GetU64>('get_memory_budget_used_bytes');
+    _getMemoryBudgetLimitBytes = lib.lookupFunction<_GetU64Native, _GetU64>(
+        'get_memory_budget_limit_bytes');
+    _getMspMappedSizeBytes =
+        lib.lookupFunction<_GetU64Native, _GetU64>('get_msp_mapped_size_bytes');
+    _getMspBuildTimeMicros =
+        lib.lookupFunction<_GetU64Native, _GetU64>('get_msp_build_time_micros');
   }
 
   // ---------------------------------------------------------------------------
   // Engine lifecycle.
   // ---------------------------------------------------------------------------
-  /// Initialises the engine and returns `0` on success or a negative error code.
+  /// Initializes the engine and returns `0` on success or a negative error code.
   ///
   /// Rust allocates and owns the 64-byte aligned bridge and command buffers;
   /// Dart only receives the pointer and must treat it as read-only.
@@ -451,6 +463,13 @@ class MalphasBindings extends ChangeNotifier {
   int get pulseLatencyMicros => _nativeAvailable ? _getPulseLatencyMicros() : 0;
   int get commandsGeneratedCount =>
       _nativeAvailable ? _getCommandsGeneratedCount() : 0;
+
+  int get memoryBudgetUsedBytes =>
+      _nativeAvailable ? _getMemoryBudgetUsedBytes() : 0;
+  int get memoryBudgetLimitBytes =>
+      _nativeAvailable ? _getMemoryBudgetLimitBytes() : 0;
+  int get mspMappedSizeBytes => _nativeAvailable ? _getMspMappedSizeBytes() : 0;
+  int get mspBuildTimeMicros => _nativeAvailable ? _getMspBuildTimeMicros() : 0;
 
   int getMspEntityCount() => _nativeAvailable ? _getMspEntityCount() : 0;
   int getLoadedSystemCount() => _nativeAvailable ? _getLoadedSystemCount() : 0;

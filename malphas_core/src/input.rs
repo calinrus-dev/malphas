@@ -26,6 +26,7 @@ impl TryFrom<i32> for InputEventType {
     }
 }
 
+#[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct InputEvent {
     pub event_type: InputEventType,

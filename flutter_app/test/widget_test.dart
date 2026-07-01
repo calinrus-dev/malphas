@@ -28,7 +28,7 @@ void main() {
 
     try {
       // Perform 10,000 reads and writes at aligned DartRenderCommand strides.
-      // DartRenderCommand is a 64-byte packed struct as required by v2.10.0.
+      // DartRenderCommand is a 64-byte packed struct as required by v3.0.0.
       const slotSize = 64;
       for (int i = 0; i < 10000; i++) {
         final offset = i * slotSize;
@@ -71,7 +71,8 @@ void main() {
 
     final workspace = _findWorkspaceRoot();
     final mspFile = File('$workspace/examples/bouncing_demo/bouncing_demo.msp');
-    final mspSigFile = File('$workspace/examples/bouncing_demo/bouncing_demo.msp.sig');
+    final mspSigFile =
+        File('$workspace/examples/bouncing_demo/bouncing_demo.msp.sig');
     final systemPath = _resolveSystemPath(workspace, 'bouncing_demo');
 
     if (!mspFile.existsSync()) {
@@ -79,7 +80,8 @@ void main() {
       return;
     }
     if (!mspSigFile.existsSync()) {
-      markTestSkipped('bouncing_demo.msp.sig not found; signed package required');
+      markTestSkipped(
+          'bouncing_demo.msp.sig not found; signed package required');
       return;
     }
     if (systemPath == null) {
@@ -87,7 +89,7 @@ void main() {
       return;
     }
 
-    // 1. Initialise the engine and allocate the bridge/buffers.
+    // 1. Initialize the engine and allocate the bridge/buffers.
     expect(() => bindings.initEngine(), returnsNormally);
 
     // Configure the trust anchor from a build-time define or the bundled asset

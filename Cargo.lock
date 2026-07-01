@@ -104,7 +104,7 @@ dependencies = [
 
 [[package]]
 name = "bouncing_demo"
-version = "2.10.0"
+version = "3.0.0"
 
 [[package]]
 name = "bumpalo"
@@ -565,7 +565,7 @@ dependencies = [
 
 [[package]]
 name = "malphas_cli"
-version = "2.10.0"
+version = "3.0.0"
 dependencies = [
  "clap",
  "ed25519-dalek",
@@ -574,11 +574,12 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "zip",
 ]
 
 [[package]]
 name = "malphas_core"
-version = "2.10.0"
+version = "3.0.0"
 dependencies = [
  "arc-swap",
  "ed25519-dalek",
@@ -1019,9 +1020,9 @@ dependencies = [
 
 [[package]]
 name = "zip"
-version = "2.4.2"
+version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fabe6324e908f85a1c52063ce7aa26b68dcb7eb6dbc83a2d148403c9bc3eba50"
+checksum = "c1d48a995652704e4d5061678c5a1d19c851ccc788cebb90aaef5cd4642b0837"
 dependencies = [
  "aes",
  "arbitrary",

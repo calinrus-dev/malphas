@@ -12,7 +12,6 @@ flutter_app/
 │   ├── main.dart                              # App entry point
 │   ├── core/
 │   │   ├── ffi/                               # Dart FFI bindings and C struct mirrors
-│   │   │   ├── arena_layout.dart
 │   │   │   ├── malphas_bindings.dart
 │   │   │   └── types.dart
 │   │   ├── compiler/                          # Thin wrapper around malphas-cli
@@ -126,7 +125,7 @@ flutter build macos --release
 - Flutter owns the only clock. On every `Ticker` pulse it calls `trigger_engine_pulse()`.
 - The Rust simulation thread wakes up, drains pending input, executes one frame of bytecode, writes render commands into the back buffer, and flips the bridge.
 - Flutter reads the front buffer on the next frame and rasterizes rectangles and text via `PrimitiveCanvas`.
-- Render commands are homogeneous 24-byte `DartRenderCommand` slots. Text commands carry a pointer to a `TextPayload` in the Arena; Dart must not perform pointer arithmetic on the bridge or Arena.
+- Render commands are homogeneous 64-byte `DartRenderCommand` slots. Text and sprite commands carry a pointer to a payload in the Arena; Dart must not perform pointer arithmetic on the bridge or Arena.
 
 See the repository `README.md` and `.agents/AGENTS.md` for the full FFI safety rules,
 C-ABI layout, and CI contract.

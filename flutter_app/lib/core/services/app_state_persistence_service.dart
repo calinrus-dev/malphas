@@ -109,4 +109,102 @@ class AppStatePersistenceService {
       return null;
     }
   }
+
+  /// Saves the user-configurable workspace directory path.
+  Future<void> saveUserWorkspaceDirectory(String? path) async {
+    final file = await _stateFile('user_workspace_directory');
+    if (path == null) {
+      if (file.existsSync()) {
+        try {
+          file.deleteSync();
+        } catch (_) {}
+      }
+    } else {
+      file.writeAsStringSync(path);
+    }
+  }
+
+  /// Loads the user-configurable workspace directory path.
+  Future<String?> loadUserWorkspaceDirectory() async {
+    try {
+      final file = await _stateFile('user_workspace_directory');
+      if (!file.existsSync()) return null;
+      return file.readAsStringSync().trim();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Synchronous loader for contexts that cannot await persistence I/O.
+  String? loadUserWorkspaceDirectorySync() {
+    try {
+      if (_overrideDocumentsDirectory == null) return null;
+      final file = File(
+          '$_overrideDocumentsDirectory/malphas_user_workspace_directory.json');
+      if (!file.existsSync()) return null;
+      return file.readAsStringSync().trim();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> saveTelemetryOverlayEnabled(bool enabled) async {
+    final file = await _stateFile('telemetry_overlay_enabled');
+    file.writeAsStringSync(enabled ? '1' : '0');
+  }
+
+  Future<bool> loadTelemetryOverlayEnabled() async {
+    try {
+      final file = await _stateFile('telemetry_overlay_enabled');
+      if (!file.existsSync()) return false;
+      return file.readAsStringSync().trim() == '1';
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> saveTelemetryGpsEnabled(bool enabled) async {
+    final file = await _stateFile('telemetry_gps_enabled');
+    file.writeAsStringSync(enabled ? '1' : '0');
+  }
+
+  Future<bool> loadTelemetryGpsEnabled() async {
+    try {
+      final file = await _stateFile('telemetry_gps_enabled');
+      if (!file.existsSync()) return false;
+      return file.readAsStringSync().trim() == '1';
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> saveSplashShown() async {
+    final file = await _stateFile('splash_shown');
+    file.writeAsStringSync('1');
+  }
+
+  Future<bool> loadSplashShown() async {
+    try {
+      final file = await _stateFile('splash_shown');
+      if (!file.existsSync()) return false;
+      return file.readAsStringSync().trim() == '1';
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> saveOnboardingCompleted() async {
+    final file = await _stateFile('onboarding_completed');
+    file.writeAsStringSync('1');
+  }
+
+  Future<bool> loadOnboardingCompleted() async {
+    try {
+      final file = await _stateFile('onboarding_completed');
+      if (!file.existsSync()) return false;
+      return file.readAsStringSync().trim() == '1';
+    } catch (_) {
+      return false;
+    }
+  }
 }

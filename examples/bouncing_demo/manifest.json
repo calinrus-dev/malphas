@@ -4,11 +4,13 @@
     {
       "entity_id": 0,
       "tag_mask": 1,
+      "payload_type": "physics_body",
       "payload_file": "entity_0.bin"
     },
     {
       "entity_id": 1,
       "tag_mask": 2,
+      "payload_type": "physics_body",
       "payload_file": "entity_1.bin"
     }
   ]

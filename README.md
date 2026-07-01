@@ -1,4 +1,4 @@
-# Malphas Engine v2.10.0
+# Malphas Engine v3.0.0
 
 [![CI](https://github.com/calinrus-dev/malphas/actions/workflows/rust_ci.yml/badge.svg)](https://github.com/calinrus-dev/malphas/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -142,20 +142,45 @@ The community can mod your game by editing the `.msp` (swapping textures, adding
 
 ---
 
+## What's New in v3.0.0
+
+- **Environments as mini OS instances** — self-contained bundles of MSP data, MXC logic, trust policy and local storage.
+- **Visual package editor** — create packages, entities, payloads and tags directly in Flutter.
+- **Asset pipeline** — import sprites, audio and binary payloads via file picker; SHA-256 content addressing.
+- **Production security** — Ed25519 signatures for `.msp` and `.mxc`, path sandbox, panic isolation, secure trust anchor storage.
+- **Runtime telemetry** — optional RAM, MSP mmap timing and GPS overlays.
+- **Developer CLI** — `keygen`, `verify`, `init`, `build-system`, `compile`, `sign`, `environment bundle/list/unbundle`.
+- **User workspace directory** — cross-platform, user-configurable storage with safe fallbacks.
+
 ## Quick Start
 
 ```bash
 # 1. Build the native core
 cargo build --release
 
-# 2. Compile a demo package
-cargo run --bin malphas-cli -- compile examples/bouncing_demo/manifest.json
+# 2. Generate a development signing keypair
+cargo run --bin malphas-cli -- keygen -o .keys
 
-# 3. Run the Flutter frontend
+# 3. Configure the trust anchor in the app
+#    Copy .keys/malphas_signing_key.pub into flutter_app/assets/trust_anchor.pem
+#    (or import it via Settings in the app).
+
+# 4. Compile and sign the demo package
+cargo run --bin malphas-cli -- compile examples/bouncing_demo/manifest.json
+cargo run --bin malphas-cli -- sign --signing-key-file .keys/malphas_signing_key.hex \
+  examples/bouncing_demo/bouncing_demo.msp
+
+# 5. Build and sign the demo system
+cargo run --bin malphas-cli -- build-system --signing-key-file .keys/malphas_signing_key.hex \
+  systems/bouncing_demo
+
+# 6. Run the Flutter frontend
 cd flutter_app
 flutter pub get
 flutter run
 ```
+
+After the first launch, the onboarding flow will guide you through workspace directory selection and trust-anchor setup.
 
 ---
 

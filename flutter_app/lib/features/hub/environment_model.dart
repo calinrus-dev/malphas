@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/models/environment_policy_model.dart';
 
 /// A persistent Malphas operational environment.
 ///
@@ -11,6 +12,7 @@ class MalphasEnvironment {
   bool isPinned;
   String? engineId;
   List<String> packageIds;
+  EnvironmentPolicy policy;
 
   MalphasEnvironment({
     required this.id,
@@ -19,6 +21,7 @@ class MalphasEnvironment {
     this.isPinned = false,
     this.engineId,
     this.packageIds = const [],
+    this.policy = EnvironmentPolicy.sandbox,
   });
 
   Map<String, dynamic> toJson() => {
@@ -28,6 +31,7 @@ class MalphasEnvironment {
         'isPinned': isPinned,
         'engineId': engineId,
         'packageIds': packageIds,
+        'policy': policy.toJson(),
       };
 
   factory MalphasEnvironment.fromJson(Map<String, dynamic> json) {
@@ -37,6 +41,7 @@ class MalphasEnvironment {
     final rawIsPinned = json['isPinned'];
     final rawEngineId = json['engineId'];
     final rawPackageIds = json['packageIds'];
+    final rawPolicy = json['policy'];
 
     int? parsedColor;
     if (rawAccentColor is int) {
@@ -52,6 +57,13 @@ class MalphasEnvironment {
       parsedPackageIds = [];
     }
 
+    EnvironmentPolicy parsedPolicy;
+    if (rawPolicy is Map<String, dynamic>) {
+      parsedPolicy = EnvironmentPolicy.fromJson(rawPolicy);
+    } else {
+      parsedPolicy = EnvironmentPolicy.sandbox;
+    }
+
     return MalphasEnvironment(
       id: rawId is String
           ? rawId
@@ -64,6 +76,7 @@ class MalphasEnvironment {
           : (rawIsPinned?.toString().toLowerCase() == 'true'),
       engineId: rawEngineId is String ? rawEngineId : null,
       packageIds: parsedPackageIds,
+      policy: parsedPolicy,
     );
   }
 }

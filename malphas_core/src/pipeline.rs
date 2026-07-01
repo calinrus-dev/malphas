@@ -1,4 +1,4 @@
-// C-ABI structures and the background simulation tick for Malphas v2.10.0.
+// C-ABI structures and the background simulation tick for Malphas v3.0.0.
 //
 // The hot path is driven by a single VSync pulse from Flutter.  On each tick
 // the core obtains the fresh Silver Platter from the mapped MSP and hands the
@@ -16,7 +16,7 @@ use crate::system_host::tick_systems;
 
 /// ABI version embedded in the bridge.  Dart must verify this value before
 /// trusting the layout.  Format: 0xMMmmpp00 (major, minor, patch).
-pub const BRIDGE_ABI_VERSION: u32 = 0x02100000;
+pub const BRIDGE_ABI_VERSION: u32 = 0x03000000;
 
 // ---------------------------------------------------------------------------
 // Global shared-memory handles and engine lifecycle state.
@@ -70,7 +70,7 @@ pub struct DartRenderCommand {
 
 /// In-Arena text object pointed to by text render commands.
 ///
-/// Kept for ABI compatibility; text rendering in v2.10.0 is handled by systems.
+/// Kept for ABI compatibility; text rendering in v3.0.0 is handled by systems.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct TextPayload {
@@ -261,10 +261,9 @@ pub(crate) fn process_engine_tick_internal() {
     };
     LAST_TICK_MICROS.store(tick_start_micros, Ordering::Relaxed);
 
-    // Drain any input events that arrived since the last tick.  The current ABI
-    // does not pass events to systems; they are consumed here to keep the queue
-    // bounded.
-    let _input_events = drain_input_events();
+    // Drain any input events that arrived since the last tick and forward them
+    // to input-aware systems.
+    let input_events = drain_input_events();
 
     // Pin the MSP snapshot for the entire tick so refresh/unload cannot free it
     // underneath the systems.
@@ -282,6 +281,7 @@ pub(crate) fn process_engine_tick_internal() {
                 commands_ptr,
                 max_capacity,
                 &mut written,
+                &input_events,
             );
         }
     }

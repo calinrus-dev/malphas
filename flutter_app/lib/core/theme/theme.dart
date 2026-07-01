@@ -6,6 +6,7 @@ class MalphasTheme {
   static const Color bone = Color(0xffe0dcd3); // High-contrast bone
   static const Color borderAccent = Color(0xff1b1b1b); // Outline gray
   static const Color mist = Color(0xff8a8a8a); // Secondary data
+  static const Color accent = Color(0xff00ffcc); // Signature teal
 
   static ThemeData get darkTheme {
     return ThemeData(

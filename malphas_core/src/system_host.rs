@@ -33,6 +33,7 @@ use arc_swap::ArcSwapOption;
 use libloading::{Library, Symbol};
 
 use crate::integrity_policy::global_trust_anchor;
+use crate::input::InputEvent;
 use crate::pipeline::DartRenderCommand;
 
 /// C-ABI signature exposed by every `.mxc` system for one-shot initialisation.
@@ -49,6 +50,18 @@ pub type MalphasTickFn = unsafe extern "C" fn(
     render_count: *mut u32,
 );
 
+/// Optional C-ABI signature that receives the input event slice for this tick.
+pub type MalphasTickWithInputFn = unsafe extern "C" fn(
+    lookup_table: *const *const u8,
+    entity_count: u32,
+    dt_micros: u64,
+    render_buffer: *mut DartRenderCommand,
+    render_capacity: u32,
+    render_count: *mut u32,
+    input_events: *const InputEvent,
+    input_count: u32,
+);
+
 /// A loaded `.mxc` dynamic library and its resolved symbols.
 #[derive(Clone)]
 #[allow(dead_code)]
@@ -56,6 +69,7 @@ pub struct LoadedSystem {
     _lib: Option<Arc<Library>>,
     init: MalphasInitFn,
     tick: MalphasTickFn,
+    tick_with_input: Option<MalphasTickWithInputFn>,
     tainted: Arc<AtomicBool>,
 }
 
@@ -226,14 +240,23 @@ pub fn load_system(path: &Path) -> Result<(), i32> {
     let init = *init;
     let tick = *tick;
 
+    // Optional input-aware tick symbol.  Older systems continue to work because
+    // the core falls back to `malphas_tick` when this symbol is absent.
+    let tick_with_input: Option<MalphasTickWithInputFn> = unsafe {
+        lib.get(b"malphas_tick_with_input\0")
+            .ok()
+            .map(|sym: Symbol<MalphasTickWithInputFn>| *sym)
+    };
+
     let system = LoadedSystem {
         _lib: Some(Arc::new(lib)),
         init,
         tick,
+        tick_with_input,
         tainted: Arc::new(AtomicBool::new(false)),
     };
 
-    // Initialise the freshly loaded system against the current MSP, if any.
+    // Initialize the freshly loaded system against the current MSP, if any.
     let init_ok = crate::msp_loader::with_msp_map(|m| {
         let table = m.lookup_table_ptr();
         let count = m.entity_count();
@@ -286,6 +309,7 @@ pub fn tick_systems(
     render_buffer: *mut DartRenderCommand,
     render_capacity: u32,
     render_count: *mut u32,
+    input_events: &[InputEvent],
 ) {
     if lookup_table.is_null()
         || render_buffer.is_null()
@@ -328,20 +352,32 @@ pub fn tick_systems(
             break;
         }
         let remaining = render_capacity as usize - base_offset;
-        let tick = system.tick;
         let tick_result = catch_unwind(std::panic::AssertUnwindSafe(move || unsafe {
             // SAFETY: The caller owns `render_buffer` and guarantees that
             // `base_offset..base_offset+remaining` lies inside the buffer.
             // `lookup_table` is the read-only MSP pointer table.
             let mut written: u32 = 0;
-            tick(
-                lookup_table,
-                entity_count,
-                dt_micros,
-                render_buffer.add(base_offset),
-                remaining as u32,
-                &mut written,
-            );
+            if let Some(tick) = system.tick_with_input {
+                tick(
+                    lookup_table,
+                    entity_count,
+                    dt_micros,
+                    render_buffer.add(base_offset),
+                    remaining as u32,
+                    &mut written,
+                    input_events.as_ptr(),
+                    input_events.len() as u32,
+                );
+            } else {
+                (system.tick)(
+                    lookup_table,
+                    entity_count,
+                    dt_micros,
+                    render_buffer.add(base_offset),
+                    remaining as u32,
+                    &mut written,
+                );
+            }
             written
         }));
         let written = match tick_result {
@@ -411,6 +447,7 @@ pub extern "C" fn tick_loaded_systems(
         render_buffer,
         render_capacity,
         render_count,
+        &[],
     );
 }
 
@@ -443,6 +480,7 @@ mod tests {
             misaligned_render as *mut DartRenderCommand,
             1,
             &mut render_count,
+            &[],
         );
         assert_eq!(render_count, 0);
     }
@@ -477,6 +515,7 @@ mod tests {
             _lib: None,
             init: dummy_init,
             tick: greedy_tick,
+            tick_with_input: None,
             tainted: Arc::new(AtomicBool::new(false)),
         };
         LOADED_SYSTEMS.store(Some(Arc::new(vec![system])));
@@ -493,6 +532,7 @@ mod tests {
             commands.as_mut_ptr(),
             1,
             &mut render_count,
+            &[],
         );
         assert_eq!(render_count, 0);
 
@@ -513,6 +553,7 @@ mod tests {
             commands.as_mut_ptr(),
             4,
             &mut render_count,
+            &[],
         );
         assert_eq!(
             render_count, 0,

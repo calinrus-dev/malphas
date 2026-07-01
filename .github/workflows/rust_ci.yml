@@ -87,7 +87,10 @@ jobs:
         run: cargo build --release --locked
 
       - name: Run tests
-        run: cargo test --release --locked
+        run: |
+          cargo test -p malphas_core --release --locked --features test-anchor
+          cargo test -p malphas_cli --release --locked
+          cargo test -p bouncing_demo --release --locked
 
       - name: Sign native engine with test key
         shell: bash

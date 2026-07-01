@@ -1,4 +1,4 @@
-//! Malphas Source Pack (MSP) compiler v2.10.0.
+//! Malphas Source Pack (MSP) compiler v3.0.0.
 //!
 //! Builds a rigid, 64-byte aligned binary from a human-readable workspace:
 //!
@@ -18,9 +18,10 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
 
 use crate::manifest::Manifest;
+use crate::payload_schema::payload_type_id_from_name;
 
 pub const MSP_MAGIC: [u8; 4] = *b"MLPS";
-pub const MSP_VERSION: u32 = 3;
+pub const MSP_VERSION: u32 = 4;
 /// Space reserved at the end of the payload section for Error Payloads.
 pub const ERROR_PAYLOAD_RESERVE: usize = 64 * 1024;
 
@@ -40,13 +41,14 @@ pub struct MspHeader {
 
 /// 64-byte aligned entity descriptor (one cache line).
 ///
-/// Because `tag_mask` is a u64 placed after a u32, `#[repr(C)]` inserts 4 bytes
-/// of implicit padding.  The manual padding is therefore 40 bytes so the total
-/// struct size remains exactly 64 bytes.
+/// The 4-byte gap between `entity_id` and `tag_mask` carries `payload_type_id`,
+/// leaving 40 bytes of explicit padding so the total struct size remains exactly
+/// 64 bytes.
 #[repr(C, align(64))]
 #[derive(Clone, Copy, Debug)]
 pub struct MspEntityDescriptor {
     pub entity_id: u32,
+    pub payload_type_id: u32,
     pub tag_mask: u64,
     pub payload_offset: u32,
     pub payload_size: u32,
@@ -188,6 +190,7 @@ pub fn build_msp(manifest: &Manifest, manifest_dir: &Path) -> Result<Vec<u8>, Bo
 
         descriptors.push(MspEntityDescriptor {
             entity_id: entity.entity_id,
+            payload_type_id: payload_type_id_from_name(&entity.payload_type),
             tag_mask: entity.tag_mask,
             payload_offset: payload_offset as u32,
             payload_size: payload_size as u32,
@@ -274,6 +277,7 @@ pub fn header_as_bytes(header: &MspHeader) -> [u8; 64] {
 pub fn descriptor_as_bytes(descriptor: &MspEntityDescriptor) -> [u8; 64] {
     let mut buf = [0u8; 64];
     buf[0..4].copy_from_slice(&descriptor.entity_id.to_le_bytes());
+    buf[4..8].copy_from_slice(&descriptor.payload_type_id.to_le_bytes());
     buf[8..16].copy_from_slice(&descriptor.tag_mask.to_le_bytes());
     buf[16..20].copy_from_slice(&descriptor.payload_offset.to_le_bytes());
     buf[20..24].copy_from_slice(&descriptor.payload_size.to_le_bytes());
@@ -318,11 +322,13 @@ mod tests {
                 ManifestEntity {
                     entity_id: 0,
                     tag_mask: 1,
+                    payload_type: "unknown".to_string(),
                     payload_file: PathBuf::from("a.bin"),
                 },
                 ManifestEntity {
                     entity_id: 1,
                     tag_mask: 2,
+                    payload_type: "unknown".to_string(),
                     payload_file: PathBuf::from("b.bin"),
                 },
             ],
@@ -427,11 +433,13 @@ mod tests {
                 ManifestEntity {
                     entity_id: 0,
                     tag_mask: 1,
+                    payload_type: "unknown".to_string(),
                     payload_file: PathBuf::from("a.bin"),
                 },
                 ManifestEntity {
                     entity_id: 0,
                     tag_mask: 2,
+                    payload_type: "unknown".to_string(),
                     payload_file: PathBuf::from("b.bin"),
                 },
             ],
@@ -451,13 +459,14 @@ mod tests {
         let manifest_dir = tmp_dir.join("workspace");
         fs::create_dir_all(&manifest_dir).unwrap();
 
-        // Regression: the exact traversal payload from the v2.10.0 hardening spec
+        // Regression: the exact traversal payload from the v3.0.0 hardening spec
         // must be rejected before any filesystem read is attempted.
         let manifest = Manifest {
             pack_id: "traversal_test".to_string(),
             entities: vec![ManifestEntity {
                 entity_id: 0,
                 tag_mask: 1,
+                payload_type: "unknown".to_string(),
                 payload_file: PathBuf::from("../etc/passwd"),
             }],
         };
@@ -490,6 +499,7 @@ mod tests {
             entities: vec![ManifestEntity {
                 entity_id: 0,
                 tag_mask: 1,
+                payload_type: "unknown".to_string(),
                 payload_file: payload_file.clone(),
             }],
         };

@@ -1,4 +1,4 @@
-# Malphas Agent Instructions — v2.10.0
+# Malphas Agent Instructions — v3.0.0
 
 These rules govern every AI agent that modifies code, documentation, or build configuration in the Malphas repository. Violations will be rejected in review.
 

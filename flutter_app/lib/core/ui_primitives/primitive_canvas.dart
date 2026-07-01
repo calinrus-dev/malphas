@@ -12,6 +12,10 @@ import '../ffi/types.dart';
 /// bridge on every vsync. No command list is copied into Dart memory; the only
 /// data moved is the handful of fields read by the GPU-bound [Canvas] ops.
 class PrimitiveCanvas extends StatefulWidget {
+  /// Logical coordinate space used by the native render buffer.
+  static const double logicalWidth = 1000.0;
+  static const double logicalHeight = 1000.0;
+
   final MalphasBindings bindings;
 
   /// Optional external repaint source. When provided, the canvas does NOT pulse
@@ -19,10 +23,15 @@ class PrimitiveCanvas extends StatefulWidget {
   /// a parent [EngineController] own the single vsync ticker.
   final Listenable? repaint;
 
+  /// Optional resolver that maps a [payloadId] to a loaded [ui.Image].
+  /// When null, sprite commands fall back to the placeholder outline.
+  final ui.Image? Function(int payloadId)? imageResolver;
+
   const PrimitiveCanvas({
     super.key,
     required this.bindings,
     this.repaint,
+    this.imageResolver,
   });
 
   @override
@@ -65,6 +74,7 @@ class _PrimitiveCanvasState extends State<PrimitiveCanvas>
       painter: _PrimitivePainter(
         bindings: widget.bindings,
         repaint: _repaint,
+        imageResolver: widget.imageResolver,
       ),
       size: Size.infinite,
     );
@@ -72,15 +82,15 @@ class _PrimitiveCanvasState extends State<PrimitiveCanvas>
 }
 
 class _PrimitivePainter extends CustomPainter {
-  static const double _logicalWidth = 1000.0;
-  static const double _logicalHeight = 1000.0;
-
   final MalphasBindings _bindings;
+  final ui.Image? Function(int payloadId)? _imageResolver;
 
   _PrimitivePainter({
     required MalphasBindings bindings,
     required Listenable repaint,
+    required ui.Image? Function(int payloadId)? imageResolver,
   })  : _bindings = bindings,
+        _imageResolver = imageResolver,
         super(repaint: repaint);
 
   @override
@@ -97,8 +107,8 @@ class _PrimitivePainter extends CustomPainter {
     final count = snapshot.count;
     if (commands == ffi.nullptr || count <= 0) return;
 
-    final scaleX = size.width / _logicalWidth;
-    final scaleY = size.height / _logicalHeight;
+    final scaleX = size.width / PrimitiveCanvas.logicalWidth;
+    final scaleY = size.height / PrimitiveCanvas.logicalHeight;
 
     for (int i = 0; i < count; i++) {
       final cmd = (commands + i).ref;
@@ -108,7 +118,7 @@ class _PrimitivePainter extends CustomPainter {
       } else if (type == 2) {
         _drawText(canvas, cmd, scaleX, scaleY);
       } else if (type == 3) {
-        _drawSpritePlaceholder(canvas, cmd, scaleX, scaleY);
+        _drawSprite(canvas, cmd, scaleX, scaleY);
       } else if (type == 4) {
         _drawCircle(canvas, cmd, scaleX, scaleY);
       }
@@ -147,7 +157,7 @@ class _PrimitivePainter extends CustomPainter {
     canvas.drawCircle(center, radius, paint);
   }
 
-  void _drawSpritePlaceholder(
+  void _drawSprite(
     Canvas canvas,
     DartRenderCommand cmd,
     double scaleX,
@@ -159,6 +169,21 @@ class _PrimitivePainter extends CustomPainter {
       cmd.width * scaleX,
       cmd.height * scaleY,
     );
+    final image = _imageResolver?.call(cmd.payloadId);
+    if (image != null) {
+      canvas.drawImageRect(
+        image,
+        Rect.fromLTWH(
+          0,
+          0,
+          image.width.toDouble(),
+          image.height.toDouble(),
+        ),
+        rect,
+        Paint()..filterQuality = FilterQuality.low,
+      );
+      return;
+    }
     final paint = Paint()
       ..color = Color(cmd.color).withValues(alpha: 0.5)
       ..style = PaintingStyle.stroke

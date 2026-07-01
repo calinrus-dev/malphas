@@ -21,9 +21,12 @@ use memmap2::Mmap;
 use sha2::{Digest, Sha256};
 
 use crate::integrity_policy::global_trust_anchor;
+use crate::memory_budget::{release, try_reserve, ERR_MEMORY_BUDGET_EXCEEDED};
+use crate::payload_schema::{PayloadSchemaRegistry, PAYLOAD_TYPE_UNKNOWN};
+use crate::pipeline::telemetry_now_micros;
 
 pub const MSP_MAGIC: [u8; 4] = *b"MLPS";
-pub const MSP_VERSION: u32 = 3;
+pub const MSP_VERSION: u32 = 4;
 
 /// Maximum size of an MSP file that the loader will map.  Files larger than
 /// this are rejected before any memory is mapped.
@@ -39,6 +42,14 @@ const ERR_MSP_INVALID_LAYOUT: i32 = -114;
 /// Payloads.  Every valid MSP must contain at least this many bytes of
 /// payload data.
 pub const ERROR_PAYLOAD_RESERVE: usize = 64 * 1024;
+
+struct BudgetGuard(usize);
+
+impl Drop for BudgetGuard {
+    fn drop(&mut self) {
+        release(self.0);
+    }
+}
 
 /// 64-byte aligned MSP header.
 ///
@@ -59,14 +70,14 @@ pub struct MspHeader {
 
 /// 64-byte aligned entity descriptor.
 ///
-/// The field order is fixed by the v2.10.0 ABI.  Because `tag_mask` is a u64
-/// placed after a u32, the compiler inserts 4 bytes of implicit padding before
-/// `tag_mask`.  The manual padding is therefore 40 bytes (not 44) so the total
-/// struct size remains exactly 64 bytes.
+/// The field order is fixed by the v3.0.0 MSP format.  The 4-byte gap between
+/// `entity_id` and `tag_mask` is used for `payload_type_id`, leaving 40 bytes
+/// of explicit padding so the total struct size remains exactly 64 bytes.
 #[repr(C, align(64))]
 #[derive(Clone, Copy, Debug)]
 pub struct MspEntityDescriptor {
     pub entity_id: u32,
+    pub payload_type_id: u32,
     pub tag_mask: u64,
     pub payload_offset: u32,
     pub payload_size: u32,
@@ -90,6 +101,8 @@ pub struct MspMap {
     payload_section_offset: u32,
     payload_section_size: u32,
     error_payload_ptr: *const u8,
+    mapped_size: usize,
+    build_time_micros: u64,
 }
 
 // SAFETY: The mmap-backed pointer table is read-only after construction and
@@ -113,6 +126,10 @@ impl MspMap {
     }
 
     fn from_mmap(mmap: Mmap) -> Result<Self, i32> {
+        let mapped_size = mmap.len();
+        try_reserve(mapped_size).map_err(|_| ERR_MEMORY_BUDGET_EXCEEDED)?;
+        let _budget_guard = BudgetGuard(mapped_size);
+
         let base = mmap.as_ptr();
         let len = mmap.len();
 
@@ -196,6 +213,7 @@ impl MspMap {
             unsafe { payload_base.add(payload_section_size - ERROR_PAYLOAD_RESERVE) };
 
         // Build the Silver Platter: a flat array indexed by entity ID.
+        let build_start = telemetry_now_micros();
         let mut lookup_table = Vec::with_capacity(entity_count);
         lookup_table.resize(entity_count, error_payload_ptr);
 
@@ -209,6 +227,7 @@ impl MspMap {
                     entity_count,
                 )
             };
+            let registry = PayloadSchemaRegistry::default();
             let mut seen = vec![false; entity_count];
             for descriptor in descriptors {
                 let id = descriptor.entity_id as usize;
@@ -221,8 +240,23 @@ impl MspMap {
                     return Err(ERR_MSP_DUPLICATE_ENTITY_ID);
                 }
                 seen[id] = true;
-                let offset = descriptor.payload_offset as usize;
+
+                // Validate payload type.  Known types must match the schema size;
+                // unknown types are accepted for forward compatibility.
+                let payload_type_id = descriptor.payload_type_id;
                 let size = descriptor.payload_size as usize;
+                if payload_type_id != PAYLOAD_TYPE_UNKNOWN {
+                    if let Some(schema) = registry.get(payload_type_id) {
+                        if size != schema.size {
+                            // Size mismatch for a known payload type: point to
+                            // the error payload so the system cannot misread it.
+                            lookup_table[id] = error_payload_ptr;
+                            continue;
+                        }
+                    }
+                }
+
+                let offset = descriptor.payload_offset as usize;
                 if offset
                     .checked_add(size)
                     .is_none_or(|end| end > payload_section_size)
@@ -237,6 +271,8 @@ impl MspMap {
             }
         }
 
+        let build_time_micros = telemetry_now_micros().saturating_sub(build_start);
+        std::mem::forget(_budget_guard);
         Ok(Self {
             mmap,
             lookup_table,
@@ -244,9 +280,19 @@ impl MspMap {
             payload_section_offset: header.payload_section_offset,
             payload_section_size: header.payload_section_size,
             error_payload_ptr,
+            mapped_size,
+            build_time_micros,
         })
     }
+}
 
+impl Drop for MspMap {
+    fn drop(&mut self) {
+        release(self.mapped_size);
+    }
+}
+
+impl MspMap {
     /// Base pointer of the Silver Platter.  Systems read this once per tick:
     /// `let payload = *lookup_table.add(entity_id as usize);`
     #[inline]
@@ -262,6 +308,18 @@ impl MspMap {
     #[inline]
     pub fn error_payload_ptr(&self) -> *const u8 {
         self.error_payload_ptr
+    }
+
+    /// Bytes charged against the memory budget for this mapped MSP.
+    #[inline]
+    pub fn mapped_size_bytes(&self) -> u64 {
+        self.mapped_size as u64
+    }
+
+    /// Time spent building the Silver Platter lookup table, in microseconds.
+    #[inline]
+    pub fn build_time_micros(&self) -> u64 {
+        self.build_time_micros
     }
 
     /// Safe resolver used by the core before passing IDs to systems.  Invalid
@@ -495,6 +553,7 @@ mod tests {
         let descriptors = vec![
             MspEntityDescriptor {
                 entity_id: 0,
+                payload_type_id: 0,
                 tag_mask: 1,
                 payload_offset: 0,
                 payload_size: 64,
@@ -502,6 +561,7 @@ mod tests {
             },
             MspEntityDescriptor {
                 entity_id: 1,
+                payload_type_id: 0,
                 tag_mask: 2,
                 payload_offset: 64,
                 payload_size: 64,
@@ -547,6 +607,7 @@ mod tests {
         let descriptors = vec![
             MspEntityDescriptor {
                 entity_id: 0,
+                payload_type_id: 0,
                 tag_mask: 1,
                 payload_offset: 0,
                 payload_size: 64,
@@ -554,6 +615,7 @@ mod tests {
             },
             MspEntityDescriptor {
                 entity_id: 99, // Out of range.
+                payload_type_id: 0,
                 tag_mask: 2,
                 payload_offset: 64,
                 payload_size: 64,
@@ -580,6 +642,7 @@ mod tests {
         let path = temp_msp_path("oob_payload");
         let descriptors = vec![MspEntityDescriptor {
             entity_id: 0,
+            payload_type_id: 0,
             tag_mask: 1,
             payload_offset: 0,
             payload_size: 1_000_000, // Larger than section.
@@ -697,6 +760,7 @@ mod tests {
         let descriptors = vec![
             MspEntityDescriptor {
                 entity_id: 0,
+                payload_type_id: 0,
                 tag_mask: 1,
                 payload_offset: 0,
                 payload_size: 64,
@@ -704,6 +768,7 @@ mod tests {
             },
             MspEntityDescriptor {
                 entity_id: 0, // Duplicate.
+                payload_type_id: 0,
                 tag_mask: 2,
                 payload_offset: 64,
                 payload_size: 64,

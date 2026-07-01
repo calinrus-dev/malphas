@@ -1,4 +1,4 @@
-//! Typed manifest schema for the Malphas v2.10.0 workspace compiler.
+//! Typed manifest schema for the Malphas v3.0.0 workspace compiler.
 //!
 //! A workspace is a directory that contains:
 //!   * `manifest.json`   — this file.
@@ -12,6 +12,7 @@
 //!       {
 //!         "entity_id": u32,
 //!         "tag_mask": u64,
+//!         "payload_type": string,  // optional, default "unknown"
 //!         "payload_file": string
 //!       }
 //!     ]
@@ -38,6 +39,13 @@ pub struct ManifestEntity {
     pub entity_id: u32,
     #[serde(default)]
     pub tag_mask: u64,
+    /// Logical payload type used by systems to interpret the payload bytes.
+    #[serde(default = "default_payload_type")]
+    pub payload_type: String,
     /// Relative path from the manifest directory to the raw payload file.
     pub payload_file: PathBuf,
+}
+
+fn default_payload_type() -> String {
+    "unknown".to_string()
 }

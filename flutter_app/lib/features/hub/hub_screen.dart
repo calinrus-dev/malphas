@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import '../../core/services/app_state_persistence_service.dart';
+import '../../core/theme/theme.dart';
+import '../../core/ui_primitives/malphas_widgets.dart';
 import '../workspace/workspace_screen.dart';
 import '../package_manager/package_manager_screen.dart';
 import '../engine_manager/engine_manager_screen.dart';
 import '../package_manager/package_controller.dart';
 import '../engine_manager/engine_controller.dart';
+import '../settings/settings_screen.dart';
 import 'environment_model.dart';
 
 class MalphasHubScreen extends StatefulWidget {
@@ -16,6 +19,7 @@ class MalphasHubScreen extends StatefulWidget {
 
 class _MalphasHubScreenState extends State<MalphasHubScreen> {
   bool _isGridView = true;
+  bool _isLoading = true;
   List<MalphasEnvironment> _environments = [];
   final PackageController _packageController = PackageController();
   final EngineController _engineController = EngineController();
@@ -41,6 +45,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
   }
 
   Future<void> _initialize() async {
+    setState(() => _isLoading = true);
     _engineController.scanAvailableEngines();
 
     // Build the default environments synchronously so the UI is never empty
@@ -56,7 +61,9 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
       // Rebuild with any packages discovered during init.
       _buildEnvironments();
     }
-    if (mounted) setState(() {});
+    if (mounted) {
+      setState(() => _isLoading = false);
+    }
   }
 
   Future<void> _persistEnvironments() async {
@@ -73,7 +80,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
         MalphasEnvironment(
           id: 'env_sandbox',
           name: 'Malphas Sandbox',
-          accentColor: const Color(0xffe0dcd3),
+          accentColor: MalphasTheme.bone,
           engineId: firstEngineId,
           packageIds: const [],
         ),
@@ -83,7 +90,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
         return MalphasEnvironment(
           id: pack.id,
           name: pack.name,
-          accentColor: const Color(0xffe0dcd3),
+          accentColor: MalphasTheme.bone,
           engineId: firstEngineId,
           packageIds: [pack.id],
         );
@@ -103,16 +110,16 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return AlertDialog(
-              backgroundColor: const Color(0xff0d0d0d),
+              backgroundColor: MalphasTheme.slate,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(24),
-                side: const BorderSide(color: Color(0xff1b1b1b)),
+                side: const BorderSide(color: MalphasTheme.borderAccent),
               ),
               title: const Text(
                 'NEW ENVIRONMENT',
                 style: TextStyle(
                   fontFamily: 'Georgia',
-                  color: Color(0xffe0dcd3),
+                  color: MalphasTheme.bone,
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
                 ),
@@ -137,9 +144,9 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 12),
                         decoration: BoxDecoration(
-                          color: Colors.black,
+                          color: MalphasTheme.ink,
                           borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: const Color(0xff1b1b1b)),
+                          border: Border.all(color: MalphasTheme.borderAccent),
                         ),
                         child: TextField(
                           style: const TextStyle(
@@ -171,13 +178,13 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 12),
                         decoration: BoxDecoration(
-                          color: Colors.black,
+                          color: MalphasTheme.ink,
                           borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: const Color(0xff1b1b1b)),
+                          border: Border.all(color: MalphasTheme.borderAccent),
                         ),
                         child: DropdownButtonHideUnderline(
                           child: DropdownButton<String>(
-                            dropdownColor: const Color(0xff0d0d0d),
+                            dropdownColor: MalphasTheme.slate,
                             value: selectedEngineId,
                             isExpanded: true,
                             style: const TextStyle(
@@ -232,8 +239,8 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                               ),
                             ),
                             value: isSelected,
-                            activeColor: const Color(0xffe0dcd3),
-                            checkColor: Colors.black,
+                            activeColor: MalphasTheme.bone,
+                            checkColor: MalphasTheme.ink,
                             controlAffinity: ListTileControlAffinity.leading,
                             contentPadding: EdgeInsets.zero,
                             onChanged: (val) {
@@ -268,7 +275,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                   child: const Text(
                     'CREATE',
                     style: TextStyle(
-                      color: Color(0xffe0dcd3),
+                      color: MalphasTheme.bone,
                       fontSize: 12,
                       fontWeight: FontWeight.bold,
                     ),
@@ -280,7 +287,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                           MalphasEnvironment(
                             id: 'env_${DateTime.now().millisecondsSinceEpoch}',
                             name: name.trim(),
-                            accentColor: const Color(0xffe0dcd3),
+                            accentColor: MalphasTheme.bone,
                             engineId: selectedEngineId,
                             packageIds: selectedPackageIds,
                           ),
@@ -311,16 +318,16 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return AlertDialog(
-              backgroundColor: const Color(0xff0d0d0d),
+              backgroundColor: MalphasTheme.slate,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(24),
-                side: const BorderSide(color: Color(0xff1b1b1b)),
+                side: const BorderSide(color: MalphasTheme.borderAccent),
               ),
               title: const Text(
                 'EDIT ENVIRONMENT',
                 style: TextStyle(
                   fontFamily: 'Georgia',
-                  color: Color(0xffe0dcd3),
+                  color: MalphasTheme.bone,
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
                 ),
@@ -345,9 +352,9 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 12),
                         decoration: BoxDecoration(
-                          color: Colors.black,
+                          color: MalphasTheme.ink,
                           borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: const Color(0xff1b1b1b)),
+                          border: Border.all(color: MalphasTheme.borderAccent),
                         ),
                         child: TextFormField(
                           initialValue: name,
@@ -375,13 +382,13 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 12),
                         decoration: BoxDecoration(
-                          color: Colors.black,
+                          color: MalphasTheme.ink,
                           borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: const Color(0xff1b1b1b)),
+                          border: Border.all(color: MalphasTheme.borderAccent),
                         ),
                         child: DropdownButtonHideUnderline(
                           child: DropdownButton<String>(
-                            dropdownColor: const Color(0xff0d0d0d),
+                            dropdownColor: MalphasTheme.slate,
                             value: selectedEngineId,
                             isExpanded: true,
                             style: const TextStyle(
@@ -436,8 +443,8 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                               ),
                             ),
                             value: isSelected,
-                            activeColor: const Color(0xffe0dcd3),
-                            checkColor: Colors.black,
+                            activeColor: MalphasTheme.bone,
+                            checkColor: MalphasTheme.ink,
                             controlAffinity: ListTileControlAffinity.leading,
                             contentPadding: EdgeInsets.zero,
                             onChanged: (val) {
@@ -472,7 +479,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                   child: const Text(
                     'SAVE',
                     style: TextStyle(
-                      color: Color(0xffe0dcd3),
+                      color: MalphasTheme.bone,
                       fontSize: 12,
                       fontWeight: FontWeight.bold,
                     ),
@@ -503,16 +510,16 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
       builder: (context) {
         String name = env.name;
         return AlertDialog(
-          backgroundColor: const Color(0xff0d0d0d),
+          backgroundColor: MalphasTheme.slate,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(24),
-            side: const BorderSide(color: Color(0xff1b1b1b)),
+            side: const BorderSide(color: MalphasTheme.borderAccent),
           ),
           title: const Text(
             'RENAME',
             style: TextStyle(
               fontFamily: 'Georgia',
-              color: Color(0xffe0dcd3),
+              color: MalphasTheme.bone,
               fontSize: 16,
               fontWeight: FontWeight.bold,
             ),
@@ -520,9 +527,9 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
           content: Container(
             padding: const EdgeInsets.symmetric(horizontal: 12),
             decoration: BoxDecoration(
-              color: Colors.black,
+              color: MalphasTheme.ink,
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: const Color(0xff1b1b1b)),
+              border: Border.all(color: MalphasTheme.borderAccent),
             ),
             child: TextFormField(
               initialValue: name,
@@ -547,7 +554,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
               child: const Text(
                 'CONFIRM',
                 style: TextStyle(
-                  color: Color(0xffe0dcd3),
+                  color: MalphasTheme.bone,
                   fontSize: 12,
                   fontWeight: FontWeight.bold,
                 ),
@@ -573,10 +580,10 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
       context: context,
       builder: (context) {
         return AlertDialog(
-          backgroundColor: const Color(0xff0d0d0d),
+          backgroundColor: MalphasTheme.slate,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(24),
-            side: const BorderSide(color: Color(0xff1b1b1b)),
+            side: const BorderSide(color: MalphasTheme.borderAccent),
           ),
           title: const Text(
             'DELETE ENVIRONMENT',
@@ -629,7 +636,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
   void _showEnvironmentOptions(MalphasEnvironment env) {
     showModalBottomSheet(
       context: context,
-      backgroundColor: const Color(0xff0d0d0d),
+      backgroundColor: MalphasTheme.slate,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -641,7 +648,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
               ListTile(
                 leading: const Icon(
                   Icons.edit_outlined,
-                  color: Color(0xffe0dcd3),
+                  color: MalphasTheme.bone,
                 ),
                 title: const Text(
                   'Edit Environment',
@@ -655,7 +662,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
               ListTile(
                 leading: const Icon(
                   Icons.text_fields_outlined,
-                  color: Color(0xffe0dcd3),
+                  color: MalphasTheme.bone,
                 ),
                 title: const Text(
                   'Rename',
@@ -703,27 +710,43 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
       (a, b) => (b.isPinned ? 1 : 0).compareTo(a.isPinned ? 1 : 0),
     );
 
+    final bodyContent = _isLoading
+        ? const MalphasLoadingIndicator(message: 'LOADING ENVIRONMENTS')
+        : sortedEnvs.isEmpty
+            ? MalphasEmptyState(
+                icon: Icons.dashboard_outlined,
+                title: 'NO ENVIRONMENTS YET',
+                subtitle:
+                    'Create your first Environment to combine packages and native logic cores.',
+                actionLabel: 'CREATE ENVIRONMENT',
+                onAction: _showCreateEnvironmentDialog,
+              )
+            : (_isGridView
+                ? _buildGridView(sortedEnvs)
+                : _buildListView(sortedEnvs));
+
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: MalphasTheme.ink,
       appBar: AppBar(
         title: const Text(
           'Malphas Chassis',
           style: TextStyle(
             fontFamily: 'Georgia',
             fontSize: 22,
-            color: Color(0xffe0dcd3),
+            color: MalphasTheme.bone,
           ),
         ),
-        backgroundColor: Colors.black,
+        backgroundColor: MalphasTheme.ink,
         elevation: 0,
         actions: [
           PopupMenuButton<bool>(
+            tooltip: 'Toggle view',
             icon: const Icon(
               Icons.remove_red_eye_outlined,
-              color: Color(0xffe0dcd3),
+              color: MalphasTheme.bone,
             ),
             onSelected: (isGrid) => setState(() => _isGridView = isGrid),
-            color: const Color(0xff0d0d0d),
+            color: MalphasTheme.slate,
             itemBuilder: (context) => [
               const PopupMenuItem(
                 value: true,
@@ -741,8 +764,9 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
               ),
             ],
           ),
-          IconButton(
-            icon: const Icon(Icons.add_box_outlined, color: Color(0xffe0dcd3)),
+          MalphasIconButton(
+            icon: Icons.add_box_outlined,
+            tooltip: 'Create environment',
             onPressed: _showCreateEnvironmentDialog,
           ),
         ],
@@ -759,17 +783,13 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                 style: TextStyle(
                   fontFamily: 'Arial',
                   fontSize: 10,
-                  color: Colors.white24,
+                  color: Colors.white38,
                   letterSpacing: 1,
                   fontWeight: FontWeight.bold,
                 ),
               ),
               const SizedBox(height: 16),
-              Expanded(
-                child: _isGridView
-                    ? _buildGridView(sortedEnvs)
-                    : _buildListView(sortedEnvs),
-              ),
+              Expanded(child: bodyContent),
             ],
           ),
         ),
@@ -806,12 +826,12 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
               onLongPress: () => _showEnvironmentOptions(env),
               child: Container(
                 decoration: BoxDecoration(
-                  color: const Color(0xff0d0d0d),
+                  color: MalphasTheme.slate,
                   borderRadius: BorderRadius.circular(24),
                   border: Border.all(
                     color: env.isPinned
                         ? env.accentColor.withValues(alpha: 0.5)
-                        : const Color(0xff1b1b1b),
+                        : MalphasTheme.borderAccent,
                     width: env.isPinned ? 1.5 : 1.0,
                   ),
                   boxShadow: env.isPinned
@@ -832,51 +852,20 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: env.accentColor.withValues(alpha: 0.08),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                                color: env.accentColor.withValues(alpha: 0.2),
-                                width: 0.8),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Container(
-                                width: 6,
-                                height: 6,
-                                decoration: BoxDecoration(
-                                  color: env.accentColor,
-                                  shape: BoxShape.circle,
-                                ),
-                              ),
-                              const SizedBox(width: 6),
-                              Text(
-                                env.isPinned ? 'PINNED' : 'ACTIVE',
-                                style: TextStyle(
-                                  fontFamily: 'Courier',
-                                  fontSize: 8,
-                                  color: env.accentColor,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ],
-                          ),
+                        MalphasTag(
+                          label: env.isPinned ? 'PINNED' : 'ACTIVE',
+                          color: env.accentColor,
                         ),
-                        IconButton(
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(),
-                          icon: Icon(
-                            env.isPinned
-                                ? Icons.push_pin
-                                : Icons.push_pin_outlined,
-                            size: 14,
-                            color:
-                                env.isPinned ? env.accentColor : Colors.white24,
-                          ),
+                        MalphasIconButton(
+                          icon: env.isPinned
+                              ? Icons.push_pin
+                              : Icons.push_pin_outlined,
+                          tooltip: env.isPinned
+                              ? 'Unpin environment'
+                              : 'Pin environment',
+                          size: 14,
+                          color:
+                              env.isPinned ? env.accentColor : Colors.white24,
                           onPressed: () async {
                             setState(() => env.isPinned = !env.isPinned);
                             await _persistEnvironments();
@@ -908,7 +897,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                                     fontFamily: 'Georgia',
                                     fontSize: 14,
                                     fontWeight: FontWeight.bold,
-                                    color: Color(0xffe0dcd3),
+                                    color: MalphasTheme.bone,
                                   ),
                                 ),
                               ),
@@ -919,7 +908,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                                 fontFamily: 'Georgia',
                                 fontSize: 16,
                                 fontWeight: FontWeight.bold,
-                                color: Color(0xffe0dcd3),
+                                color: MalphasTheme.bone,
                               ),
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
@@ -975,12 +964,12 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
                 decoration: BoxDecoration(
-                  color: const Color(0xff0d0d0d),
+                  color: MalphasTheme.slate,
                   borderRadius: BorderRadius.circular(24),
                   border: Border.all(
                     color: env.isPinned
                         ? env.accentColor.withValues(alpha: 0.5)
-                        : const Color(0xff1b1b1b),
+                        : MalphasTheme.borderAccent,
                     width: env.isPinned ? 1.5 : 1.0,
                   ),
                   boxShadow: env.isPinned
@@ -1033,7 +1022,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                                     fontFamily: 'Georgia',
                                     fontSize: 14,
                                     fontWeight: FontWeight.bold,
-                                    color: Color(0xffe0dcd3),
+                                    color: MalphasTheme.bone,
                                   ),
                                 ),
                               ),
@@ -1044,7 +1033,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                                 fontFamily: 'Georgia',
                                 fontSize: 16,
                                 fontWeight: FontWeight.bold,
-                                color: Color(0xffe0dcd3),
+                                color: MalphasTheme.bone,
                               ),
                             ),
                           ),
@@ -1062,12 +1051,15 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                         ],
                       ),
                     ),
-                    IconButton(
-                      icon: Icon(
-                        env.isPinned ? Icons.push_pin : Icons.push_pin_outlined,
-                        size: 16,
-                        color: env.isPinned ? env.accentColor : Colors.white24,
-                      ),
+                    MalphasIconButton(
+                      icon: env.isPinned
+                          ? Icons.push_pin
+                          : Icons.push_pin_outlined,
+                      tooltip: env.isPinned
+                          ? 'Unpin environment'
+                          : 'Pin environment',
+                      size: 16,
+                      color: env.isPinned ? env.accentColor : Colors.white24,
                       onPressed: () async {
                         setState(() => env.isPinned = !env.isPinned);
                         await _persistEnvironments();
@@ -1085,7 +1077,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
 
   Widget _buildGlobalDrawer() {
     return Drawer(
-      backgroundColor: const Color(0xff0d0d0d),
+      backgroundColor: MalphasTheme.slate,
       child: Column(
         children: [
           const DrawerHeader(
@@ -1096,7 +1088,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                 style: TextStyle(
                   fontFamily: 'Georgia',
                   fontSize: 24,
-                  color: Color(0xffe0dcd3),
+                  color: MalphasTheme.bone,
                   fontWeight: FontWeight.bold,
                 ),
               ),
@@ -1106,7 +1098,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
             leading: const Icon(
               Icons.archive_outlined,
               size: 20,
-              color: Color(0xffe0dcd3),
+              color: MalphasTheme.bone,
             ),
             title: const Text(
               'Global Package Hub',
@@ -1117,15 +1109,15 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
               Navigator.of(context).push(
                 MaterialPageRoute(
                   builder: (context) => Scaffold(
-                    backgroundColor: Colors.black,
+                    backgroundColor: MalphasTheme.ink,
                     appBar: AppBar(
-                      backgroundColor: Colors.black,
+                      backgroundColor: MalphasTheme.ink,
                       elevation: 0,
                       leading: IconButton(
                         icon: const Icon(
                           Icons.arrow_back_ios,
                           size: 16,
-                          color: Color(0xffe0dcd3),
+                          color: MalphasTheme.bone,
                         ),
                         onPressed: () => Navigator.of(context).pop(),
                       ),
@@ -1140,7 +1132,7 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
             leading: const Icon(
               Icons.memory_outlined,
               size: 20,
-              color: Color(0xffe0dcd3),
+              color: MalphasTheme.bone,
             ),
             title: const Text(
               'Global Engine Depot',
@@ -1151,15 +1143,15 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
               Navigator.of(context).push(
                 MaterialPageRoute(
                   builder: (context) => Scaffold(
-                    backgroundColor: Colors.black,
+                    backgroundColor: MalphasTheme.ink,
                     appBar: AppBar(
-                      backgroundColor: Colors.black,
+                      backgroundColor: MalphasTheme.ink,
                       elevation: 0,
                       leading: IconButton(
                         icon: const Icon(
                           Icons.arrow_back_ios,
                           size: 16,
-                          color: Color(0xffe0dcd3),
+                          color: MalphasTheme.bone,
                         ),
                         onPressed: () => Navigator.of(context).pop(),
                       ),
@@ -1171,11 +1163,11 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
             },
           ),
           const Spacer(),
-          const Divider(color: Color(0xff1b1b1b)),
+          const Divider(color: MalphasTheme.borderAccent),
           ListTile(
             leading: const Icon(
               Icons.account_circle_outlined,
-              color: Color(0xffe0dcd3),
+              color: MalphasTheme.bone,
             ),
             title: const Text(
               'Calin Rus',
@@ -1193,6 +1185,14 @@ class _MalphasHubScreenState extends State<MalphasHubScreen> {
                 color: Colors.white.withValues(alpha: 0.3),
               ),
             ),
+            onTap: () {
+              Navigator.of(context).pop();
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (context) => const SettingsScreen(),
+                ),
+              );
+            },
           ),
           const SizedBox(height: 12),
         ],

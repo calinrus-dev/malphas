@@ -1,7 +1,7 @@
 # Security Policy
 
 This document describes the security model, trust anchor setup, runtime sandbox,
-and reporting process for Malphas v2.10.0.
+and reporting process for Malphas v3.0.0.
 
 ## Threat Model
 
@@ -161,7 +161,7 @@ verifications.  Already-loaded systems are not re-verified retroactively; rotate
 the anchor during a maintenance window or after calling `shutdown_engine` and
 re-initializing.
 
-A multi-key keyring is planned for a future release.  v2.10.0 supports only a
+A multi-key keyring is planned for a future release.  v3.0.0 supports only a
 single active anchor at a time.
 
 ## Reporting Security Issues

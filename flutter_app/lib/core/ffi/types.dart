@@ -4,11 +4,11 @@ import 'dart:ffi';
 
 /// ABI version expected by the Dart binding and written by Rust in
 /// `init_engine`. Both sides must agree before any shared memory is trusted.
-const int bridgeAbiVersion = 0x02100000;
+const int bridgeAbiVersion = 0x03000000;
 
 /// C-ABI mirror of the Rust `DartRenderCommand`.
 ///
-/// 64-byte packed struct as required by the v2.10.0 frontend contract.
+/// 64-byte struct as required by the v3.0.0 frontend contract.
 /// Layout (packed, 1-byte alignment):
 ///   type      : u32  (4 bytes)
 ///   entityId  : u32  (4 bytes)
@@ -161,23 +161,23 @@ final class MspHeader extends Struct {
 
 /// C-ABI mirror of the Rust `MspEntityDescriptor`.
 ///
-/// 64-byte aligned descriptor. The explicit 4-byte gap before `tagMask` matches
-/// the Rust `#[repr(C, align(64))]` layout.
+/// 64-byte aligned descriptor. The 4-byte gap between `entityId` and `tagMask`
+/// carries `payloadTypeId`, matching the Rust `#[repr(C, align(64))]` layout.
 /// Layout (packed, explicit offsets):
-///   entity_id    : 4 bytes
-///   _gap         : 4 bytes
-///   tag_mask     : 8 bytes
-///   payload_offset : 4 bytes
-///   payload_size   : 4 bytes
-///   _padding[40] : 40 bytes
+///   entity_id       : 4 bytes
+///   payload_type_id : 4 bytes
+///   tag_mask        : 8 bytes
+///   payload_offset  : 4 bytes
+///   payload_size    : 4 bytes
+///   _padding[40]    : 40 bytes
 /// Total: 64 bytes.
 @Packed(1)
 final class MspEntityDescriptor extends Struct {
   @Uint32()
   external int entityId;
 
-  @Array(4)
-  external Array<Uint8> tagMaskGap;
+  @Uint32()
+  external int payloadTypeId;
 
   @Uint64()
   external int tagMask;

@@ -29,11 +29,11 @@ pub fn set_global_trust_anchor(public_key_hex: &str) -> Result<(), IntegrityErro
 
 /// Return the configured global trust anchor.
 ///
-/// In release builds without the `test-anchor` feature, this returns `None` when
-/// no anchor has been set.  Debug builds and `test-anchor` builds fall back to
-/// the documented test anchor.
+/// In builds without the `test-anchor` feature, this returns `None` when no
+/// anchor has been set.  Only `test-anchor` builds fall back to the documented
+/// test anchor; release builds never use it.
 pub fn global_trust_anchor() -> Option<Arc<IntegrityPolicy>> {
-    #[cfg(any(debug_assertions, feature = "test-anchor"))]
+    #[cfg(feature = "test-anchor")]
     {
         let guard = GLOBAL_TRUST_ANCHOR.read().ok()?;
         if let Some(arc) = guard.as_ref() {
@@ -41,7 +41,7 @@ pub fn global_trust_anchor() -> Option<Arc<IntegrityPolicy>> {
         }
         Some(Arc::new(IntegrityPolicy::default_trust_anchor().ok()?))
     }
-    #[cfg(not(any(debug_assertions, feature = "test-anchor")))]
+    #[cfg(not(feature = "test-anchor"))]
     {
         GLOBAL_TRUST_ANCHOR.read().ok()?.clone()
     }
@@ -69,7 +69,7 @@ pub const MAX_ZIP_COMPRESSION_RATIO: u64 = 100;
 /// by a real release-signing key before any binary is shipped.
 ///
 /// The corresponding secret key is intentionally omitted from the repository.
-#[cfg(any(debug_assertions, feature = "test-anchor"))]
+#[cfg(feature = "test-anchor")]
 const DEFAULT_TRUST_ANCHOR_HEX: &str =
     "aac8adcae7707a961bd03e24c1196d2593ba62f491ab00c0dd20bfa9b284aa1c";
 
@@ -123,7 +123,7 @@ impl IntegrityPolicy {
     }
 
     /// Returns the test-only trust anchor documented on `DEFAULT_TRUST_ANCHOR_HEX`.
-    #[cfg(any(debug_assertions, feature = "test-anchor"))]
+    #[cfg(feature = "test-anchor")]
     pub fn default_trust_anchor() -> Result<Self, IntegrityError> {
         Self::from_hex(DEFAULT_TRUST_ANCHOR_HEX)
     }
@@ -214,7 +214,7 @@ impl IntegrityPolicy {
     }
 }
 
-#[cfg(any(debug_assertions, feature = "test-anchor"))]
+#[cfg(feature = "test-anchor")]
 impl Default for IntegrityPolicy {
     fn default() -> Self {
         Self::default_trust_anchor().expect("built-in test trust anchor is valid hex")

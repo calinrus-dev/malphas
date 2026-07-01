@@ -35,8 +35,10 @@ class DecodedPayload {
 /// a large payload grid does not repeat I/O work.
 class PayloadDecodeService {
   static const int _maxCacheSize = 100;
+  static const int _maxCacheBytes = 64 * 1024 * 1024; // 64 MB
   static final LinkedHashMap<int, DecodedPayload> _cache =
       LinkedHashMap<int, DecodedPayload>();
+  static int _cacheBytes = 0;
 
   const PayloadDecodeService();
 
@@ -70,19 +72,39 @@ class PayloadDecodeService {
     return result;
   }
 
-  /// Clears the decode cache.
-  void clearCache() => _cache.clear();
+  /// Clears the decode cache and releases the byte accounting.
+  void clearCache() {
+    _cache.clear();
+    _cacheBytes = 0;
+  }
 
   void _promote(int id) {
     final value = _cache.remove(id);
     if (value != null) _cache[id] = value;
   }
 
+  static int _payloadSizeBytes(DecodedPayload payload) {
+    if (payload.bytes != null) return payload.bytes!.length;
+    if (payload.textPreview != null) return payload.textPreview!.length * 2;
+    return 64;
+  }
+
   void _put(int id, DecodedPayload payload) {
-    while (_cache.length >= _maxCacheSize && _cache.isNotEmpty) {
-      _cache.remove(_cache.keys.first);
+    final incoming = _payloadSizeBytes(payload);
+
+    // Evict oldest entries until both item count and byte budget allow the new
+    // payload. This keeps the cache under a predictable RAM cap.
+    while (_cache.isNotEmpty &&
+        (_cache.length >= _maxCacheSize ||
+            _cacheBytes + incoming > _maxCacheBytes)) {
+      final evicted = _cache.remove(_cache.keys.first);
+      if (evicted != null) {
+        _cacheBytes -= _payloadSizeBytes(evicted);
+      }
     }
+
     _cache[id] = payload;
+    _cacheBytes += incoming;
   }
 
   static DecodedPayload _decodeInIsolate({

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/theme/theme.dart';
 import 'engine_controller.dart';
 import 'hot_swap_panel.dart';
 import 'models.dart';
@@ -72,7 +73,7 @@ class _EngineManagerPanelState extends State<EngineManagerPanel> {
                 decoration: BoxDecoration(
                   color: theme.cardColor,
                   borderRadius: BorderRadius.circular(24),
-                  border: Border.all(color: const Color(0xff161616)),
+                  border: Border.all(color: MalphasTheme.borderAccent),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -93,7 +94,7 @@ class _EngineManagerPanelState extends State<EngineManagerPanel> {
                       runSpacing: 12,
                       alignment: WrapAlignment.start,
                       children: [
-                        _statBlock('MAPPED RAMPOOL', '24 BYTES/CMD'),
+                        _statBlock('MAPPED RAMPOOL', '64 BYTES/CMD'),
                         _statBlock('ALIGNMENT', '#[repr(C)]'),
                         _statBlock('VSYNC REFRESH', '120 HZ LOOP'),
                       ],
@@ -141,7 +142,7 @@ class _EngineManagerPanelState extends State<EngineManagerPanel> {
                       decoration: BoxDecoration(
                         color: theme.cardColor,
                         borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: const Color(0xff141414)),
+                        border: Border.all(color: MalphasTheme.borderAccent),
                       ),
                       child: ListTile(
                         contentPadding: const EdgeInsets.symmetric(
@@ -176,7 +177,7 @@ class _EngineManagerPanelState extends State<EngineManagerPanel> {
                             TextButton(
                               onPressed: action,
                               style: TextButton.styleFrom(
-                                backgroundColor: const Color(0xff1b1b1b),
+                                backgroundColor: MalphasTheme.borderAccent,
                                 foregroundColor: Colors.white,
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: 12,
@@ -206,9 +207,9 @@ class _EngineManagerPanelState extends State<EngineManagerPanel> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: const Color(0xff050505),
+                  color: MalphasTheme.ink,
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: const Color(0xff111111)),
+                  border: Border.all(color: MalphasTheme.borderAccent),
                 ),
                 child: const Text(
                   '[SYSTEM] Passive Display Server coupled to the GPU synchronously.',

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/theme/theme.dart';
 import 'engine_controller.dart';
 
 /// Runtime heads-up overlay.
@@ -61,9 +62,9 @@ class _RuntimeHudState extends State<RuntimeHud> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: const Color(0xff0d0d0d).withValues(alpha: 0.9),
+        color: MalphasTheme.slate.withValues(alpha: 0.9),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xff161616)),
+        border: Border.all(color: MalphasTheme.borderAccent),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,

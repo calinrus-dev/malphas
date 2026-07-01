@@ -1,4 +1,4 @@
-//! Malphas package compiler and signer CLI (v2.10.0).
+//! Malphas package compiler and signer CLI (v3.0.0).
 //!
 //! Subcommands:
 //!   compile <manifest.json>  -- Build <pack_id>.msp and generate bindings.rs
@@ -11,7 +11,10 @@
 
 mod bindings_codegen;
 mod compiler;
+mod dev_tools;
+mod environment;
 mod manifest;
+mod payload_schema;
 
 use clap::{Parser, Subcommand};
 use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
@@ -23,6 +26,8 @@ use std::path::{Path, PathBuf};
 
 use crate::bindings_codegen::generate_bindings_next_to_manifest;
 use crate::compiler::compile_manifest;
+use crate::dev_tools::{build_system, init_workspace, keygen, verify};
+use crate::environment::{bundle_environment, list_bundle, unbundle_environment};
 use crate::manifest::Manifest;
 
 #[derive(Parser)]
@@ -65,6 +70,75 @@ enum Commands {
         #[arg(long, value_name = "PATH")]
         signing_key_file: Option<PathBuf>,
     },
+    /// Manage environment bundles (.menv).
+    Environment {
+        #[command(subcommand)]
+        command: EnvironmentCommands,
+    },
+    /// Generate an Ed25519 signing keypair.
+    Keygen {
+        /// Output directory for the key files.
+        #[arg(long, short, value_name = "DIR", default_value = ".")]
+        output: PathBuf,
+        /// Also write a local seed-phrase backup file.
+        #[arg(long)]
+        seed_phrase: bool,
+    },
+    /// Verify a sidecar signature against a public key.
+    Verify {
+        /// File whose signature should be checked.
+        file: PathBuf,
+        /// Public key hex string or path to a file containing it.
+        #[arg(long, short, value_name = "KEY")]
+        public_key: String,
+    },
+    /// Scaffold a new Malphas workspace with a package manifest and system crate.
+    Init {
+        /// Project name.
+        name: String,
+        /// Output directory.
+        #[arg(long, short, value_name = "DIR", default_value = ".")]
+        output: PathBuf,
+    },
+    /// Build a Rust `cdylib` system crate and sign the artifact.
+    BuildSystem {
+        /// Directory containing the system Cargo.toml.
+        crate_dir: PathBuf,
+        /// Read the 32-byte Ed25519 private key from this environment variable.
+        #[arg(long, value_name = "VAR")]
+        signing_key_env: Option<String>,
+        /// Read the 32-byte Ed25519 private key from this file (use `-` for stdin).
+        #[arg(long, value_name = "PATH")]
+        signing_key_file: Option<PathBuf>,
+    },
+}
+
+#[derive(Subcommand)]
+enum EnvironmentCommands {
+    /// Create a .menv bundle from an environment manifest.
+    Bundle {
+        /// Path to environment.json
+        manifest: PathBuf,
+        /// Workspace root that contains packages/ and systems/
+        #[arg(long, value_name = "DIR")]
+        workspace: PathBuf,
+        /// Output .menv path
+        #[arg(long, short, value_name = "PATH")]
+        output: PathBuf,
+    },
+    /// Extract a .menv bundle into an installation directory.
+    Unbundle {
+        /// Path to .menv bundle
+        bundle: PathBuf,
+        /// Installation directory
+        #[arg(long, short, value_name = "DIR")]
+        output: PathBuf,
+    },
+    /// List the contents of a .menv bundle.
+    List {
+        /// Path to .menv bundle
+        bundle: PathBuf,
+    },
 }
 
 fn main() {
@@ -95,6 +169,50 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        Commands::Environment { command } => {
+            if let Err(e) = match command {
+                EnvironmentCommands::Bundle {
+                    manifest,
+                    workspace,
+                    output,
+                } => bundle_environment(&manifest, &workspace, &output),
+                EnvironmentCommands::Unbundle { bundle, output } => {
+                    unbundle_environment(&bundle, &output).map(|_| ())
+                }
+                EnvironmentCommands::List { bundle } => list_bundle(&bundle),
+            } {
+                eprintln!("Environment command failed: {e}");
+                std::process::exit(1);
+            }
+        }
+        Commands::Keygen { output, seed_phrase } => {
+            if let Err(e) = keygen(&output, seed_phrase) {
+                eprintln!("Keygen failed: {e}");
+                std::process::exit(1);
+            }
+        }
+        Commands::Verify { file, public_key } => {
+            if let Err(e) = verify(&file, &public_key) {
+                eprintln!("Verify failed: {e}");
+                std::process::exit(1);
+            }
+        }
+        Commands::Init { name, output } => {
+            if let Err(e) = init_workspace(&name, &output) {
+                eprintln!("Init failed: {e}");
+                std::process::exit(1);
+            }
+        }
+        Commands::BuildSystem {
+            crate_dir,
+            signing_key_env,
+            signing_key_file,
+        } => {
+            if let Err(e) = build_system(&crate_dir, signing_key_env, signing_key_file) {
+                eprintln!("Build-system failed: {e}");
+                std::process::exit(1);
+            }
+        }
     }
 }
 
@@ -118,7 +236,7 @@ fn compile_workspace(manifest_path: &Path) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn resolve_signing_key(
+pub fn resolve_signing_key(
     env_var: Option<String>,
     file_path: Option<PathBuf>,
 ) -> Result<String, Box<dyn Error>> {
@@ -154,7 +272,7 @@ fn resolve_signing_key(
     })
 }
 
-fn decode_hex_32(s: &str) -> Result<[u8; 32], Box<dyn Error>> {
+pub fn decode_hex_32(s: &str) -> Result<[u8; 32], Box<dyn Error>> {
     let cleaned = s.trim().trim_start_matches("0x").trim_start_matches("0X");
     let bytes = hex::decode(cleaned)?;
     if bytes.len() != 32 {
@@ -165,7 +283,7 @@ fn decode_hex_32(s: &str) -> Result<[u8; 32], Box<dyn Error>> {
     Ok(array)
 }
 
-fn signing_key_from_source(
+pub fn signing_key_from_source(
     env_var: Option<String>,
     file_path: Option<PathBuf>,
 ) -> Result<SigningKey, Box<dyn Error>> {
@@ -186,7 +304,7 @@ fn sign_file_cli(
     sign_file_with_key(file_path, &signing_key)
 }
 
-fn sign_file_with_key(file_path: &Path, signing_key: &SigningKey) -> Result<(), Box<dyn Error>> {
+pub fn sign_file_with_key(file_path: &Path, signing_key: &SigningKey) -> Result<(), Box<dyn Error>> {
     let data = fs::read(file_path)?;
     let hash = Sha256::digest(&data);
     let signature = signing_key.sign(&hash);
@@ -417,5 +535,126 @@ mod tests {
 
         let _ = fs::remove_file(&manifest_path);
         let _ = fs::remove_dir(&tmp_dir);
+    }
+
+    #[test]
+    fn environment_bundle_round_trip_preserves_manifest() {
+        use crate::environment::{bundle_environment, unbundle_environment};
+
+        let tmp_dir =
+            std::env::temp_dir().join(format!("malphas_cli_env_test_{}", std::process::id()));
+        fs::create_dir_all(&tmp_dir).unwrap();
+
+        let manifest_path = tmp_dir.join("environment.json");
+        let manifest_text = r#"{
+            "id": "env_round_trip",
+            "name": "Round Trip",
+            "engineId": "demo_engine",
+            "packageIds": ["demo_pack"]
+        }"#;
+        fs::write(&manifest_path, manifest_text).unwrap();
+
+        let workspace = tmp_dir.join("workspace");
+        let packages_dir = workspace.join("packages");
+        fs::create_dir_all(&packages_dir).unwrap();
+        fs::write(packages_dir.join("demo_pack.msp"), b"MSP").unwrap();
+        fs::write(packages_dir.join("demo_pack.manifest.json"), b"{}")
+            .unwrap();
+
+        let bundle_path = tmp_dir.join("env_round_trip.menv");
+        bundle_environment(&manifest_path, &workspace, &bundle_path).unwrap();
+        assert!(bundle_path.exists());
+
+        let install_dir = tmp_dir.join("install");
+        let restored = unbundle_environment(&bundle_path, &install_dir).unwrap();
+        assert_eq!(restored.id, "env_round_trip");
+        assert_eq!(restored.name, "Round Trip");
+        assert_eq!(restored.engine_id.as_deref(), Some("demo_engine"));
+        assert_eq!(restored.package_ids, vec!["demo_pack"]);
+        assert!(install_dir.join("packages").join("demo_pack.msp").exists());
+
+        let _ = fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn keygen_creates_keypair_and_verify_passes() {
+        use crate::dev_tools::{keygen, verify};
+
+        let tmp_dir =
+            std::env::temp_dir().join(format!("malphas_cli_keygen_test_{}", std::process::id()));
+        fs::create_dir_all(&tmp_dir).unwrap();
+
+        keygen(&tmp_dir, false).unwrap();
+        assert!(tmp_dir.join("malphas_signing_key.hex").exists());
+        assert!(tmp_dir.join("malphas_signing_key.pub").exists());
+
+        let data_path = tmp_dir.join("payload.bin");
+        fs::write(&data_path, b"keygen verify test").unwrap();
+
+        let signing_key =
+            signing_key_from_source(None, Some(tmp_dir.join("malphas_signing_key.hex"))).unwrap();
+        sign_file_with_key(&data_path, &signing_key).unwrap();
+
+        verify(&data_path, tmp_dir.join("malphas_signing_key.pub").to_str().unwrap()).unwrap();
+
+        let _ = fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn init_creates_workspace_template() {
+        use crate::dev_tools::init_workspace;
+
+        let tmp_dir =
+            std::env::temp_dir().join(format!("malphas_cli_init_test_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp_dir);
+
+        init_workspace("Hello World", &tmp_dir).unwrap();
+        assert!(tmp_dir.join("manifest.json").exists());
+        assert!(tmp_dir.join("systems").join("hello-world").join("Cargo.toml").exists());
+        assert!(tmp_dir
+            .join("systems")
+            .join("hello-world")
+            .join("src")
+            .join("lib.rs")
+            .exists());
+
+        let _ = fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn build_system_compiles_and_signs_template() {
+        use crate::dev_tools::{build_system, init_workspace};
+
+        let tmp_dir = std::env::temp_dir()
+            .join(format!("malphas_cli_build_test_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp_dir);
+
+        init_workspace("Build Test", &tmp_dir).unwrap();
+
+        let key_dir = tmp_dir.join("keys");
+        crate::dev_tools::keygen(&key_dir, false).unwrap();
+
+        let crate_dir = tmp_dir.join("systems").join("build-test");
+        build_system(
+            &crate_dir,
+            None,
+            Some(key_dir.join("malphas_signing_key.hex")),
+        )
+        .unwrap();
+
+        let artifact_candidates = [
+            crate_dir.join("target").join("release").join("build_test.dll"),
+            crate_dir.join("target").join("release").join("libbuild_test.so"),
+            crate_dir.join("target").join("release").join("libbuild_test.dylib"),
+        ];
+        let artifact = artifact_candidates.iter().find(|p| p.exists()).unwrap();
+        assert!(artifact.with_extension(
+            artifact
+                .extension()
+                .and_then(|e| e.to_str())
+                .map_or_else(|| "sig".to_string(), |e| format!("{e}.sig"))
+        ).exists());
+
+        let _ = fs::remove_dir_all(&tmp_dir);
     }
 }

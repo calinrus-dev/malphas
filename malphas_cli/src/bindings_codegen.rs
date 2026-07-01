@@ -1,4 +1,4 @@
-//! Auto-generated `bindings.rs` codegen for Malphas v2.10.0 systems.
+//! Auto-generated `bindings.rs` codegen for Malphas v3.0.0 systems.
 //!
 //! The compiler writes an immutable Rust module containing every Entity ID and
 //! Tag mask declared in the workspace manifest.  Systems include this file so
@@ -45,14 +45,29 @@ pub fn generate_bindings(manifest: &Manifest, output_path: &Path) -> Result<(), 
         manifest.entities.len()
     ));
 
+    let mut emitted = std::collections::HashSet::new();
     for entity in &manifest.entities {
         let name = sanitize(&format!("ENTITY_{}", entity.entity_id));
+        if !emitted.insert(name.clone()) {
+            return Err(format!(
+                "bindings collision: entity name `{}` would produce duplicate constant `{}`",
+                entity.entity_id, name
+            )
+            .into());
+        }
         content.push_str(&format!(
             "pub const {}: u32 = {};\n",
             name, entity.entity_id
         ));
 
         let tag_name = sanitize(&format!("TAG_MASK_{}", entity.entity_id));
+        if !emitted.insert(tag_name.clone()) {
+            return Err(format!(
+                "bindings collision: tag name `{}` would produce duplicate constant `{}`",
+                entity.entity_id, tag_name
+            )
+            .into());
+        }
         content.push_str(&format!(
             "pub const {}: u64 = {};\n",
             tag_name, entity.tag_mask
@@ -94,11 +109,13 @@ mod tests {
                 crate::manifest::ManifestEntity {
                     entity_id: 0,
                     tag_mask: 1,
+                    payload_type: "unknown".to_string(),
                     payload_file: PathBuf::from("a.bin"),
                 },
                 crate::manifest::ManifestEntity {
                     entity_id: 42,
                     tag_mask: 0xFF,
+                    payload_type: "unknown".to_string(),
                     payload_file: PathBuf::from("b.bin"),
                 },
             ],
@@ -123,5 +140,40 @@ mod tests {
         assert_eq!(sanitize("entity-1"), "ENTITY_1");
         assert_eq!(sanitize("1st"), "_1ST");
         assert_eq!(sanitize(""), "_");
+    }
+
+    #[test]
+    fn generate_bindings_rejects_collisions() {
+        let tmp_dir =
+            std::env::temp_dir().join(format!("malphas_bindings_collision_{}", std::process::id()));
+        fs::create_dir_all(&tmp_dir).unwrap();
+
+        // Two entities with the same id would generate the same constants.
+        let manifest = Manifest {
+            pack_id: "collision_pack".to_string(),
+            entities: vec![
+                crate::manifest::ManifestEntity {
+                    entity_id: 7,
+                    tag_mask: 1,
+                    payload_type: "unknown".to_string(),
+                    payload_file: PathBuf::from("a.bin"),
+                },
+                crate::manifest::ManifestEntity {
+                    entity_id: 7,
+                    tag_mask: 2,
+                    payload_type: "unknown".to_string(),
+                    payload_file: PathBuf::from("b.bin"),
+                },
+            ],
+        };
+
+        let output = tmp_dir.join("bindings.rs");
+        let result = generate_bindings(&manifest, &output);
+        assert!(
+            result.is_err(),
+            "expected collision error for duplicate constants"
+        );
+
+        let _ = fs::remove_dir_all(&tmp_dir);
     }
 }

@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import '../../core/ffi/malphas_bindings.dart';
 import '../hub/environment_model.dart';
@@ -33,6 +34,11 @@ class _PackageCreatorScreenState extends State<PackageCreatorScreen> {
   final List<EntityProperty> _properties = [];
   bool _isCompiling = false;
 
+  // Undo/redo history.
+  final List<_EditorState> _undoStack = [];
+  final List<_EditorState> _redoStack = [];
+  static const int _maxHistoryDepth = 50;
+
   @override
   void dispose() {
     _packIdController.dispose();
@@ -45,8 +51,83 @@ class _PackageCreatorScreenState extends State<PackageCreatorScreen> {
     super.dispose();
   }
 
+  int _allocateEntityId() {
+    int maxId = 0;
+    for (final obj in _objects) {
+      if (obj.id > maxId) maxId = obj.id;
+    }
+    for (final entity in _controller.store.entities) {
+      if (entity != null && entity.id > maxId) maxId = entity.id;
+    }
+    return maxId + 1;
+  }
+
+  void _pushState() {
+    _undoStack.add(_EditorState(
+      objects: List.of(_objects),
+      payloads: List.of(_payloads),
+      tags: List.of(_tags),
+      properties: List.of(_properties),
+    ).copy());
+    if (_undoStack.length > _maxHistoryDepth) {
+      _undoStack.removeAt(0);
+    }
+    _redoStack.clear();
+  }
+
+  void _undo() {
+    if (_undoStack.isEmpty) return;
+    _redoStack.add(_EditorState(
+      objects: List.of(_objects),
+      payloads: List.of(_payloads),
+      tags: List.of(_tags),
+      properties: List.of(_properties),
+    ).copy());
+    final state = _undoStack.removeLast();
+    setState(() {
+      _objects
+        ..clear()
+        ..addAll(state.objects);
+      _payloads
+        ..clear()
+        ..addAll(state.payloads);
+      _tags
+        ..clear()
+        ..addAll(state.tags);
+      _properties
+        ..clear()
+        ..addAll(state.properties);
+    });
+  }
+
+  void _redo() {
+    if (_redoStack.isEmpty) return;
+    _undoStack.add(_EditorState(
+      objects: List.of(_objects),
+      payloads: List.of(_payloads),
+      tags: List.of(_tags),
+      properties: List.of(_properties),
+    ).copy());
+    final state = _redoStack.removeLast();
+    setState(() {
+      _objects
+        ..clear()
+        ..addAll(state.objects);
+      _payloads
+        ..clear()
+        ..addAll(state.payloads);
+      _tags
+        ..clear()
+        ..addAll(state.tags);
+      _properties
+        ..clear()
+        ..addAll(state.properties);
+    });
+  }
+
   void _addObject() {
-    final nextId = _objects.length + 1;
+    _pushState();
+    final nextId = _allocateEntityId();
     setState(() {
       _objects.add(
         Entity(
@@ -77,6 +158,7 @@ class _PackageCreatorScreenState extends State<PackageCreatorScreen> {
   }
 
   void _removeObject(int index) {
+    _pushState();
     final obj = _objects[index];
     setState(() {
       _objects.removeAt(index);
@@ -98,14 +180,16 @@ class _PackageCreatorScreenState extends State<PackageCreatorScreen> {
     final tagCtrl = TextEditingController(
       text: entTags.map((t) => t.name).join(', '),
     );
-    final skinPathCtrl = TextEditingController(
+    final payloadPathCtrl = TextEditingController(
       text: entPayloads.isEmpty ? '' : entPayloads.first.assetPath,
     );
 
+    final payloadTypeNotifier =
+        ValueNotifier<String>(propsMap['payloadType'] ?? 'physics_body');
     final kindNotifier = ValueNotifier<String>(propsMap['kind'] ?? 'rectangle');
     final propsControllers = <String, TextEditingController>{};
     propsMap.forEach((key, value) {
-      if (key != 'kind') {
+      if (key != 'kind' && key != 'payloadType') {
         propsControllers[key] = TextEditingController(text: value);
       }
     });
@@ -162,8 +246,75 @@ class _PackageCreatorScreenState extends State<PackageCreatorScreen> {
                   const SizedBox(height: 8),
                   _dialogTextField('Tags (comma separated)', tagCtrl),
                   const SizedBox(height: 8),
-                  _dialogTextField(
-                      'Skin Image Path (e.g. assets/red.png)', skinPathCtrl),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _dialogTextField(
+                          'Payload Asset Path',
+                          payloadPathCtrl,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        icon: const Icon(Icons.folder_open,
+                            color: Colors.white38, size: 20),
+                        tooltip: 'Pick payload asset',
+                        onPressed: () async {
+                          final result = await FilePicker.platform.pickFiles(
+                            type: FileType.any,
+                            allowMultiple: false,
+                            withData: false,
+                          );
+                          if (result != null &&
+                              result.files.isNotEmpty &&
+                              result.files.single.path != null) {
+                            payloadPathCtrl.text = result.files.single.path!;
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  _PayloadPreview(path: payloadPathCtrl.text),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Payload Type',
+                    style: TextStyle(
+                      fontFamily: 'Courier',
+                      fontSize: 11,
+                      color: Colors.white38,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  ValueListenableBuilder<String>(
+                    valueListenable: payloadTypeNotifier,
+                    builder: (context, payloadType, child) {
+                      return DropdownButton<String>(
+                        value: payloadType,
+                        dropdownColor: const Color(0xff161616),
+                        style:
+                            const TextStyle(color: Colors.white, fontSize: 12),
+                        isExpanded: true,
+                        underline: Container(
+                            height: 1, color: const Color(0xff1b1b1b)),
+                        items: const [
+                          DropdownMenuItem(
+                              value: 'physics_body',
+                              child: Text('Physics Body')),
+                          DropdownMenuItem(
+                              value: 'rectangle', child: Text('Rectangle')),
+                          DropdownMenuItem(
+                              value: 'sprite', child: Text('Sprite')),
+                          DropdownMenuItem(
+                              value: 'sound', child: Text('Sound')),
+                          DropdownMenuItem(value: 'text', child: Text('Text')),
+                          DropdownMenuItem(
+                              value: 'transform', child: Text('Transform')),
+                        ],
+                        onChanged: (val) => payloadTypeNotifier.value = val!,
+                      );
+                    },
+                  ),
                   const SizedBox(height: 12),
                   const Text(
                     'Render Geometry Type',
@@ -245,6 +396,7 @@ class _PackageCreatorScreenState extends State<PackageCreatorScreen> {
             ),
             TextButton(
               onPressed: () {
+                _pushState();
                 setState(() {
                   _tags.removeWhere((t) => t.entityId == obj.id);
                   _payloads.removeWhere((p) => p.entityId == obj.id);
@@ -259,14 +411,14 @@ class _PackageCreatorScreenState extends State<PackageCreatorScreen> {
                   _tags.addAll(newTags);
 
                   int activePayloadId = 0;
-                  if (skinPathCtrl.text.isNotEmpty) {
+                  if (payloadPathCtrl.text.isNotEmpty) {
                     activePayloadId = 1;
                     _payloads.add(
                       EntityPayload(
                         id: 1,
                         entityId: obj.id,
-                        name: 'Skin ${obj.name}',
-                        assetPath: skinPathCtrl.text.trim(),
+                        name: 'Payload ${obj.name}',
+                        assetPath: payloadPathCtrl.text.trim(),
                         version: '1.0',
                       ),
                     );
@@ -274,6 +426,7 @@ class _PackageCreatorScreenState extends State<PackageCreatorScreen> {
 
                   final Map<String, String> newProps = {
                     'kind': kindNotifier.value,
+                    'payloadType': payloadTypeNotifier.value,
                   };
                   propsControllers.forEach((key, ctrl) {
                     newProps[key] = ctrl.text.trim();
@@ -384,7 +537,7 @@ class _PackageCreatorScreenState extends State<PackageCreatorScreen> {
                   .getAllPackages()
                   .firstWhere((p) => p.id == packId);
               await _controller.setPackageLoaded(packId, loaded: true);
-              await _controller.preloadSkins(pack);
+              await _controller.preloadPayloads(pack);
             }
           } finally {
             bindings.pauseEngine(false);
@@ -583,26 +736,45 @@ class _PackageCreatorScreenState extends State<PackageCreatorScreen> {
                               fontWeight: FontWeight.bold,
                             ),
                           ),
-                          ElevatedButton.icon(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xff0d0d0d),
-                              side: const BorderSide(color: Color(0xff1b1b1b)),
-                              shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(20)),
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 14, vertical: 8),
-                            ),
-                            icon: const Icon(Icons.add,
-                                size: 14, color: Color(0xff00ffcc)),
-                            label: const Text(
-                              'ADD ENTITY',
-                              style: TextStyle(
-                                  fontFamily: 'Courier',
-                                  fontSize: 10,
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold),
-                            ),
-                            onPressed: _addObject,
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: const Icon(Icons.undo,
+                                    size: 18, color: Colors.white54),
+                                tooltip: 'Undo',
+                                onPressed: _undoStack.isEmpty ? null : _undo,
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.redo,
+                                    size: 18, color: Colors.white54),
+                                tooltip: 'Redo',
+                                onPressed: _redoStack.isEmpty ? null : _redo,
+                              ),
+                              const SizedBox(width: 8),
+                              ElevatedButton.icon(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xff0d0d0d),
+                                  side: const BorderSide(
+                                      color: Color(0xff1b1b1b)),
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(20)),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 14, vertical: 8),
+                                ),
+                                icon: const Icon(Icons.add,
+                                    size: 14, color: Color(0xff00ffcc)),
+                                label: const Text(
+                                  'ADD ENTITY',
+                                  style: TextStyle(
+                                      fontFamily: 'Courier',
+                                      fontSize: 10,
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold),
+                                ),
+                                onPressed: _addObject,
+                              ),
+                            ],
                           ),
                         ],
                       ),
@@ -797,6 +969,85 @@ class _PackageCreatorScreenState extends State<PackageCreatorScreen> {
           errorStyle: const TextStyle(
               fontFamily: 'Courier', fontSize: 10, color: Colors.redAccent),
         ),
+      ),
+    );
+  }
+}
+
+/// Immutable snapshot of the package creator's mutable state.
+class _EditorState {
+  final List<Entity> objects;
+  final List<EntityPayload> payloads;
+  final List<EntityTag> tags;
+  final List<EntityProperty> properties;
+
+  const _EditorState({
+    required this.objects,
+    required this.payloads,
+    required this.tags,
+    required this.properties,
+  });
+
+  _EditorState copy() => _EditorState(
+        objects: List.of(objects),
+        payloads: List.of(payloads),
+        tags: List.of(tags),
+        properties: List.of(properties),
+      );
+}
+
+/// Tiny asset preview for the payload editor dialog.
+class _PayloadPreview extends StatelessWidget {
+  final String path;
+
+  const _PayloadPreview({required this.path});
+
+  bool get _isImage {
+    final lower = path.toLowerCase();
+    return lower.endsWith('.png') ||
+        lower.endsWith('.jpg') ||
+        lower.endsWith('.jpeg') ||
+        lower.endsWith('.webp') ||
+        lower.endsWith('.gif') ||
+        lower.endsWith('.bmp');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (path.isEmpty) {
+      return const Text(
+        'No asset selected.',
+        style: TextStyle(
+          fontFamily: 'Courier',
+          fontSize: 10,
+          color: Colors.white24,
+        ),
+      );
+    }
+    if (_isImage) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Image.file(
+          File(path),
+          height: 80,
+          fit: BoxFit.contain,
+          errorBuilder: (_, __, ___) => const Text(
+            'Unable to preview image.',
+            style: TextStyle(
+              fontFamily: 'Courier',
+              fontSize: 10,
+              color: Colors.white24,
+            ),
+          ),
+        ),
+      );
+    }
+    return Text(
+      'Asset: ${path.split(Platform.pathSeparator).last}',
+      style: const TextStyle(
+        fontFamily: 'Courier',
+        fontSize: 10,
+        color: Colors.white38,
       ),
     );
   }

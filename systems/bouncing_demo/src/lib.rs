@@ -1,4 +1,4 @@
-//! Bouncing demo system for Malphas v2.10.0.
+//! Bouncing demo system for Malphas v3.0.0.
 //!
 //! This `.mxc` (Malphas eXecutable Core) is a hot-swappable dynamic library
 //! that receives the Silver Platter lookup table every frame.  It keeps its own
@@ -104,35 +104,48 @@ pub extern "C" fn malphas_init_system(lookup_table: *const *const u8, entity_cou
     0
 }
 
-/// Advance simulation and write render commands.
-///
-/// The lookup table is read-only and freshly injected every frame; the system
-/// never caches it globally.  Dynamic mutation happens only in the internal
-/// SoA arrays allocated during init.
-#[no_mangle]
-pub extern "C" fn malphas_tick(
+/// C-ABI mirror of the core `InputEvent`.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InputEvent {
+    pub event_type: u8,
+    pub x: f32,
+    pub y: f32,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn simulate_and_render(
+    state: &mut State,
     lookup_table: *const *const u8,
     entity_count: u32,
     _dt_micros: u64,
     render_buffer: *mut DartRenderCommand,
     render_capacity: u32,
     render_count: *mut u32,
+    input_events: &[InputEvent],
 ) {
-    if lookup_table.is_null()
-        || render_buffer.is_null()
-        || render_count.is_null()
-        || entity_count == 0
-    {
-        return;
-    }
-    let mut guard = STATE.lock().unwrap();
-    let state = match guard.as_mut() {
-        Some(s) => s,
-        None => return,
-    };
     let count = (entity_count as usize).min(state.count);
     let capacity = render_capacity as usize;
     let mut written = 0u32;
+
+    // Apply touch events: if any touch lands inside an entity, invert its
+    // velocity.  This demonstrates interactive canvas input end-to-end.
+    for event in input_events {
+        if event.event_type != 0 {
+            continue;
+        }
+        for id in 0..count {
+            if state.x[id] <= event.x
+                && event.x <= state.x[id] + state.width[id]
+                && state.y[id] <= event.y
+                && event.y <= state.y[id] + state.height[id]
+            {
+                state.speed_x[id] = -state.speed_x[id];
+                state.speed_y[id] = -state.speed_y[id];
+            }
+        }
+    }
+
     for id in 0..count {
         if written as usize >= capacity {
             break;
@@ -181,4 +194,83 @@ pub extern "C" fn malphas_tick(
     unsafe {
         *render_count = written;
     }
+}
+
+/// Advance simulation and write render commands.
+///
+/// The lookup table is read-only and freshly injected every frame; the system
+/// never caches it globally.  Dynamic mutation happens only in the internal
+/// SoA arrays allocated during init.
+#[no_mangle]
+pub extern "C" fn malphas_tick(
+    lookup_table: *const *const u8,
+    entity_count: u32,
+    dt_micros: u64,
+    render_buffer: *mut DartRenderCommand,
+    render_capacity: u32,
+    render_count: *mut u32,
+) {
+    if lookup_table.is_null()
+        || render_buffer.is_null()
+        || render_count.is_null()
+        || entity_count == 0
+    {
+        return;
+    }
+    let mut guard = STATE.lock().unwrap();
+    let state = match guard.as_mut() {
+        Some(s) => s,
+        None => return,
+    };
+    simulate_and_render(
+        state,
+        lookup_table,
+        entity_count,
+        dt_micros,
+        render_buffer,
+        render_capacity,
+        render_count,
+        &[],
+    );
+}
+
+/// Input-aware tick variant.  The core prefers this symbol when present.
+#[no_mangle]
+pub extern "C" fn malphas_tick_with_input(
+    lookup_table: *const *const u8,
+    entity_count: u32,
+    dt_micros: u64,
+    render_buffer: *mut DartRenderCommand,
+    render_capacity: u32,
+    render_count: *mut u32,
+    input_events: *const InputEvent,
+    input_count: u32,
+) {
+    if lookup_table.is_null()
+        || render_buffer.is_null()
+        || render_count.is_null()
+        || entity_count == 0
+    {
+        return;
+    }
+    let mut guard = STATE.lock().unwrap();
+    let state = match guard.as_mut() {
+        Some(s) => s,
+        None => return,
+    };
+    let events = if input_events.is_null() || input_count == 0 {
+        &[]
+    } else {
+        unsafe { std::slice::from_raw_parts(input_events, input_count as usize) }
+    };
+    simulate_and_render(
+        state,
+        lookup_table,
+        entity_count,
+        dt_micros,
+        render_buffer,
+        render_capacity,
+        render_count,
+        events,
+    );
 }
