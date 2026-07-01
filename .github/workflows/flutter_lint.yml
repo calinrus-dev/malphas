@@ -142,12 +142,30 @@ jobs:
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
       - name: Run Flutter tests
+        id: flutter_tests
         run: |
           if [ -z "$PUBKEY" ]; then
             echo "Trust anchor not available; running tests with signature verification skipped."
             export MALPHAS_INSECURE_SKIP_VERIFY=1
           fi
-          flutter test -j 1
+          set -o pipefail
+          flutter test -j 1 2>&1 | tee flutter_test.log
+
+      - name: Surface Flutter test diagnostics
+        if: failure() && steps.flutter_tests.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "## Flutter test failures" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          if [ -f flutter_test.log ]; then
+            tail -n 300 flutter_test.log >> "$GITHUB_STEP_SUMMARY"
+            tail -n 60 flutter_test.log | grep -E '(FAILED|Exception|Error|expect|threw|test .* failed)' | head -40 | while IFS= read -r line; do
+              echo "::error::$line"
+            done
+          else
+            echo "flutter_test.log not found" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verify Dart format
         run: dart format --set-exit-if-changed .

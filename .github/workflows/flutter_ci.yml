@@ -212,6 +212,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y xvfb
 
       - name: Run Flutter Tests (Native Headless)
+        id: flutter_tests
         env:
           LD_LIBRARY_PATH: ${{ github.workspace }}/flutter_app/motors
         run: |
@@ -220,4 +221,21 @@ jobs:
             echo "Trust anchor not available; running tests with signature verification skipped."
             export MALPHAS_INSECURE_SKIP_VERIFY=1
           fi
-          xvfb-run -a flutter test -j 1 --dart-define=MALPHAS_TRUST_ANCHOR="$PUBKEY"
+          set -o pipefail
+          xvfb-run -a flutter test -j 1 --dart-define=MALPHAS_TRUST_ANCHOR="$PUBKEY" 2>&1 | tee flutter_test.log
+
+      - name: Surface Flutter test diagnostics
+        if: failure() && steps.flutter_tests.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "## Flutter test failures" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          if [ -f flutter_app/flutter_test.log ]; then
+            tail -n 300 flutter_app/flutter_test.log >> "$GITHUB_STEP_SUMMARY"
+            tail -n 60 flutter_app/flutter_test.log | grep -E '(FAILED|Exception|Error|expect|threw|test .* failed)' | head -40 | while IFS= read -r line; do
+              echo "::error::$line"
+            done
+          else
+            echo "flutter_test.log not found" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
