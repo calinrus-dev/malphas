@@ -335,7 +335,7 @@ pub(crate) fn get_text_payload_pointer(command: *const DartRenderCommand) -> *co
     // SAFETY: `command` was validated to be non-null and aligned above, so the
     // dereference is sound for the C-ABI struct.
     unsafe {
-        if (*command).command_type != 2 {
+        if (*command).cmd_type != 2 {
             return std::ptr::null();
         }
         let low = (*command).width.to_bits() as u64;
@@ -488,14 +488,14 @@ mod tests {
         // SAFETY: Zeroing a POD C-ABI struct is valid; we fill in the fields
         // before use.
         let mut rect_cmd = unsafe { std::mem::zeroed::<crate::pipeline::DartRenderCommand>() };
-        rect_cmd.command_type = 1;
+        rect_cmd.cmd_type = 1;
         rect_cmd.width = f32::from_bits(0x12345678);
         rect_cmd.height = f32::from_bits(0x9ABCDEF0);
         assert!(get_text_payload_pointer(&rect_cmd).is_null());
 
         // SAFETY: Same as above.
         let mut text_cmd = unsafe { std::mem::zeroed::<crate::pipeline::DartRenderCommand>() };
-        text_cmd.command_type = 2;
+        text_cmd.cmd_type = 2;
         text_cmd.width = f32::from_bits(0x12345678);
         text_cmd.height = f32::from_bits(0x9ABCDEF0);
         let decoded = get_text_payload_pointer(&text_cmd);
@@ -511,7 +511,7 @@ mod tests {
         // SAFETY: Zeroing a POD C-ABI struct is valid; we fill in the fields
         // before use.
         let mut text_cmd = unsafe { std::mem::zeroed::<crate::pipeline::DartRenderCommand>() };
-        text_cmd.command_type = 2;
+        text_cmd.cmd_type = 2;
         // Encode address 0x0000_0000_0000_0001, which is non-null but not
         // 4-byte aligned.
         text_cmd.width = f32::from_bits(0x0000_0001);
