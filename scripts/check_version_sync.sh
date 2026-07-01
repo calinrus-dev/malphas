@@ -34,10 +34,10 @@ minor_bcd=$(( MINOR / 10 * 16 + MINOR % 10 ))
 patch_bcd=$(( PATCH / 10 * 16 + PATCH % 10 ))
 EXPECTED_ABI_VERSION=$(printf '0x%02x%02x%02x00' "$major_bcd" "$minor_bcd" "$patch_bcd")
 
-cargo_version=$(grep -E '^version\s*=' "$ROOT/Cargo.toml" | head -n1 | sed -E 's/.*"([^"]+)".*/\1/')
+cargo_version=$(grep -E '^version[[:space:]]*=' "$ROOT/Cargo.toml" | head -n1 | sed -E 's/.*"([^"]+)".*/\1/')
 flutter_version=$(grep -E '^version:' "$ROOT/flutter_app/pubspec.yaml" | head -n1 | sed -E 's/.*([0-9]+\.[0-9]+\.[0-9]+).*/\1/')
 readme_version=$(grep -E '^# Malphas( Engine)? v[0-9]+\.[0-9]+\.[0-9]+' "$ROOT/README.md" | head -n1 | sed -E 's/.*v([0-9]+\.[0-9]+\.[0-9]+).*/\1/')
-abi_version=$(grep -E 'pub const BRIDGE_ABI_VERSION:' "$ROOT/malphas_core/src/pipeline.rs" | sed -E 's/.*=\s*(0x[0-9a-fA-F]+).*/\1/')
+abi_version=$(grep -E 'pub const BRIDGE_ABI_VERSION:' "$ROOT/malphas_core/src/pipeline.rs" | sed -E 's/.*=[[:space:]]*(0x[0-9a-fA-F]+).*/\1/')
 
 echo "VERSION file:      $VERSION"
 echo "Cargo.toml:        $cargo_version"
@@ -67,7 +67,7 @@ if [ "$abi_version" != "$EXPECTED_ABI_VERSION" ]; then
     ERRORS=$((ERRORS + 1))
 fi
 
-overrides=$(grep -R -n --include='Cargo.toml' '^version\s*=\s*"' "$ROOT"/*/Cargo.toml "$ROOT"/systems/*/Cargo.toml 2>/dev/null || true)
+overrides=$(grep -R -n --include='Cargo.toml' '^version[[:space:]]*=[[:space:]]*"' "$ROOT"/*/Cargo.toml "$ROOT"/systems/*/Cargo.toml 2>/dev/null || true)
 if [ -n "$overrides" ]; then
     echo "ERROR: Some crates override the workspace version instead of using version.workspace = true:"
     echo "$overrides"
