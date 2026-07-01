@@ -40,7 +40,26 @@ jobs:
         run: bash scripts/check_version_sync.sh
 
       - name: Run Clippy
-        run: cargo clippy --release --all-targets -- -D warnings
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo clippy --release --all-targets --message-format=short -- -D warnings 2>&1 | tee clippy.log
+
+      - name: Surface Clippy diagnostics
+        if: failure()
+        shell: bash
+        run: |
+          echo "## Clippy diagnostics" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          if [ -f clippy.log ]; then
+            tail -n 200 clippy.log >> "$GITHUB_STEP_SUMMARY"
+            tail -n 50 clippy.log | while IFS= read -r line; do
+              echo "::error::$line"
+            done
+          else
+            echo "clippy.log not found" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Audit dependencies
         shell: bash
