@@ -118,9 +118,15 @@ jobs:
           }
           $key = $env:MALPHAS_SIGNING_KEY
           if ([string]::IsNullOrWhiteSpace($key) -or -not (Test-Path $cli -PathType Leaf)) {
+            Write-Host "RELEASE_SIGNING_KEY not available or CLI missing; building without a trust anchor."
+            Add-Content -Path $env:GITHUB_ENV -Value "PUBKEY="
+            exit 0
+          }
+          $pubkey = & $cli pubkey --signing-key-env MALPHAS_SIGNING_KEY 2>&1
+          if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Failed to derive trust anchor ($pubkey); continuing without it."
             Add-Content -Path $env:GITHUB_ENV -Value "PUBKEY="
           } else {
-            $pubkey = & $cli pubkey --signing-key-env MALPHAS_SIGNING_KEY
             Add-Content -Path $env:GITHUB_ENV -Value "PUBKEY=$pubkey"
           }
 

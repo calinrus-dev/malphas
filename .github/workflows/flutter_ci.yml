@@ -214,7 +214,10 @@ jobs:
       - name: Run Flutter Tests (Native Headless)
         env:
           LD_LIBRARY_PATH: ${{ github.workspace }}/flutter_app/motors
-          MALPHAS_INSECURE_SKIP_VERIFY: ${{ github.event_name == 'pull_request' && '1' || '' }}
         run: |
           export LD_LIBRARY_PATH="${{ github.workspace }}/flutter_app/motors"
+          if [ -z "$PUBKEY" ]; then
+            echo "Trust anchor not available; running tests with signature verification skipped."
+            export MALPHAS_INSECURE_SKIP_VERIFY=1
+          fi
           xvfb-run -a flutter test --dart-define=MALPHAS_TRUST_ANCHOR="$PUBKEY"

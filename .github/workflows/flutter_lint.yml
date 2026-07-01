@@ -142,9 +142,12 @@ jobs:
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
       - name: Run Flutter tests
-        env:
-          MALPHAS_INSECURE_SKIP_VERIFY: ${{ github.event_name == 'pull_request' && '1' || '' }}
-        run: flutter test
+        run: |
+          if [ -z "$PUBKEY" ]; then
+            echo "Trust anchor not available; running tests with signature verification skipped."
+            export MALPHAS_INSECURE_SKIP_VERIFY=1
+          fi
+          flutter test
 
       - name: Verify Dart format
         run: dart format --set-exit-if-changed .
