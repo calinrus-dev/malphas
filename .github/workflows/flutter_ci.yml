@@ -192,9 +192,14 @@ jobs:
 
       - name: Compile bouncing_demo manifest with downloaded CLI
         shell: bash
+        env:
+          MALPHAS_SIGNING_KEY: ${{ secrets.TEST_SIGNING_KEY }}
         run: |
           export LD_LIBRARY_PATH="${{ github.workspace }}/flutter_app/motors"
           ./motors/malphas-cli compile ../examples/bouncing_demo/manifest.json
+          if [ -n "$MALPHAS_SIGNING_KEY" ]; then
+            ./motors/malphas-cli sign --signing-key-env MALPHAS_SIGNING_KEY ../examples/bouncing_demo/bouncing_demo.msp
+          fi
 
       - name: Set up Flutter
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0

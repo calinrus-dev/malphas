@@ -71,10 +71,15 @@ void main() {
 
     final workspace = _findWorkspaceRoot();
     final mspFile = File('$workspace/examples/bouncing_demo/bouncing_demo.msp');
+    final mspSigFile = File('$workspace/examples/bouncing_demo/bouncing_demo.msp.sig');
     final systemPath = _resolveSystemPath(workspace, 'bouncing_demo');
 
     if (!mspFile.existsSync()) {
       markTestSkipped('bouncing_demo.msp not found at ${mspFile.path}');
+      return;
+    }
+    if (!mspSigFile.existsSync()) {
+      markTestSkipped('bouncing_demo.msp.sig not found; signed package required');
       return;
     }
     if (systemPath == null) {
