@@ -1,4 +1,4 @@
-// Malphas Core v2.9.0 - Data-Oriented Design memory router.
+// Malphas Core v2.10.0 - Data-Oriented Design memory router.
 //
 // This crate is a C-ABI boundary; pointer arguments are validated inside each
 // function before they are dereferenced, so the not_unsafe_ptr_arg_deref lint
@@ -61,6 +61,11 @@ use crate::system_host::{
 #[no_mangle]
 pub extern "C" fn init_engine(max_commands: u32) -> *mut MalphasDoubleBufferBridge {
     init_engine_internal(max_commands)
+}
+
+#[no_mangle]
+pub extern "C" fn get_abi_version() -> u32 {
+    crate::pipeline::BRIDGE_ABI_VERSION
 }
 
 #[no_mangle]

@@ -1,6 +1,21 @@
-//! Security-focused integration tests for Malphas v2.9.0.
+//! Security-focused integration tests for Malphas v2.10.0.
 //!
 //! Covers signature enforcement and sandbox path validation for `.msp` and `.mxc`.
+//!
+//! # Strict mode and test signing keys
+//!
+//! Tests run with `MALPHAS_INSECURE_SKIP_VERIFY=0` (strict mode) by default
+//! because the code under test only skips verification when that env var is set.
+//!
+//! `reject_unsigned_msp`, `reject_msp_with_malformed_signature`, and
+//! `reject_msp_signed_with_wrong_key` rely on a trust anchor being configured.
+//! In debug/test builds the core provides a default test anchor; in a release
+//! build without the `test-anchor` feature, set `MALPHAS_INSECURE_SKIP_VERIFY=0`
+//! and provide a real anchor via `malphas_core::set_global_trust_anchor` or these
+//! tests will fail.
+//!
+//! The system signature tests create their own ephemeral Ed25519 keys and do not
+//! need the repository's `TEST_SIGNING_KEY` secret.
 
 use std::io::Write;
 
@@ -74,8 +89,13 @@ fn system_library_path() -> std::path::PathBuf {
 fn ensure_system_built() -> std::path::PathBuf {
     let path = system_library_path();
     if !path.exists() {
+        let profile = if cfg!(debug_assertions) {
+            "dev"
+        } else {
+            "release"
+        };
         let status = std::process::Command::new("cargo")
-            .args(["build", "-p", "bouncing_demo", "--release"])
+            .args(["build", "-p", "bouncing_demo", "--profile", profile])
             .status()
             .expect("failed to build bouncing_demo");
         assert!(status.success(), "failed to build bouncing_demo");

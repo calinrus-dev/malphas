@@ -1,4 +1,4 @@
-//! End-to-end integration test for the Malphas FFI core v2.9.0.
+//! End-to-end integration test for the Malphas FFI core v2.10.0.
 //!
 //! Exercises the full lifecycle: init → load MSP → load signed bouncing_demo.mxc →
 //! trigger pulse → shutdown, verifying that the system produces render
@@ -189,8 +189,13 @@ fn end_to_end_init_load_msp_system_pulse_shutdown() {
     let system_path = system_library_path();
     if !system_path.exists() {
         // Build the system cdylib on demand for the integration test.
+        let profile = if cfg!(debug_assertions) {
+            "dev"
+        } else {
+            "release"
+        };
         let status = std::process::Command::new("cargo")
-            .args(["build", "-p", "bouncing_demo", "--release"])
+            .args(["build", "-p", "bouncing_demo", "--profile", profile])
             .status()
             .expect("failed to spawn cargo build for bouncing_demo");
         assert!(
@@ -306,8 +311,8 @@ fn end_to_end_init_load_msp_system_pulse_shutdown() {
     };
     assert!(front_count >= 1);
     let cmd = unsafe { &*front_commands };
-    assert_eq!(cmd.command_type, 1);
-    assert_eq!(cmd.color_rgba, 0xFF112233);
+    assert_eq!(cmd.cmd_type, 1);
+    assert_eq!(cmd.color, 0xFF112233);
 
     // 6. Shutdown: Rust frees the bridge and command buffers.
     assert_eq!(malphas_core::shutdown_engine(), 0);

@@ -1,4 +1,4 @@
-//! Bouncing demo system for Malphas v2.9.0.
+//! Bouncing demo system for Malphas v2.10.0.
 //!
 //! This `.mxc` (Malphas eXecutable Core) is a hot-swappable dynamic library
 //! that receives the Silver Platter lookup table every frame.  It keeps its own
@@ -9,18 +9,19 @@
 
 use std::sync::Mutex;
 
-/// C-ABI mirror of the core `DartRenderCommand` (24 bytes, 4-byte aligned).
-#[repr(C)]
+/// C-ABI mirror of the core `DartRenderCommand` (64 bytes, 64-byte aligned).
+#[repr(C, align(64))]
 #[derive(Clone, Copy)]
 pub struct DartRenderCommand {
-    pub command_type: u8,
-    pub layer: u8,
-    pub pad: u16,
+    pub cmd_type: u32,
+    pub entity_id: u32,
     pub x: f32,
     pub y: f32,
     pub width: f32,
     pub height: f32,
-    pub color_rgba: u32,
+    pub color: u32,
+    pub payload_id: u32,
+    pub _padding: [u32; 8],
 }
 
 /// 64-byte aligned payload read from the mapped MSP.
@@ -163,14 +164,15 @@ pub extern "C" fn malphas_tick(
 
         // Write render command.
         let cmd = unsafe { &mut *render_buffer.add(written as usize) };
-        cmd.command_type = 1; // rectangle
-        cmd.layer = state.layer[id];
-        cmd.pad = id as u16;
+        cmd.cmd_type = 1; // rectangle
+        cmd.entity_id = id as u32;
         cmd.x = state.x[id];
         cmd.y = state.y[id];
         cmd.width = state.width[id];
         cmd.height = state.height[id];
-        cmd.color_rgba = state.color_rgba[id];
+        cmd.color = state.color_rgba[id];
+        cmd.payload_id = 0;
+        cmd._padding = [0; 8];
         written += 1;
 
         // `tag_mask` is part of the ABI contract even if this demo ignores it.
